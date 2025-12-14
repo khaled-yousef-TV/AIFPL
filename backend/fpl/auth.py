@@ -43,9 +43,12 @@ class FPLAuth:
         
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
         })
         
         self._authenticated = False
@@ -101,23 +104,32 @@ class FPLAuth:
                 "Content-Type": "application/x-www-form-urlencoded",
             }
             
-            # Perform login
+            # Perform login - follow redirects
             response = self.session.post(
                 self.LOGIN_URL,
                 data=payload,
                 headers=headers,
-                allow_redirects=False
+                allow_redirects=True
             )
             
-            # Check for successful login (redirect or 200)
-            if response.status_code in [200, 302]:
+            logger.info(f"Login response status: {response.status_code}, URL: {response.url}")
+            
+            # Check if we got redirected to FPL (success) or back to login (failure)
+            if "fantasy.premierleague.com" in response.url or response.status_code == 200:
                 # Verify we can access authenticated endpoints
                 if self._verify_session():
                     self._save_session()
                     logger.info(f"Login successful! Team ID: {self._team_id}")
                     return True
+                else:
+                    logger.warning("Login appeared successful but session verification failed")
             
-            logger.error(f"Login failed with status: {response.status_code}")
+            # Check for error in response
+            if "incorrect" in response.text.lower() or "invalid" in response.text.lower():
+                logger.error("Invalid credentials")
+                return False
+            
+            logger.error(f"Login failed. Final URL: {response.url}")
             return False
             
         except Exception as e:
@@ -216,4 +228,31 @@ class FPLAuth:
             self.login()
         
         return self.session
+    
+    def set_cookies_manually(self, pl_profile: str, session_id: str) -> bool:
+        """
+        Set cookies manually from browser session.
+        
+        To get these cookies:
+        1. Login to fantasy.premierleague.com in your browser
+        2. Open Developer Tools > Application > Cookies
+        3. Copy 'pl_profile' and 'sessionid' values
+        
+        Args:
+            pl_profile: The pl_profile cookie value
+            session_id: The sessionid cookie value
+            
+        Returns:
+            True if session is valid
+        """
+        self.session.cookies.set("pl_profile", pl_profile, domain=".premierleague.com")
+        self.session.cookies.set("sessionid", session_id, domain=".premierleague.com")
+        
+        if self._verify_session():
+            self._save_session()
+            logger.info(f"Manual cookie auth successful! Team ID: {self._team_id}")
+            return True
+        
+        logger.error("Manual cookies invalid or expired")
+        return False
 

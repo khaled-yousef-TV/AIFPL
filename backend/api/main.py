@@ -1,19 +1,17 @@
 """
-FPL Agent API
+FPL Squad Suggester API
 
-FastAPI backend for the FPL AI Agent dashboard.
+Suggests optimal squad for the next gameweek using predictions.
+No login required - uses public FPL data.
 """
 
 import os
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -28,35 +26,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fpl.client import FPLClient
-from fpl.auth import FPLAuth
 from ml.features import FeatureEngineer
-from ml.predictor import get_predictor, HeuristicPredictor
-from engine.captain import CaptainPicker
-from engine.lineup import LineupOptimizer
-from engine.transfers import TransferEngine
-from engine.differentials import DifferentialFinder
-from database.crud import DatabaseManager
+from ml.predictor import HeuristicPredictor
+from data.european_teams import assess_rotation_risk, get_european_competition
 
-# Initialize components
-db = DatabaseManager()
-fpl_auth = FPLAuth()
-fpl_client = FPLClient(auth=fpl_auth)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup/shutdown."""
-    logger.info("FPL Agent API starting up...")
-    yield
-    logger.info("FPL Agent API shutting down...")
+# Initialize components (no auth needed for public data)
+fpl_client = FPLClient(auth=None)
+predictor = HeuristicPredictor()
 
 
 # Create FastAPI app
 app = FastAPI(
-    title="FPL AI Agent",
-    description="AI-powered Fantasy Premier League agent",
+    title="FPL Squad Suggester",
+    description="AI-powered squad suggestions for Fantasy Premier League",
     version="1.0.0",
-    lifespan=lifespan
 )
 
 # CORS
@@ -69,31 +52,6 @@ app.add_middleware(
 )
 
 
-# ==================== Pydantic Models ====================
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class SettingsUpdate(BaseModel):
-    auto_execute: Optional[bool] = None
-    differential_mode: Optional[bool] = None
-    notification_email: Optional[str] = None
-
-
-class TransferRequest(BaseModel):
-    player_out_id: int
-    player_in_id: int
-
-
-class LineupRequest(BaseModel):
-    starting_ids: List[int]
-    bench_ids: List[int]
-    captain_id: int
-    vice_captain_id: int
-
-
 # ==================== Health Check ====================
 
 @app.get("/api/health")
@@ -102,456 +60,14 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "authenticated": fpl_auth.is_authenticated
     }
 
 
-# ==================== Authentication ====================
+# ==================== Gameweek Info ====================
 
-@app.post("/api/auth/login")
-async def login(request: LoginRequest):
-    """Login to FPL."""
-    try:
-        fpl_auth.email = request.email
-        fpl_auth.password = request.password
-        
-        success = fpl_auth.login()
-        
-        if success:
-            # Store credentials
-            db.set_setting("fpl_email", request.email)
-            db.set_setting("fpl_team_id", str(fpl_auth.team_id))
-            
-            return {
-                "success": True,
-                "team_id": fpl_auth.team_id,
-                "message": "Login successful"
-            }
-        else:
-            raise HTTPException(status_code=401, detail="Login failed")
-            
-    except Exception as e:
-        logger.error(f"Login error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/auth/status")
-async def auth_status():
-    """Get authentication status."""
-    return {
-        "authenticated": fpl_auth.is_authenticated,
-        "team_id": fpl_auth.team_id
-    }
-
-
-@app.post("/api/auth/logout")
-async def logout():
-    """Logout from FPL."""
-    fpl_auth.logout()
-    return {"success": True}
-
-
-# ==================== Team Data ====================
-
-@app.get("/api/team/current")
-async def get_current_team():
-    """Get current team."""
-    if not fpl_auth.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    try:
-        my_team = fpl_client.get_my_team()
-        players = fpl_client.get_players()
-        player_dict = {p.id: p for p in players}
-        
-        team_data = []
-        for pick in my_team.picks:
-            player = player_dict.get(pick.element)
-            if player:
-                team_data.append({
-                    "id": player.id,
-                    "name": player.web_name,
-                    "team": player.team,
-                    "position": player.position,
-                    "price": player.price,
-                    "points": player.total_points,
-                    "form": float(player.form),
-                    "is_captain": pick.is_captain,
-                    "is_vice_captain": pick.is_vice_captain,
-                    "is_starter": pick.position <= 11,
-                    "bench_order": pick.position - 11 if pick.position > 11 else None
-                })
-        
-        return {
-            "players": team_data,
-            "captain_id": my_team.captain_id
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting team: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/team/info")
-async def get_team_info():
-    """Get team info and stats."""
-    if not fpl_auth.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    try:
-        info = fpl_client.get_my_team_info()
-        return info
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Predictions ====================
-
-@app.get("/api/predictions")
-async def get_predictions(top_n: int = 50):
-    """Get player predictions for next gameweek."""
-    try:
-        # Get all players
-        players = fpl_client.get_players()
-        
-        # Use heuristic predictor (fast)
-        predictor = HeuristicPredictor()
-        feature_eng = FeatureEngineer(fpl_client)
-        
-        predictions = []
-        for player in players:
-            if player.minutes < 90:  # Skip players with no minutes
-                continue
-            
-            try:
-                features = feature_eng.extract_features(
-                    player.id,
-                    include_history=False
-                )
-                pred = predictor.predict_player(features)
-                
-                predictions.append({
-                    "player_id": player.id,
-                    "name": player.web_name,
-                    "team": player.team,
-                    "position": player.position,
-                    "price": player.price,
-                    "predicted_points": round(pred, 2),
-                    "form": float(player.form),
-                    "ownership": float(player.selected_by_percent)
-                })
-            except Exception:
-                continue
-        
-        # Sort by predicted points
-        predictions.sort(key=lambda x: x["predicted_points"], reverse=True)
-        
-        return {"predictions": predictions[:top_n]}
-        
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Recommendations ====================
-
-@app.get("/api/recommendations/captain")
-async def get_captain_recommendation():
-    """Get captain recommendation."""
-    if not fpl_auth.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    try:
-        # Get team predictions
-        my_team = fpl_client.get_my_team()
-        team_ids = [p.element for p in my_team.picks]
-        
-        predictor = HeuristicPredictor()
-        feature_eng = FeatureEngineer(fpl_client)
-        
-        team_predictions = []
-        player_ownership = {}
-        
-        for player_id in team_ids:
-            player = fpl_client.get_player(player_id)
-            if player:
-                features = feature_eng.extract_features(player_id, include_history=False)
-                pred = predictor.predict_player(features)
-                team_predictions.append((player_id, player.web_name, pred))
-                player_ownership[player_id] = float(player.selected_by_percent)
-        
-        # Get captain pick
-        picker = CaptainPicker()
-        captain_pick = picker.pick(
-            team_predictions,
-            player_ownership,
-            prefer_differential=db.get_setting("differential_mode") == "true"
-        )
-        
-        return {
-            "captain": {
-                "id": captain_pick.captain_id,
-                "name": captain_pick.captain_name,
-                "predicted": round(captain_pick.captain_predicted, 2)
-            },
-            "vice_captain": {
-                "id": captain_pick.vice_captain_id,
-                "name": captain_pick.vice_captain_name,
-                "predicted": round(captain_pick.vice_captain_predicted, 2)
-            },
-            "reasoning": captain_pick.reasoning,
-            "options": picker.get_captain_options(team_predictions, player_ownership)
-        }
-        
-    except Exception as e:
-        logger.error(f"Captain recommendation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/recommendations/transfers")
-async def get_transfer_recommendations():
-    """Get transfer recommendations."""
-    if not fpl_auth.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    try:
-        # Get current team
-        my_team = fpl_client.get_my_team()
-        team_info = fpl_client.get_my_team_info()
-        
-        # Get all players
-        all_players = fpl_client.get_players()
-        
-        predictor = HeuristicPredictor()
-        feature_eng = FeatureEngineer(fpl_client)
-        
-        # Build current team data
-        current_team = []
-        for pick in my_team.picks:
-            player = fpl_client.get_player(pick.element)
-            if player:
-                features = feature_eng.extract_features(player.id, include_history=False)
-                pred = predictor.predict_player(features)
-                current_team.append((
-                    player.id,
-                    player.web_name,
-                    player.price,
-                    player.element_type,
-                    pred
-                ))
-        
-        # Build all players data
-        all_player_data = []
-        for player in all_players:
-            if player.minutes >= 90:
-                try:
-                    features = feature_eng.extract_features(player.id, include_history=False)
-                    pred = predictor.predict_player(features)
-                    all_player_data.append((
-                        player.id,
-                        player.web_name,
-                        player.price,
-                        player.element_type,
-                        pred
-                    ))
-                except:
-                    continue
-        
-        # Get budget
-        budget = team_info.get("last_deadline_bank", 0) / 10
-        free_transfers = team_info.get("last_deadline_total_transfers", 1)
-        
-        # Get transfer suggestions
-        engine = TransferEngine()
-        plan = engine.suggest_transfers(
-            current_team,
-            all_player_data,
-            budget,
-            free_transfers=free_transfers
-        )
-        
-        return {
-            "transfers": [
-                {
-                    "out": {
-                        "id": t.player_out_id,
-                        "name": t.player_out_name,
-                        "price": t.player_out_price,
-                        "predicted": round(t.player_out_predicted, 2)
-                    },
-                    "in": {
-                        "id": t.player_in_id,
-                        "name": t.player_in_name,
-                        "price": t.player_in_price,
-                        "predicted": round(t.player_in_predicted, 2)
-                    },
-                    "gain": round(t.points_gain, 2)
-                }
-                for t in plan.transfers
-            ],
-            "total_gain": round(plan.total_points_gain, 2),
-            "transfer_cost": plan.total_cost,
-            "net_gain": round(plan.net_gain, 2),
-            "reasoning": plan.reasoning,
-            "budget": budget,
-            "free_transfers": free_transfers
-        }
-        
-    except Exception as e:
-        logger.error(f"Transfer recommendation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/recommendations/differentials")
-async def get_differentials():
-    """Get differential picks."""
-    try:
-        players = fpl_client.get_players()
-        teams = fpl_client.get_teams()
-        team_names = {t.id: t.short_name for t in teams}
-        
-        predictor = HeuristicPredictor()
-        feature_eng = FeatureEngineer(fpl_client)
-        
-        # Get predictions for all players
-        all_predictions = []
-        player_data = {}
-        
-        for player in players:
-            if player.minutes >= 180:  # At least 2 games
-                try:
-                    features = feature_eng.extract_features(player.id, include_history=False)
-                    pred = predictor.predict_player(features)
-                    all_predictions.append((player.id, player.web_name, pred))
-                    player_data[player.id] = {
-                        "selected_by_percent": player.selected_by_percent,
-                        "form": player.form,
-                        "team": player.team,
-                        "element_type": player.element_type,
-                        "now_cost": player.now_cost,
-                        "minutes": player.minutes
-                    }
-                except:
-                    continue
-        
-        # Find differentials
-        finder = DifferentialFinder()
-        differentials = finder.find_differentials(
-            all_predictions,
-            player_data,
-            team_names
-        )
-        
-        return {
-            "differentials": [
-                {
-                    "player_id": d.player_id,
-                    "name": d.name,
-                    "team": d.team,
-                    "position": d.position,
-                    "price": d.price,
-                    "predicted": round(d.predicted_points, 2),
-                    "ownership": round(d.ownership, 1),
-                    "form": round(d.form, 1),
-                    "risk": d.risk_level,
-                    "reasoning": d.reasoning
-                }
-                for d in differentials
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"Differential error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Actions ====================
-
-@app.post("/api/actions/set-lineup")
-async def set_lineup(request: LineupRequest):
-    """Set team lineup."""
-    if not fpl_auth.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    try:
-        result = fpl_client.set_lineup(
-            starting_ids=request.starting_ids,
-            bench_ids=request.bench_ids,
-            captain_id=request.captain_id,
-            vice_captain_id=request.vice_captain_id
-        )
-        
-        # Log decision
-        next_gw = fpl_client.get_next_gameweek()
-        if next_gw:
-            db.log_decision(
-                gameweek=next_gw.id,
-                decision_type="lineup",
-                details={
-                    "starting": request.starting_ids,
-                    "bench": request.bench_ids,
-                    "captain": request.captain_id,
-                    "vice_captain": request.vice_captain_id
-                },
-                reasoning="Manual lineup set via dashboard"
-            )
-        
-        return {"success": True, "result": result}
-        
-    except Exception as e:
-        logger.error(f"Set lineup error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== History ====================
-
-@app.get("/api/history/decisions")
-async def get_decision_history(limit: int = 20):
-    """Get decision history."""
-    decisions = db.get_decisions(limit=limit)
-    return {"decisions": decisions}
-
-
-@app.get("/api/history/performance")
-async def get_performance_history():
-    """Get performance history."""
-    performance = db.get_performance_history()
-    return {"history": performance}
-
-
-# ==================== Settings ====================
-
-@app.get("/api/settings")
-async def get_settings():
-    """Get agent settings."""
-    settings = db.get_all_settings()
-    return {
-        "auto_execute": settings.get("auto_execute") == "true",
-        "differential_mode": settings.get("differential_mode") == "true",
-        "notification_email": settings.get("notification_email", ""),
-        "fpl_email": settings.get("fpl_email", ""),
-        "fpl_team_id": settings.get("fpl_team_id", "")
-    }
-
-
-@app.post("/api/settings")
-async def update_settings(settings: SettingsUpdate):
-    """Update agent settings."""
-    if settings.auto_execute is not None:
-        db.set_setting("auto_execute", str(settings.auto_execute).lower())
-    if settings.differential_mode is not None:
-        db.set_setting("differential_mode", str(settings.differential_mode).lower())
-    if settings.notification_email is not None:
-        db.set_setting("notification_email", settings.notification_email)
-    
-    return {"success": True}
-
-
-# ==================== FPL Data ====================
-
-@app.get("/api/fpl/gameweek")
-async def get_current_gameweek():
-    """Get current/next gameweek info."""
+@app.get("/api/gameweek")
+async def get_gameweek():
+    """Get current and next gameweek info."""
     try:
         current = fpl_client.get_current_gameweek()
         next_gw = fpl_client.get_next_gameweek()
@@ -565,45 +81,365 @@ async def get_current_gameweek():
             "next": {
                 "id": next_gw.id if next_gw else None,
                 "name": next_gw.name if next_gw else None,
-                "deadline": next_gw.deadline_time.isoformat() if next_gw else None
+                "deadline": next_gw.deadline_time.isoformat() if next_gw and next_gw.deadline_time else None
             } if next_gw else None
         }
     except Exception as e:
+        logger.error(f"Error getting gameweek: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/fpl/players")
-async def get_all_players(position: Optional[int] = None, top_n: int = 100):
-    """Get all players."""
+# ==================== Predictions ====================
+
+@app.get("/api/predictions")
+async def get_predictions(position: Optional[int] = None, top_n: int = 100):
+    """Get player predictions for next gameweek."""
     try:
-        if position:
-            players = fpl_client.get_players_by_position(position)
-        else:
-            players = fpl_client.get_top_players(n=top_n)
+        players = fpl_client.get_players()
+        teams = fpl_client.get_teams()
+        team_names = {t.id: t.short_name for t in teams}
+        
+        next_gw = fpl_client.get_next_gameweek()
+        fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
+        gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+        
+        # Build fixture info
+        fixture_info = {}
+        for f in fixtures:
+            fixture_info[f.team_h] = {
+                "opponent": team_names.get(f.team_a, "???"),
+                "difficulty": f.team_h_difficulty,
+                "is_home": True,
+            }
+            fixture_info[f.team_a] = {
+                "opponent": team_names.get(f.team_h, "???"),
+                "difficulty": f.team_a_difficulty,
+                "is_home": False,
+            }
+        
+        feature_eng = FeatureEngineer(fpl_client)
+        
+        predictions = []
+        for player in players:
+            if position and player.element_type != position:
+                continue
+            if player.minutes < 90:
+                continue
+            
+            try:
+                features = feature_eng.extract_features(player.id, include_history=False)
+                pred = predictor.predict_player(features)
+                
+                fix = fixture_info.get(player.team, {})
+                opponent = fix.get("opponent", "???")
+                difficulty = fix.get("difficulty", 3)
+                is_home = fix.get("is_home", False)
+                
+                team_name = team_names.get(player.team, "???")
+                rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
+                
+                reasons = []
+                if rotation.risk_level in ["high", "medium"]:
+                    reasons.append(f"⚠️ {rotation.competition} rotation risk")
+                if float(player.form) >= 5.0:
+                    reasons.append(f"Form: {player.form}")
+                if difficulty <= 2:
+                    reasons.append(f"Easy fixture (FDR {difficulty})")
+                if is_home:
+                    reasons.append("Home advantage")
+                if not reasons:
+                    reasons.append(f"vs {opponent}")
+                
+                predictions.append({
+                    "id": player.id,
+                    "name": player.web_name,
+                    "full_name": player.full_name,
+                    "team": team_name,
+                    "team_id": player.team,
+                    "position": player.position,
+                    "position_id": player.element_type,
+                    "price": player.price,
+                    "predicted_points": round(pred, 2),
+                    "form": float(player.form),
+                    "total_points": player.total_points,
+                    "ownership": float(player.selected_by_percent),
+                    "opponent": opponent,
+                    "difficulty": difficulty,
+                    "is_home": is_home,
+                    "rotation_risk": rotation.risk_level,
+                    "european_comp": rotation.competition,
+                    "reason": " • ".join(reasons[:2]),
+                    "status": player.status,
+                    "news": player.news,
+                })
+            except Exception as e:
+                continue
+        
+        predictions.sort(key=lambda x: x["predicted_points"], reverse=True)
+        return {"predictions": predictions[:top_n]}
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Suggested Squad ====================
+
+@app.get("/api/suggested-squad")
+async def get_suggested_squad(budget: float = 100.0):
+    """Get optimal suggested squad for next gameweek."""
+    try:
+        players = fpl_client.get_players()
+        teams = fpl_client.get_teams()
+        team_names = {t.id: t.short_name for t in teams}
+        
+        next_gw = fpl_client.get_next_gameweek()
+        fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
+        gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+        
+        fixture_info = {}
+        for f in fixtures:
+            fixture_info[f.team_h] = {
+                "opponent": team_names.get(f.team_a, "???"),
+                "difficulty": f.team_h_difficulty,
+                "is_home": True,
+            }
+            fixture_info[f.team_a] = {
+                "opponent": team_names.get(f.team_h, "???"),
+                "difficulty": f.team_a_difficulty,
+                "is_home": False,
+            }
+        
+        feature_eng = FeatureEngineer(fpl_client)
+        
+        player_predictions = []
+        for player in players:
+            if player.minutes < 90 or player.status not in ["a", "d"]:
+                continue
+            
+            try:
+                features = feature_eng.extract_features(player.id, include_history=False)
+                pred = predictor.predict_player(features)
+                
+                fix = fixture_info.get(player.team, {})
+                opponent = fix.get("opponent", "???")
+                difficulty = fix.get("difficulty", 3)
+                is_home = fix.get("is_home", False)
+                
+                team_name = team_names.get(player.team, "???")
+                rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
+                
+                reasons = []
+                if rotation.risk_level == "high":
+                    reasons.append(f"⚠️ HIGH rotation ({rotation.competition})")
+                elif rotation.risk_level == "medium":
+                    reasons.append(f"⚡ Rotation risk ({rotation.competition})")
+                
+                if float(player.form) >= 5.0:
+                    reasons.append(f"Hot form ({player.form})")
+                if difficulty <= 2:
+                    reasons.append(f"Easy fixture vs {opponent} (FDR {difficulty})")
+                elif is_home and difficulty <= 3:
+                    reasons.append(f"Home vs {opponent}")
+                if float(player.selected_by_percent) < 10 and pred >= 5:
+                    reasons.append(f"Differential ({player.selected_by_percent}% owned)")
+                if player.total_points >= 70:
+                    reasons.append(f"Season performer ({player.total_points} pts)")
+                
+                if not reasons:
+                    reasons.append(f"vs {opponent} ({'H' if is_home else 'A'})")
+                
+                player_predictions.append({
+                    "id": player.id,
+                    "name": player.web_name,
+                    "team": team_name,
+                    "team_id": player.team,
+                    "position": player.position,
+                    "position_id": player.element_type,
+                    "price": player.price,
+                    "predicted": pred,
+                    "form": float(player.form),
+                    "total_points": player.total_points,
+                    "ownership": float(player.selected_by_percent),
+                    "opponent": opponent,
+                    "difficulty": difficulty,
+                    "is_home": is_home,
+                    "rotation_risk": rotation.risk_level,
+                    "european_comp": rotation.competition,
+                    "rotation_factor": rotation.risk_factor,
+                    "reason": " • ".join(reasons[:2]),
+                })
+            except:
+                continue
+        
+        squad = _build_optimal_squad(player_predictions, budget)
+        starting_xi, bench, formation = _optimize_lineup(squad)
+        
+        captain = max(starting_xi, key=lambda x: x["predicted"])
+        vice_captain = sorted(starting_xi, key=lambda x: x["predicted"], reverse=True)[1]
+        
+        total_cost = sum(p["price"] for p in squad)
+        total_predicted = sum(p["predicted"] for p in starting_xi) + captain["predicted"]
         
         return {
-            "players": [
-                {
-                    "id": p.id,
-                    "name": p.web_name,
-                    "full_name": p.full_name,
-                    "team": p.team,
-                    "position": p.position,
-                    "price": p.price,
-                    "points": p.total_points,
-                    "form": float(p.form),
-                    "ownership": float(p.selected_by_percent),
-                    "status": p.status,
-                    "news": p.news
-                }
-                for p in players
-            ]
+            "gameweek": next_gw.id if next_gw else None,
+            "formation": formation,
+            "starting_xi": [
+                {**p, "is_captain": p["id"] == captain["id"], "is_vice_captain": p["id"] == vice_captain["id"]}
+                for p in starting_xi
+            ],
+            "bench": bench,
+            "captain": {"id": captain["id"], "name": captain["name"], "predicted": round(captain["predicted"], 2)},
+            "vice_captain": {"id": vice_captain["id"], "name": vice_captain["name"], "predicted": round(vice_captain["predicted"], 2)},
+            "total_cost": round(total_cost, 1),
+            "remaining_budget": round(budget - total_cost, 1),
+            "predicted_points": round(total_predicted, 1),
         }
+        
     except Exception as e:
+        logger.error(f"Squad suggestion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
+    """Build optimal 15-player squad within budget."""
+    by_position = {1: [], 2: [], 3: [], 4: []}
+    for p in players:
+        by_position[p["position_id"]].append(p)
+    
+    def player_score(p):
+        pred = p["predicted"]
+        difficulty = p.get("difficulty", 3)
+        form = p.get("form", 2)
+        price = max(p["price"], 4.0)
+        rotation_risk = p.get("rotation_risk", "none")
+        rotation_factor = p.get("rotation_factor", 0)
+        
+        fixture_bonus = (4 - difficulty) * 1.5
+        if difficulty == 2:
+            fixture_bonus += 1.5
+        
+        form_bonus = max(0, (form - 3) * 0.3)
+        home_bonus = 0.5 if p.get("is_home") else 0
+        
+        rotation_penalty = 0
+        if rotation_risk == "high":
+            rotation_penalty = -3.0
+        elif rotation_risk == "medium":
+            rotation_penalty = -1.5
+        elif rotation_risk == "low":
+            rotation_penalty = -0.5
+        
+        if rotation_factor > 0.3 and difficulty <= 2:
+            rotation_penalty *= 1.5
+        
+        score = pred + fixture_bonus + form_bonus + home_bonus + rotation_penalty
+        value_factor = pred / price
+        
+        return score + value_factor * 0.3
+    
+    for pos in by_position:
+        by_position[pos].sort(key=player_score, reverse=True)
+    
+    squad = []
+    team_counts = {}
+    remaining_budget = budget
+    
+    requirements = {1: 2, 2: 5, 3: 5, 4: 3}
+    
+    for pos_id, count in requirements.items():
+        selected = 0
+        for player in by_position[pos_id]:
+            if selected >= count:
+                break
+            if player["price"] > remaining_budget:
+                continue
+            team_id = player["team_id"]
+            if team_counts.get(team_id, 0) >= 3:
+                continue
+            
+            squad.append(player)
+            remaining_budget -= player["price"]
+            team_counts[team_id] = team_counts.get(team_id, 0) + 1
+            selected += 1
+    
+    return squad
+
+
+def _optimize_lineup(squad: List[Dict]) -> tuple:
+    """Optimize starting XI from 15-player squad."""
+    by_pos = {1: [], 2: [], 3: [], 4: []}
+    for p in squad:
+        by_pos[p["position_id"]].append(p)
+    
+    for pos in by_pos:
+        by_pos[pos].sort(key=lambda x: x["predicted"], reverse=True)
+    
+    formations = [(3, 5, 2), (3, 4, 3), (4, 5, 1), (4, 4, 2), (4, 3, 3), (5, 4, 1), (5, 3, 2)]
+    
+    best_xi = None
+    best_total = -1
+    best_formation = ""
+    
+    for n_def, n_mid, n_fwd in formations:
+        if len(by_pos[2]) < n_def or len(by_pos[3]) < n_mid or len(by_pos[4]) < n_fwd:
+            continue
+        
+        xi = [by_pos[1][0]]
+        xi.extend(by_pos[2][:n_def])
+        xi.extend(by_pos[3][:n_mid])
+        xi.extend(by_pos[4][:n_fwd])
+        
+        total = sum(p["predicted"] for p in xi)
+        if total > best_total:
+            best_total = total
+            best_xi = xi
+            best_formation = f"{n_def}-{n_mid}-{n_fwd}"
+    
+    xi_ids = {p["id"] for p in best_xi}
+    bench = [p for p in squad if p["id"] not in xi_ids]
+    bench.sort(key=lambda x: x["predicted"], reverse=True)
+    
+    best_xi.sort(key=lambda x: (x["position_id"], -x["predicted"]))
+    
+    for p in best_xi:
+        p["predicted"] = round(p["predicted"], 2)
+    for p in bench:
+        p["predicted"] = round(p["predicted"], 2)
+    
+    return best_xi, bench, best_formation
+
+
+@app.get("/api/top-picks")
+async def get_top_picks():
+    """Get top 5 picks for each position."""
+    try:
+        result = {}
+        for pos_id, pos_name in [(1, "goalkeepers"), (2, "defenders"), (3, "midfielders"), (4, "forwards")]:
+            preds = await get_predictions(position=pos_id, top_n=5)
+            result[pos_name] = preds["predictions"]
+        return result
+    except Exception as e:
+        logger.error(f"Top picks error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/differentials")
+async def get_differentials(max_ownership: float = 10.0, top_n: int = 10):
+    """Get differential picks (low ownership, high predicted points)."""
+    try:
+        preds = await get_predictions(top_n=500)
+        differentials = [
+            p for p in preds["predictions"]
+            if p["ownership"] < max_ownership and p["predicted_points"] >= 4.0
+        ]
+        differentials.sort(key=lambda x: x["predicted_points"], reverse=True)
+        return {"differentials": differentials[:top_n]}
+    except Exception as e:
+        logger.error(f"Differentials error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
+    uvicorn.run(app, host="0.0.0.0", port=8001)

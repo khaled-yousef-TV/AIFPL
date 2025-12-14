@@ -276,46 +276,62 @@ class HeuristicPredictor:
         Returns:
             Predicted points
         """
-        # Base prediction from form and PPG
-        base = (features.form * 0.4 + features.points_per_game * 0.6)
+        # Base prediction from form and PPG (form is 5-game average)
+        form = features.form if features.form > 0 else 2.0
+        ppg = features.points_per_game if features.points_per_game > 0 else 2.0
+        base = (form * 0.5 + ppg * 0.5)
         
         # Adjust for fixture difficulty (1=easy, 5=hard)
-        fixture_multiplier = 1.2 - (features.next_fixture_difficulty - 1) * 0.1
+        # FDR of 2 is favorable, 5 is very difficult
+        fixture_multiplier = 1.3 - (features.next_fixture_difficulty - 1) * 0.1
+        fixture_multiplier = max(0.7, min(1.3, fixture_multiplier))
         
         # Adjust for availability
-        availability_mult = features.availability
+        availability_mult = features.availability if features.availability > 0 else 1.0
         
         # Adjust for home/away
-        home_bonus = 0.2 if features.is_home else 0
+        home_bonus = 0.3 if features.is_home else 0
         
         # Position-specific adjustments
         pos_weight = self.POSITION_WEIGHTS.get(features.position, {})
         
-        # xG/xA contribution
-        xg_contribution = features.xG * pos_weight.get("goal", 4) / 38  # Per game
-        xa_contribution = features.xA * pos_weight.get("assist", 3) / 38
+        # xG/xA contribution (expected per game, adjusted for season)
+        games_played = max(1, features.total_points / max(ppg, 1))
+        xg_per_game = features.xG / max(games_played, 1)
+        xa_per_game = features.xA / max(games_played, 1)
+        
+        xg_contribution = xg_per_game * pos_weight.get("goal", 4)
+        xa_contribution = xa_per_game * pos_weight.get("assist", 3)
         
         # Clean sheet potential (for GK/DEF)
         cs_contribution = 0
         if features.position in [1, 2]:
-            # Lower opponent strength = higher CS chance
-            cs_chance = max(0, (6 - features.next_fixture_difficulty) / 5)
-            cs_contribution = cs_chance * pos_weight.get("clean_sheet", 0)
+            # Lower opponent FDR = higher CS chance
+            cs_chance = max(0.1, (6 - features.next_fixture_difficulty) / 5)
+            cs_contribution = cs_chance * pos_weight.get("clean_sheet", 0) * 0.3
         
-        # Combine
+        # Bonus points potential (based on ICT)
+        ict_bonus = features.ict_index / 100 * 0.5  # Small bonus for high ICT
+        
+        # Combine all factors
         predicted = (
             base * fixture_multiplier * availability_mult
             + home_bonus
             + xg_contribution
             + xa_contribution
             + cs_contribution
+            + ict_bonus
         )
         
-        # Minutes adjustment
-        if features.avg_minutes_3 < 60:
+        # Minutes adjustment - if we have history data
+        if features.avg_minutes_3 > 0 and features.avg_minutes_3 < 60:
             predicted *= features.avg_minutes_3 / 90
+        elif features.minutes_percent < 0.5:
+            # Player doesn't play regularly
+            predicted *= features.minutes_percent * 1.5
         
-        return max(0, predicted)
+        # Ensure reasonable bounds
+        return max(1.0, min(15.0, predicted))
     
     def predict_players(
         self,

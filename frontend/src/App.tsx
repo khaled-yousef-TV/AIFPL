@@ -1,39 +1,45 @@
 import { useState, useEffect } from 'react'
 import { 
-  Users, TrendingUp, RefreshCw, Settings, LogOut, 
-  Clock, Target, Zap, Award, AlertCircle, CheckCircle,
-  ChevronRight, BarChart3
+  Users, TrendingUp, RefreshCw, Zap, Award, 
+  ChevronRight, Star, Target, Flame, AlertTriangle, Plane
 } from 'lucide-react'
-import { api } from './api/client'
+
+const API_BASE = 'http://localhost:8001'
 
 // Types
 interface Player {
   id: number
   name: string
-  team: number
+  full_name?: string
+  team: string
   position: string
+  position_id: number
   price: number
-  points?: number
+  predicted: number
   predicted_points?: number
-  form?: number
-  ownership?: number
+  form: number
+  total_points: number
+  ownership: number
   is_captain?: boolean
   is_vice_captain?: boolean
-  is_starter?: boolean
+  rotation_risk?: string
+  european_comp?: string
+  opponent?: string
+  difficulty?: number
+  is_home?: boolean
+  reason?: string
 }
 
-interface Recommendation {
-  captain?: {
-    id: number
-    name: string
-    predicted: number
-  }
-  vice_captain?: {
-    id: number
-    name: string
-    predicted: number
-  }
-  reasoning?: string
+interface SuggestedSquad {
+  gameweek: number
+  formation: string
+  starting_xi: Player[]
+  bench: Player[]
+  captain: { id: number; name: string; predicted: number }
+  vice_captain: { id: number; name: string; predicted: number }
+  total_cost: number
+  remaining_budget: number
+  predicted_points: number
 }
 
 interface GameWeekInfo {
@@ -42,87 +48,50 @@ interface GameWeekInfo {
 }
 
 function App() {
-  const [authenticated, setAuthenticated] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [team, setTeam] = useState<Player[]>([])
-  const [predictions, setPredictions] = useState<Player[]>([])
-  const [captainRec, setCaptainRec] = useState<Recommendation | null>(null)
+  const [squad, setSquad] = useState<SuggestedSquad | null>(null)
+  const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
+  const [differentials, setDifferentials] = useState<Player[]>([])
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
-  const [activeTab, setActiveTab] = useState('dashboard')
-  
-  // Login state
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loginError, setLoginError] = useState('')
+  const [activeTab, setActiveTab] = useState('squad')
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    checkAuth()
+    loadData()
   }, [])
 
-  const checkAuth = async () => {
+  const loadData = async () => {
+    setLoading(true)
+    setError(null)
+    
     try {
-      const status = await api.getAuthStatus()
-      setAuthenticated(status.authenticated)
-      if (status.authenticated) {
-        loadDashboardData()
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error)
+      const [gwRes, squadRes, topsRes, diffsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/gameweek`).then(r => r.json()),
+        fetch(`${API_BASE}/api/suggested-squad`).then(r => r.json()),
+        fetch(`${API_BASE}/api/top-picks`).then(r => r.json()),
+        fetch(`${API_BASE}/api/differentials`).then(r => r.json()),
+      ])
+      
+      setGameweek(gwRes)
+      setSquad(squadRes)
+      setTopPicks(topsRes)
+      setDifferentials(diffsRes.differentials || [])
+    } catch (err: any) {
+      setError(err.message || 'Failed to load data')
+      console.error('Load error:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  const loadDashboardData = async () => {
-    try {
-      const [teamData, gwData] = await Promise.all([
-        api.getCurrentTeam().catch(() => ({ players: [] })),
-        api.getGameweek().catch(() => null)
-      ])
-      
-      setTeam(teamData.players || [])
-      setGameweek(gwData)
-      
-      // Load recommendations
-      const captain = await api.getCaptainRecommendation().catch(() => null)
-      setCaptainRec(captain)
-      
-      // Load predictions
-      const preds = await api.getPredictions().catch(() => ({ predictions: [] }))
-      setPredictions(preds.predictions || [])
-    } catch (error) {
-      console.error('Failed to load data:', error)
-    }
-  }
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoginError('')
-    
-    try {
-      await api.login(email, password)
-      setAuthenticated(true)
-      loadDashboardData()
-    } catch (error: any) {
-      setLoginError(error.message || 'Login failed')
-    }
-  }
-
-  const handleLogout = async () => {
-    await api.logout()
-    setAuthenticated(false)
-    setTeam([])
-    setPredictions([])
-  }
-
   const getPositionClass = (pos: string) => {
     const classes: Record<string, string> = {
-      'GK': 'pos-gk',
-      'DEF': 'pos-def',
-      'MID': 'pos-mid',
-      'FWD': 'pos-fwd'
+      'GK': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+      'DEF': 'bg-green-500/20 text-green-400 border-green-500/30',
+      'MID': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      'FWD': 'bg-red-500/20 text-red-400 border-red-500/30'
     }
-    return classes[pos] || ''
+    return classes[pos] || 'bg-gray-500/20 text-gray-400'
   }
 
   const formatDeadline = (dateStr?: string) => {
@@ -139,108 +108,59 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <RefreshCw className="w-8 h-8 animate-spin text-[#00ff87]" />
-      </div>
-    )
-  }
-
-  // Login Screen
-  if (!authenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="card max-w-md w-full">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-[#00ff87] to-[#00cc6a] rounded-xl mx-auto mb-4 flex items-center justify-center">
-              <Zap className="w-8 h-8 text-[#0f0f1a]" />
-            </div>
-            <h1 className="text-2xl font-bold">FPL AI Agent</h1>
-            <p className="text-gray-400 mt-2">Sign in with your FPL account</p>
-          </div>
-          
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg px-4 py-3 focus:outline-none focus:border-[#00ff87]"
-                placeholder="your@email.com"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg px-4 py-3 focus:outline-none focus:border-[#00ff87]"
-                placeholder="••••••••"
-                required
-              />
-            </div>
-            
-            {loginError && (
-              <div className="flex items-center gap-2 text-red-400 text-sm">
-                <AlertCircle className="w-4 h-4" />
-                {loginError}
-              </div>
-            )}
-            
-            <button type="submit" className="btn btn-primary w-full py-3">
-              Sign In to FPL
-            </button>
-          </form>
-          
-          <p className="text-center text-gray-500 text-sm mt-6">
-            Uses official FPL credentials. Your data stays private.
-          </p>
+      <div className="min-h-screen bg-[#0f0f1a] flex items-center justify-center">
+        <div className="text-center">
+          <RefreshCw className="w-10 h-10 animate-spin text-[#00ff87] mx-auto mb-4" />
+          <p className="text-gray-400">Loading predictions...</p>
         </div>
       </div>
     )
   }
 
-  // Main Dashboard
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#0f0f1a] flex items-center justify-center p-4">
+        <div className="card max-w-md w-full text-center">
+          <p className="text-red-400 mb-4">{error}</p>
+          <button onClick={loadData} className="btn btn-primary">
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-[#0f0f1a] text-white">
       {/* Header */}
       <header className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-[#00ff87] to-[#00cc6a] rounded-lg flex items-center justify-center">
               <Zap className="w-5 h-5 text-[#0f0f1a]" />
             </div>
             <div>
-              <h1 className="font-bold text-lg">FPL AI Agent</h1>
+              <h1 className="font-bold text-lg">FPL Squad Suggester</h1>
               <p className="text-xs text-gray-400">
-                {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+                {gameweek?.next ? `GW${gameweek.next.id} • Deadline: ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
               </p>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <button onClick={loadDashboardData} className="btn btn-secondary flex items-center gap-2">
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-            <button onClick={handleLogout} className="text-gray-400 hover:text-white">
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
+          <button onClick={loadData} className="btn btn-secondary flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
         </div>
       </header>
 
       {/* Navigation */}
       <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-6">
-        <div className="max-w-7xl mx-auto flex gap-1">
+        <div className="max-w-6xl mx-auto flex gap-1">
           {[
-            { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
-            { id: 'team', icon: Users, label: 'My Team' },
-            { id: 'predictions', icon: TrendingUp, label: 'Predictions' },
-            { id: 'settings', icon: Settings, label: 'Settings' },
+            { id: 'squad', icon: Users, label: 'Suggested Squad' },
+            { id: 'picks', icon: Star, label: 'Top Picks' },
+            { id: 'differentials', icon: Target, label: 'Differentials' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -259,103 +179,84 @@ function App() {
       </nav>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto p-6">
-        {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Status Card */}
-            <div className="card">
-              <div className="card-header">
-                <Clock className="w-5 h-5 text-[#00ff87]" />
-                Gameweek Status
+      <main className="max-w-6xl mx-auto p-6">
+        
+        {/* Suggested Squad Tab */}
+        {activeTab === 'squad' && squad && (
+          <div className="space-y-6">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="card">
+                <div className="text-gray-400 text-sm mb-1">Formation</div>
+                <div className="text-2xl font-bold text-[#00ff87]">{squad.formation}</div>
               </div>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Current GW</span>
-                  <span className="font-mono">{gameweek?.current?.id || '-'}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Next Deadline</span>
-                  <span className="font-mono text-sm">{formatDeadline(gameweek?.next?.deadline)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Agent Status</span>
-                  <span className="badge badge-success flex items-center gap-1">
-                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                    Active
-                  </span>
+              <div className="card">
+                <div className="text-gray-400 text-sm mb-1">Predicted Points</div>
+                <div className="text-2xl font-bold text-[#00ff87]">{squad.predicted_points}</div>
+              </div>
+              <div className="card">
+                <div className="text-gray-400 text-sm mb-1">Squad Cost</div>
+                <div className="text-2xl font-bold">£{squad.total_cost}m</div>
+              </div>
+              <div className="card">
+                <div className="text-gray-400 text-sm mb-1">Remaining</div>
+                <div className="text-2xl font-bold text-green-400">£{squad.remaining_budget}m</div>
+              </div>
+            </div>
+
+            {/* European Rotation Notice */}
+            <div className="bg-[#1a1a2e]/50 border border-[#2a2a4a] rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Plane className="w-5 h-5 text-blue-400 mt-0.5" />
+                <div>
+                  <h3 className="font-medium text-sm mb-1">European Rotation Risk</h3>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Teams in UCL/UEL/UECL may rotate players, especially for easier league games.
+                  </p>
+                  <div className="flex flex-wrap gap-3 text-xs">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                      <span className="text-orange-400">High risk</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                      <span className="text-yellow-400">Medium risk</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      <span className="text-blue-400">In Europe (low risk)</span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Captain Recommendation */}
+            {/* Captain Pick */}
             <div className="card">
               <div className="card-header">
                 <Award className="w-5 h-5 text-yellow-400" />
                 Captain Pick
               </div>
-              {captainRec?.captain ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-yellow-400 text-lg">©</span>
-                        <span className="font-semibold">{captainRec.captain.name}</span>
-                      </div>
-                      <span className="text-sm text-gray-400">Predicted: {captainRec.captain.predicted} pts</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-500" />
+              <div className="flex gap-4">
+                <div className="flex-1 p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-yellow-400 text-lg font-bold">©</span>
+                    <span className="font-semibold text-lg">{squad.captain.name}</span>
                   </div>
-                  
-                  {captainRec.vice_captain && (
-                    <div className="flex items-center justify-between p-3 bg-[#0f0f1a] rounded-lg">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-400">V</span>
-                          <span>{captainRec.vice_captain.name}</span>
-                        </div>
-                        <span className="text-sm text-gray-400">Predicted: {captainRec.vice_captain.predicted} pts</span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <p className="text-sm text-gray-400">{captainRec.reasoning}</p>
+                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{squad.captain.predicted} × 2 = {(squad.captain.predicted * 2).toFixed(1)}</span></span>
                 </div>
-              ) : (
-                <p className="text-gray-400">Loading recommendations...</p>
-              )}
+                <div className="flex-1 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-gray-400">V</span>
+                    <span className="font-medium">{squad.vice_captain.name}</span>
+                  </div>
+                  <span className="text-gray-400">Predicted: <span className="font-mono">{squad.vice_captain.predicted}</span></span>
+                </div>
+              </div>
             </div>
 
-            {/* Quick Stats */}
+            {/* Starting XI */}
             <div className="card">
-              <div className="card-header">
-                <Target className="w-5 h-5 text-blue-400" />
-                Team Overview
-              </div>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Squad Value</span>
-                  <span className="font-mono">
-                    £{team.reduce((sum, p) => sum + (p.price || 0), 0).toFixed(1)}m
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total Points</span>
-                  <span className="font-mono">{team.reduce((sum, p) => sum + (p.points || 0), 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Avg Form</span>
-                  <span className="font-mono">
-                    {team.length > 0 
-                      ? (team.reduce((sum, p) => sum + (p.form || 0), 0) / team.length).toFixed(1)
-                      : '-'
-                    }
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Team Table */}
-            <div className="card lg:col-span-2">
               <div className="card-header">
                 <Users className="w-5 h-5 text-[#00ff87]" />
                 Starting XI
@@ -364,29 +265,58 @@ function App() {
                 <table className="w-full">
                   <thead>
                     <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
+                      <th className="pb-3 w-8"></th>
                       <th className="pb-3">Player</th>
+                      <th className="pb-3">Fixture</th>
                       <th className="pb-3">Pos</th>
-                      <th className="pb-3">Price</th>
-                      <th className="pb-3">Form</th>
-                      <th className="pb-3">Points</th>
+                      <th className="pb-3 text-right">Price</th>
+                      <th className="pb-3 text-right">Pts</th>
+                      <th className="pb-3">Selection Reason</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {team.filter(p => p.is_starter).map(player => (
-                      <tr key={player.id} className="table-row">
+                    {squad.starting_xi.map((player: any, i) => (
+                      <tr key={player.id} className={`border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors ${
+                        player.rotation_risk === 'high' ? 'bg-orange-500/5' : ''
+                      }`}>
+                        <td className="py-3">
+                          {player.is_captain && <span className="text-yellow-400 font-bold">©</span>}
+                          {player.is_vice_captain && <span className="text-gray-400">V</span>}
+                        </td>
                         <td className="py-3">
                           <div className="flex items-center gap-2">
-                            {player.is_captain && <span className="text-yellow-400">©</span>}
-                            {player.is_vice_captain && <span className="text-gray-400">V</span>}
-                            <span className="font-medium">{player.name}</span>
+                            <div>
+                              <span className="font-medium">{player.name}</span>
+                              <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                            </div>
+                            {player.european_comp && (
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                'bg-blue-500/20 text-blue-400'
+                              }`}>
+                                {player.european_comp}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className={`py-3 ${getPositionClass(player.position)}`}>
-                          {player.position}
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                            player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-red-500/20 text-red-400'
+                          }`}>
+                            {player.is_home ? 'vs' : '@'} {player.opponent} 
+                          </span>
                         </td>
-                        <td className="py-3 font-mono">£{player.price}m</td>
-                        <td className="py-3 font-mono">{player.form}</td>
-                        <td className="py-3 font-mono">{player.points}</td>
+                        <td className="py-3">
+                          <span className={`px-2 py-1 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
+                            {player.position}
+                          </span>
+                        </td>
+                        <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
+                        <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted}</td>
+                        <td className="py-3 text-xs text-gray-400 max-w-[220px]">{player.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -394,25 +324,44 @@ function App() {
               </div>
             </div>
 
-            {/* Top Predictions */}
+            {/* Bench */}
             <div className="card">
               <div className="card-header">
-                <TrendingUp className="w-5 h-5 text-purple-400" />
-                Top Predictions
+                <ChevronRight className="w-5 h-5 text-gray-400" />
+                Bench
               </div>
-              <div className="space-y-2">
-                {predictions.slice(0, 8).map((player, i) => (
-                  <div key={player.id} className="flex items-center justify-between py-2">
-                    <div className="flex items-center gap-3">
-                      <span className="text-gray-500 font-mono w-4">{i + 1}</span>
-                      <span className={`text-xs ${getPositionClass(player.position)}`}>
-                        {player.position}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                {squad.bench.map((player: any, i) => (
+                  <div key={player.id} className={`p-3 bg-[#0f0f1a] rounded-lg border ${
+                    player.rotation_risk === 'high' ? 'border-orange-500/50' : 'border-[#2a2a4a]'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
+                          {player.position}
+                        </span>
+                        {player.european_comp && (
+                          <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                            'bg-blue-500/20 text-blue-400'
+                          }`}>
+                            {player.european_comp}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                        player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {player.is_home ? 'vs' : '@'} {player.opponent}
                       </span>
-                      <span>{player.name}</span>
                     </div>
-                    <span className="font-mono text-[#00ff87]">
-                      {player.predicted_points?.toFixed(1)}
-                    </span>
+                    <div className="font-medium">{player.name}</div>
+                    <div className="text-sm text-gray-400">{player.team} • £{player.price}m</div>
+                    <div className="text-sm text-[#00ff87] font-mono mt-1">{player.predicted} pts</div>
+                    <div className="text-xs text-gray-500 mt-1">{player.reason}</div>
                   </div>
                 ))}
               </div>
@@ -420,86 +369,96 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'team' && (
-          <div className="card">
-            <div className="card-header">
-              <Users className="w-5 h-5 text-[#00ff87]" />
-              Full Squad
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
-                    <th className="pb-3">Player</th>
-                    <th className="pb-3">Position</th>
-                    <th className="pb-3">Price</th>
-                    <th className="pb-3">Form</th>
-                    <th className="pb-3">Points</th>
-                    <th className="pb-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {team.map(player => (
-                    <tr key={player.id} className="table-row">
-                      <td className="py-3">
-                        <div className="flex items-center gap-2">
-                          {player.is_captain && <span className="text-yellow-400">©</span>}
-                          {player.is_vice_captain && <span className="text-gray-400">V</span>}
-                          <span className="font-medium">{player.name}</span>
+        {/* Top Picks Tab */}
+        {activeTab === 'picks' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Object.entries(topPicks).map(([position, players]) => (
+              <div key={position} className="card">
+                <div className="card-header capitalize">
+                  <Star className="w-5 h-5 text-yellow-400" />
+                  Top {position}
+                </div>
+                <div className="space-y-2">
+                  {players.map((player: any, i: number) => (
+                    <div key={player.id} className="p-3 bg-[#0f0f1a] rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-500 font-mono w-4">{i + 1}</span>
+                          <div>
+                            <div className="font-medium">{player.name}</div>
+                            <div className="text-sm text-gray-400">{player.team} • £{player.price}m</div>
+                          </div>
                         </div>
-                      </td>
-                      <td className={`py-3 ${getPositionClass(player.position)}`}>
-                        {player.position}
-                      </td>
-                      <td className="py-3 font-mono">£{player.price}m</td>
-                      <td className="py-3 font-mono">{player.form}</td>
-                      <td className="py-3 font-mono">{player.points}</td>
-                      <td className="py-3">
-                        <span className={`badge ${player.is_starter ? 'badge-success' : 'badge-warning'}`}>
-                          {player.is_starter ? 'Starting' : `Bench ${player.bench_order}`}
-                        </span>
-                      </td>
-                    </tr>
+                        <div className="text-right">
+                          <div className="text-[#00ff87] font-mono font-semibold">{player.predicted_points}</div>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                            player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-red-500/20 text-red-400'
+                          }`}>
+                            {player.is_home ? 'vs' : '@'} {player.opponent}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2 pl-7">{player.reason}</div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {activeTab === 'predictions' && (
+        {/* Differentials Tab */}
+        {activeTab === 'differentials' && (
           <div className="card">
             <div className="card-header">
-              <TrendingUp className="w-5 h-5 text-purple-400" />
-              Player Predictions
+              <Flame className="w-5 h-5 text-orange-400" />
+              Differentials (Under 10% Owned)
             </div>
+            <p className="text-gray-400 text-sm mb-4">
+              Low-ownership players with high predicted points - great for climbing ranks!
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
                     <th className="pb-3">#</th>
                     <th className="pb-3">Player</th>
-                    <th className="pb-3">Position</th>
-                    <th className="pb-3">Price</th>
-                    <th className="pb-3">Form</th>
-                    <th className="pb-3">Ownership</th>
-                    <th className="pb-3">Predicted</th>
+                    <th className="pb-3">Fixture</th>
+                    <th className="pb-3">Pos</th>
+                    <th className="pb-3 text-right">Price</th>
+                    <th className="pb-3 text-right">Own%</th>
+                    <th className="pb-3 text-right">Pts</th>
+                    <th className="pb-3">Why</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {predictions.map((player, i) => (
-                    <tr key={player.id} className="table-row">
+                  {differentials.map((player: any, i: number) => (
+                    <tr key={player.id} className="border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors">
                       <td className="py-3 text-gray-500 font-mono">{i + 1}</td>
-                      <td className="py-3 font-medium">{player.name}</td>
-                      <td className={`py-3 ${getPositionClass(player.position)}`}>
-                        {player.position}
+                      <td className="py-3">
+                        <span className="font-medium">{player.name}</span>
+                        <span className="text-gray-500 text-xs ml-1">({player.team})</span>
                       </td>
-                      <td className="py-3 font-mono">£{player.price}m</td>
-                      <td className="py-3 font-mono">{player.form}</td>
-                      <td className="py-3 font-mono">{player.ownership}%</td>
-                      <td className="py-3 font-mono text-[#00ff87]">
-                        {player.predicted_points?.toFixed(1)}
+                      <td className="py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                          player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                          'bg-red-500/20 text-red-400'
+                        }`}>
+                          {player.is_home ? 'vs' : '@'} {player.opponent}
+                        </span>
                       </td>
+                      <td className="py-3">
+                        <span className={`px-2 py-1 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
+                          {player.position}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
+                      <td className="py-3 text-right font-mono text-orange-400">{player.ownership}%</td>
+                      <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted_points}</td>
+                      <td className="py-3 text-xs text-gray-400 max-w-[150px]">{player.reason}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -507,49 +466,16 @@ function App() {
             </div>
           </div>
         )}
-
-        {activeTab === 'settings' && (
-          <div className="card max-w-2xl">
-            <div className="card-header">
-              <Settings className="w-5 h-5 text-gray-400" />
-              Agent Settings
-            </div>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">Auto-Execute Decisions</div>
-                  <div className="text-sm text-gray-400">Automatically apply recommended changes</div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" />
-                  <div className="w-11 h-6 bg-[#2a2a4a] rounded-full peer peer-checked:bg-[#00ff87] peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                </label>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">Differential Mode</div>
-                  <div className="text-sm text-gray-400">Prefer low-ownership picks for rank climbing</div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" />
-                  <div className="w-11 h-6 bg-[#2a2a4a] rounded-full peer peer-checked:bg-[#00ff87] peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                </label>
-              </div>
-              
-              <div className="pt-4 border-t border-[#2a2a4a]">
-                <div className="font-medium mb-2">Account</div>
-                <button onClick={handleLogout} className="btn btn-secondary text-red-400">
-                  Sign Out
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-[#2a2a4a] py-6 mt-12">
+        <div className="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
+          FPL Squad Suggester • AI-powered predictions • Not affiliated with Premier League
+        </div>
+      </footer>
     </div>
   )
 }
 
 export default App
-

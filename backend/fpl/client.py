@@ -32,9 +32,10 @@ class FPLClient:
         Initialize the FPL client.
         
         Args:
-            auth: FPLAuth instance for authenticated requests
+            auth: FPLAuth instance for authenticated requests (optional for public data)
         """
-        self.auth = auth or FPLAuth()
+        self.auth = auth  # Can be None for public-only access
+        self._session = requests.Session()
         self._last_request_time = 0
         
         # Cache
@@ -64,10 +65,10 @@ class FPLClient:
         
         url = f"{self.BASE_URL}/{endpoint}"
         
-        if authenticated:
+        if authenticated and self.auth:
             session = self.auth.get_session()
         else:
-            session = requests.Session()
+            session = self._session
         
         try:
             response = session.get(url, timeout=30)
