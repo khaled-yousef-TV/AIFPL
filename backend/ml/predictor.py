@@ -346,6 +346,163 @@ class HeuristicPredictor:
         return results
 
 
+class FormPredictor:
+    """
+    Form-focused predictor - heavily weights recent form and momentum.
+    
+    Best for: Identifying players on hot streaks
+    """
+    
+    def __init__(self):
+        """Initialize form predictor."""
+        pass
+    
+    def predict_player(self, features: PlayerFeatures) -> float:
+        """
+        Predict points heavily based on form.
+        """
+        # Heavy weight on form (70%)
+        form = features.form if features.form > 0 else 2.0
+        ppg = features.points_per_game if features.points_per_game > 0 else 2.0
+        
+        # Form is the primary driver
+        base = (form * 0.7 + ppg * 0.3)
+        
+        # Recent form bonus (last 3 games)
+        if features.avg_points_3 > 0:
+            form_momentum = features.avg_points_3 / form if form > 0 else 1.0
+            if form_momentum > 1.1:  # Improving form
+                base *= 1.15
+            elif form_momentum < 0.9:  # Declining form
+                base *= 0.9
+        
+        # Fixture still matters but less (20% impact vs 50% in heuristic)
+        fixture_multiplier = 1.15 - (features.next_fixture_difficulty - 1) * 0.05
+        fixture_multiplier = max(0.85, min(1.15, fixture_multiplier))
+        
+        # Availability
+        availability_mult = features.availability if features.availability > 0 else 1.0
+        
+        # Home bonus
+        home_bonus = 0.2 if features.is_home else 0
+        
+        # ICT bonus (form players often have high ICT)
+        ict_bonus = features.ict_index / 100 * 0.8
+        
+        # Transfer momentum (players being transferred in = form recognition)
+        transfer_bonus = 0
+        if features.transfer_balance > 1000:
+            transfer_bonus = 0.5  # High transfer in = form recognition
+        
+        predicted = (
+            base * fixture_multiplier * availability_mult
+            + home_bonus
+            + ict_bonus
+            + transfer_bonus
+        )
+        
+        # Minutes adjustment
+        if features.avg_minutes_3 > 0 and features.avg_minutes_3 < 60:
+            predicted *= features.avg_minutes_3 / 90
+        
+        return max(1.0, min(15.0, predicted))
+    
+    def predict_players(
+        self,
+        features_list: List[PlayerFeatures]
+    ) -> List[Tuple[int, str, float]]:
+        """Predict for multiple players."""
+        results = [
+            (f.player_id, f.player_name, self.predict_player(f))
+            for f in features_list
+        ]
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results
+
+
+class FixturePredictor:
+    """
+    Fixture-focused predictor - heavily weights fixture difficulty and long-term fixtures.
+    
+    Best for: Identifying value from fixture runs
+    """
+    
+    def __init__(self):
+        """Initialize fixture predictor."""
+        pass
+    
+    def predict_player(self, features: PlayerFeatures) -> float:
+        """
+        Predict points heavily based on fixtures.
+        """
+        # Base from form and PPG (lower weight)
+        form = features.form if features.form > 0 else 2.0
+        ppg = features.points_per_game if features.points_per_game > 0 else 2.0
+        base = (form * 0.3 + ppg * 0.7)  # PPG more stable for fixture analysis
+        
+        # HEAVY fixture multiplier (50% impact)
+        fixture_multiplier = 1.5 - (features.next_fixture_difficulty - 1) * 0.15
+        fixture_multiplier = max(0.6, min(1.5, fixture_multiplier))
+        
+        # Long-term fixture bonus (next 3-5 GWs)
+        avg_fixture_bonus = 0
+        if features.avg_fixture_difficulty_3 < 2.5:
+            avg_fixture_bonus = (2.5 - features.avg_fixture_difficulty_3) * 1.5
+        elif features.avg_fixture_difficulty_3 > 3.5:
+            avg_fixture_bonus = (3.5 - features.avg_fixture_difficulty_3) * 0.8
+        
+        # Home bonus (stronger for fixture-focused)
+        home_bonus = 0.4 if features.is_home else 0
+        
+        # Availability
+        availability_mult = features.availability if features.availability > 0 else 1.0
+        
+        # Position-specific fixture bonuses
+        if features.position in [1, 2]:  # GK/DEF
+            # Clean sheet potential from easy fixtures
+            if features.next_fixture_difficulty <= 2:
+                cs_bonus = 2.5
+            elif features.next_fixture_difficulty <= 3:
+                cs_bonus = 1.5
+            else:
+                cs_bonus = 0.5
+        else:
+            cs_bonus = 0
+        
+        # xG/xA from easy fixtures
+        xgxa_bonus = 0
+        if features.next_fixture_difficulty <= 2:
+            xgxa_bonus = (features.xG + features.xA) * 0.3
+        elif features.next_fixture_difficulty <= 3:
+            xgxa_bonus = (features.xG + features.xA) * 0.15
+        
+        predicted = (
+            base * fixture_multiplier * availability_mult
+            + home_bonus
+            + avg_fixture_bonus
+            + cs_bonus
+            + xgxa_bonus
+        )
+        
+        # Minutes adjustment
+        if features.avg_minutes_3 > 0 and features.avg_minutes_3 < 60:
+            predicted *= features.avg_minutes_3 / 90
+        
+        return max(1.0, min(15.0, predicted))
+    
+    def predict_players(
+        self,
+        features_list: List[PlayerFeatures]
+    ) -> List[Tuple[int, str, float]]:
+        """Predict for multiple players."""
+        results = [
+            (f.player_id, f.player_name, self.predict_player(f))
+            for f in features_list
+        ]
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results
+
+
 def get_predictor(model_path: Optional[str] = None) -> Any:
     """
     Get the best available predictor.

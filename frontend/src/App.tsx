@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
-  ChevronRight, Star, Target, Flame, AlertTriangle, Plane
+  ChevronRight, Star, Target, Flame, AlertTriangle, Plane,
+  ArrowRightLeft, Search, Plus, X, Trash2
 } from 'lucide-react'
 
 const API_BASE = 'http://localhost:8001'
@@ -13,13 +14,13 @@ interface Player {
   full_name?: string
   team: string
   position: string
-  position_id: number
+  position_id?: number
   price: number
-  predicted: number
+  predicted?: number
   predicted_points?: number
-  form: number
-  total_points: number
-  ownership: number
+  form?: number
+  total_points?: number
+  ownership?: number
   is_captain?: boolean
   is_vice_captain?: boolean
   rotation_risk?: string
@@ -47,14 +48,46 @@ interface GameWeekInfo {
   next?: { id: number; name: string; deadline: string }
 }
 
+interface SquadPlayer {
+  id: number
+  name: string
+  position: string
+  price: number
+  team?: string
+}
+
+interface TransferSuggestion {
+  out: any
+  in: any
+  cost: number
+  points_gain: number
+  priority_score: number
+  reason: string
+  all_reasons: string[]
+}
+
 function App() {
   const [loading, setLoading] = useState(true)
   const [squad, setSquad] = useState<SuggestedSquad | null>(null)
+  const [squadHeuristic, setSquadHeuristic] = useState<SuggestedSquad | null>(null)
+  const [squadForm, setSquadForm] = useState<SuggestedSquad | null>(null)
+  const [squadFixture, setSquadFixture] = useState<SuggestedSquad | null>(null)
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
-  const [activeTab, setActiveTab] = useState('squad')
+  const [activeTab, setActiveTab] = useState('squad_combined')
   const [error, setError] = useState<string | null>(null)
+  
+  // Transfer tab state
+  const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
+  const [bank, setBank] = useState(0)
+  const [freeTransfers, setFreeTransfers] = useState(1)
+  const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([])
+  const [squadAnalysis, setSquadAnalysis] = useState<any[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Player[]>([])
+  const [searchPosition, setSearchPosition] = useState<string>('')
+  const [transferLoading, setTransferLoading] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -65,15 +98,21 @@ function App() {
     setError(null)
     
     try {
-      const [gwRes, squadRes, topsRes, diffsRes] = await Promise.all([
+      const [gwRes, squadCombined, squadHeur, squadFrm, squadFix, topsRes, diffsRes] = await Promise.all([
         fetch(`${API_BASE}/api/gameweek`).then(r => r.json()),
-        fetch(`${API_BASE}/api/suggested-squad`).then(r => r.json()),
+        fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json()),
+        fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json()),
+        fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json()),
+        fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json()),
         fetch(`${API_BASE}/api/top-picks`).then(r => r.json()),
         fetch(`${API_BASE}/api/differentials`).then(r => r.json()),
       ])
       
       setGameweek(gwRes)
-      setSquad(squadRes)
+      setSquad(squadCombined)
+      setSquadHeuristic(squadHeur)
+      setSquadForm(squadFrm)
+      setSquadFixture(squadFix)
       setTopPicks(topsRes)
       setDifferentials(diffsRes.differentials || [])
     } catch (err: any) {
@@ -81,6 +120,70 @@ function App() {
       console.error('Load error:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const searchPlayers = async (query: string, position?: string) => {
+    if (query.length < 2) {
+      setSearchResults([])
+      return
+    }
+    
+    try {
+      const url = `${API_BASE}/api/players/search?q=${encodeURIComponent(query)}${position ? `&position=${position}` : ''}`
+      const res = await fetch(url)
+      const data = await res.json()
+      setSearchResults(data.players || [])
+    } catch (err) {
+      console.error('Search error:', err)
+    }
+  }
+
+  const addToSquad = (player: Player) => {
+    if (mySquad.length >= 15) return
+    if (mySquad.find(p => p.id === player.id)) return
+    
+    setMySquad([...mySquad, {
+      id: player.id,
+      name: player.name,
+      position: player.position,
+      price: player.price,
+      team: player.team,
+    }])
+    setSearchQuery('')
+    setSearchResults([])
+  }
+
+  const removeFromSquad = (playerId: number) => {
+    setMySquad(mySquad.filter(p => p.id !== playerId))
+  }
+
+  const getTransferSuggestions = async () => {
+    if (mySquad.length < 11) {
+      alert('Please add at least 11 players to your squad')
+      return
+    }
+    
+    setTransferLoading(true)
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/transfer-suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          squad: mySquad,
+          bank: bank,
+          free_transfers: freeTransfers,
+        }),
+      })
+      
+      const data = await res.json()
+      setTransferSuggestions(data.suggestions || [])
+      setSquadAnalysis(data.squad_analysis || [])
+    } catch (err) {
+      console.error('Transfer suggestion error:', err)
+    } finally {
+      setTransferLoading(false)
     }
   }
 
@@ -105,6 +208,14 @@ function App() {
       minute: '2-digit'
     })
   }
+
+  const isSquadTab = activeTab.startsWith('squad_')
+  const currentSquad: SuggestedSquad | null =
+    activeTab === 'squad_combined' ? squad :
+    activeTab === 'squad_heuristic' ? squadHeuristic :
+    activeTab === 'squad_form' ? squadForm :
+    activeTab === 'squad_fixture' ? squadFixture :
+    null
 
   if (loading) {
     return (
@@ -158,7 +269,11 @@ function App() {
       <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-6">
         <div className="max-w-6xl mx-auto flex gap-1">
           {[
-            { id: 'squad', icon: Users, label: 'Suggested Squad' },
+            { id: 'squad_combined', icon: Users, label: 'Squad • Combined' },
+            { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic' },
+            { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form' },
+            { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture' },
+            { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers' },
             { id: 'picks', icon: Star, label: 'Top Picks' },
             { id: 'differentials', icon: Target, label: 'Differentials' },
           ].map(tab => (
@@ -181,26 +296,30 @@ function App() {
       {/* Content */}
       <main className="max-w-6xl mx-auto p-6">
         
-        {/* Suggested Squad Tab */}
-        {activeTab === 'squad' && squad && (
+        {/* Squad Tabs */}
+        {isSquadTab && !currentSquad && (
+          <div className="text-center text-gray-400 py-8">Loading squad...</div>
+        )}
+
+        {isSquadTab && currentSquad && (
           <div className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="card">
+                <div className="text-gray-400 text-sm mb-1">Method</div>
+                <div className="text-lg font-bold text-[#00ff87]">{(currentSquad as any).method || 'Combined'}</div>
+              </div>
+              <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Formation</div>
-                <div className="text-2xl font-bold text-[#00ff87]">{squad.formation}</div>
+                <div className="text-2xl font-bold text-[#00ff87]">{currentSquad.formation}</div>
               </div>
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Predicted Points</div>
-                <div className="text-2xl font-bold text-[#00ff87]">{squad.predicted_points}</div>
+                <div className="text-2xl font-bold text-[#00ff87]">{currentSquad.predicted_points}</div>
               </div>
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Squad Cost</div>
-                <div className="text-2xl font-bold">£{squad.total_cost}m</div>
-              </div>
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-1">Remaining</div>
-                <div className="text-2xl font-bold text-green-400">£{squad.remaining_budget}m</div>
+                <div className="text-2xl font-bold">£{currentSquad.total_cost}m</div>
               </div>
             </div>
 
@@ -241,16 +360,16 @@ function App() {
                 <div className="flex-1 p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-yellow-400 text-lg font-bold">©</span>
-                    <span className="font-semibold text-lg">{squad.captain.name}</span>
+                    <span className="font-semibold text-lg">{currentSquad.captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{squad.captain.predicted} × 2 = {(squad.captain.predicted * 2).toFixed(1)}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{currentSquad.captain.predicted} × 2 = {(currentSquad.captain.predicted * 2).toFixed(1)}</span></span>
                 </div>
                 <div className="flex-1 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-gray-400">V</span>
-                    <span className="font-medium">{squad.vice_captain.name}</span>
+                    <span className="font-medium">{currentSquad.vice_captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="font-mono">{squad.vice_captain.predicted}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="font-mono">{currentSquad.vice_captain.predicted}</span></span>
                 </div>
               </div>
             </div>
@@ -275,7 +394,7 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {squad.starting_xi.map((player: any, i) => (
+                    {currentSquad.starting_xi.map((player: any, i) => (
                       <tr key={player.id} className={`border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors ${
                         player.rotation_risk === 'high' ? 'bg-orange-500/5' : ''
                       }`}>
@@ -331,7 +450,7 @@ function App() {
                 Bench
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                {squad.bench.map((player: any, i) => (
+                {currentSquad.bench.map((player: any, i) => (
                   <div key={player.id} className={`p-3 bg-[#0f0f1a] rounded-lg border ${
                     player.rotation_risk === 'high' ? 'border-orange-500/50' : 'border-[#2a2a4a]'
                   }`}>
@@ -366,6 +485,299 @@ function App() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* My Transfers Tab */}
+        {activeTab === 'transfers' && (
+          <div className="space-y-6">
+            {/* Instructions */}
+            <div className="card">
+              <div className="card-header">
+                <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+                Transfer Suggestions
+              </div>
+              <p className="text-gray-400 text-sm mb-4">
+                Add your current squad below and get AI-powered transfer suggestions considering both short-term (next GW) and long-term (next 5 GWs) fixtures.
+              </p>
+              
+              {/* Squad Input */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Search & Add */}
+                <div>
+                  <h3 className="font-medium mb-3">Add Players to Squad</h3>
+                  <div className="relative mb-4">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        searchPlayers(e.target.value, searchPosition)
+                      }}
+                      placeholder="Search player name..."
+                      className="w-full pl-10 pr-4 py-2 bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg focus:border-[#00ff87] focus:outline-none"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 mb-4">
+                    {['', 'GK', 'DEF', 'MID', 'FWD'].map(pos => (
+                      <button
+                        key={pos}
+                        onClick={() => {
+                          setSearchPosition(pos)
+                          if (searchQuery.length >= 2) searchPlayers(searchQuery, pos)
+                        }}
+                        className={`px-3 py-1 rounded text-sm ${
+                          searchPosition === pos 
+                            ? 'bg-[#00ff87] text-[#0f0f1a]' 
+                            : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
+                        }`}
+                      >
+                        {pos || 'All'}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Search Results */}
+                  {searchResults.length > 0 && (
+                    <div className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto">
+                      {searchResults.map(player => (
+                        <button
+                          key={player.id}
+                          onClick={() => addToSquad(player)}
+                          disabled={mySquad.find(p => p.id === player.id) !== undefined}
+                          className="w-full flex items-center justify-between p-3 hover:bg-[#1f1f3a] border-b border-[#2a2a4a] last:border-0 disabled:opacity-50"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
+                              {player.position}
+                            </span>
+                            <div className="text-left">
+                              <div className="font-medium">{player.name}</div>
+                              <div className="text-xs text-gray-400">{player.team}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-mono">£{player.price}m</span>
+                            <Plus className="w-4 h-4 text-[#00ff87]" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Current Squad */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
+                    {mySquad.length > 0 && (
+                      <button 
+                        onClick={() => setMySquad([])}
+                        className="text-xs text-red-400 hover:text-red-300"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                    {['GK', 'DEF', 'MID', 'FWD'].map(pos => {
+                      const posPlayers = mySquad.filter(p => p.position === pos)
+                      return (
+                        <div key={pos}>
+                          <div className="text-xs text-gray-500 mb-1">{pos} ({posPlayers.length})</div>
+                          {posPlayers.map(player => (
+                            <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                                  {player.position}
+                                </span>
+                                <span className="text-sm">{player.name}</span>
+                                <span className="text-xs text-gray-500">{player.team}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono text-gray-400">£{player.price}m</span>
+                                <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
+                    
+                    {mySquad.length === 0 && (
+                      <div className="text-center text-gray-500 py-8">
+                        Search and add players to your squad
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Bank & Free Transfers */}
+              <div className="flex gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
+                <div>
+                  <label className="text-sm text-gray-400">Bank (£m)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={bank}
+                    onChange={(e) => setBank(parseFloat(e.target.value) || 0)}
+                    className="w-24 ml-2 px-3 py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-400">Free Transfers</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="5"
+                    value={freeTransfers}
+                    onChange={(e) => setFreeTransfers(parseInt(e.target.value) || 1)}
+                    className="w-16 ml-2 px-3 py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={getTransferSuggestions}
+                  disabled={mySquad.length < 11 || transferLoading}
+                  className="btn btn-primary ml-auto"
+                >
+                  {transferLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    'Get Suggestions'
+                  )}
+                </button>
+              </div>
+            </div>
+            
+            {/* Transfer Suggestions */}
+            {transferSuggestions.length > 0 && (
+              <div className="card">
+                <div className="card-header">
+                  <TrendingUp className="w-5 h-5 text-[#00ff87]" />
+                  Top 3 Transfer Suggestions
+                </div>
+                
+                <div className="space-y-4">
+                  {transferSuggestions.map((suggestion, i) => (
+                    <div key={i} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-lg font-bold text-[#00ff87]">#{i + 1}</span>
+                        <span className={`px-2 py-1 rounded text-sm font-medium ${
+                          suggestion.points_gain > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {suggestion.points_gain > 0 ? '+' : ''}{suggestion.points_gain} pts
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-4">
+                        {/* Out */}
+                        <div className="flex-1 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                          <div className="text-xs text-red-400 mb-1">Transfer Out</div>
+                          <div className="font-medium">{suggestion.out.name}</div>
+                          <div className="text-sm text-gray-400">{suggestion.out.team} • £{suggestion.out.price}m</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            vs {suggestion.out.fixture} (FDR {suggestion.out.fixture_difficulty}) • Form: {suggestion.out.form}
+                          </div>
+                        </div>
+                        
+                        <ArrowRightLeft className="w-6 h-6 text-gray-500" />
+                        
+                        {/* In */}
+                        <div className="flex-1 p-3 bg-green-500/10 rounded-lg border border-green-500/30">
+                          <div className="text-xs text-green-400 mb-1">Transfer In</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{suggestion.in.name}</span>
+                            {suggestion.in.european_comp && (
+                              <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">
+                                {suggestion.in.european_comp}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-400">{suggestion.in.team} • £{suggestion.in.price}m</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            vs {suggestion.in.fixture} (FDR {suggestion.in.fixture_difficulty}) • Form: {suggestion.in.form}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Reason */}
+                      <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                        <div className="text-sm text-[#00ff87]">💡 {suggestion.reason}</div>
+                        {suggestion.all_reasons.length > 1 && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            Also: {suggestion.all_reasons.slice(1).join(' • ')}
+                          </div>
+                        )}
+                        <div className="flex gap-4 mt-2 text-xs text-gray-400">
+                          <span>Cost: {suggestion.cost > 0 ? '+' : ''}£{suggestion.cost}m</span>
+                          <span>5GW Avg FDR: {suggestion.out.avg_fixture_5gw} → {suggestion.in.avg_fixture_5gw}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Squad Analysis */}
+            {squadAnalysis.length > 0 && (
+              <div className="card">
+                <div className="card-header">
+                  <Target className="w-5 h-5 text-yellow-400" />
+                  Squad Analysis (sorted by priority to transfer out)
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
+                        <th className="pb-2">Player</th>
+                        <th className="pb-2">Fixture</th>
+                        <th className="pb-2 text-right">Pred</th>
+                        <th className="pb-2 text-right">Form</th>
+                        <th className="pb-2 text-right">5GW FDR</th>
+                        <th className="pb-2 text-right">Keep Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {squadAnalysis.map((player: any) => (
+                        <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
+                          player.keep_score < 3 ? 'bg-red-500/10' : ''
+                        }`}>
+                          <td className="py-2">
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                          </td>
+                          <td className="py-2">
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${
+                              player.fixture_difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                              player.fixture_difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-red-500/20 text-red-400'
+                            }`}>
+                              {player.fixture} ({player.fixture_difficulty})
+                            </span>
+                          </td>
+                          <td className="py-2 text-right font-mono">{player.predicted}</td>
+                          <td className="py-2 text-right font-mono">{player.form}</td>
+                          <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
+                          <td className={`py-2 text-right font-mono font-bold ${
+                            player.keep_score < 3 ? 'text-red-400' : 
+                            player.keep_score < 5 ? 'text-yellow-400' : 'text-green-400'
+                          }`}>
+                            {player.keep_score}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

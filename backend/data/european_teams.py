@@ -53,45 +53,86 @@ EUROPEAN_TEAMS_BY_SEASON = {
 # UECL: League phase with 6 matchdays Sep-Dec
 EUROPEAN_MATCHWEEKS_BY_SEASON = {
     "2025-26": {
+        # September 2025 - Matchday 1
+        "2025-09-16": ["UCL"],
+        "2025-09-17": ["UCL"],
+        "2025-09-18": ["UCL"],
+        
+        # September-October 2025 - Matchday 2
+        "2025-09-30": ["UCL"],
+        "2025-10-01": ["UCL"],
+        
+        # October 2025 - Matchday 3
+        "2025-10-21": ["UCL"],
+        "2025-10-22": ["UCL"],
+        
+        # November 2025 - Matchday 4
+        "2025-11-04": ["UCL"],
+        "2025-11-05": ["UCL"],
+        
+        # November 2025 - Matchday 5
+        "2025-11-25": ["UCL"],
+        "2025-11-26": ["UCL"],
+        
         # December 2025 - Matchday 6
         "2025-12-09": ["UCL"],
         "2025-12-10": ["UCL"],
-        "2025-12-11": ["UCL", "UEL"],
-        "2025-12-12": ["UEL", "UECL"],
-        "2025-12-18": ["UECL"],
-        "2025-12-19": ["UECL"],
         
-        # January 2026 - Matchday 7 & 8
+        # January 2026 - Matchday 7
+        "2026-01-20": ["UCL"],
         "2026-01-21": ["UCL"],
-        "2026-01-22": ["UCL", "UEL"],
-        "2026-01-23": ["UEL", "UECL"],
+        
+        # January 2026 - Matchday 8
         "2026-01-28": ["UCL"],
-        "2026-01-29": ["UCL", "UEL"],
-        "2026-01-30": ["UEL"],
         
-        # February 2026 - Knockout playoffs
-        "2026-02-11": ["UCL", "UEL"],
-        "2026-02-12": ["UCL", "UEL"],
-        "2026-02-13": ["UECL"],
-        "2026-02-18": ["UCL", "UEL"],
-        "2026-02-19": ["UCL", "UEL"],
-        "2026-02-20": ["UECL"],
+        # February 2026 - Knockout Play-offs (Leg 1)
+        "2026-02-17": ["UCL"],
+        "2026-02-18": ["UCL"],
         
-        # March 2026 - Round of 16
-        "2026-03-04": ["UCL"],
-        "2026-03-05": ["UCL", "UEL"],
-        "2026-03-06": ["UEL", "UECL"],
+        # February 2026 - Knockout Play-offs (Leg 2)
+        "2026-02-24": ["UCL"],
+        "2026-02-25": ["UCL"],
+        
+        # March 2026 - Round of 16 (Leg 1)
+        "2026-03-10": ["UCL"],
         "2026-03-11": ["UCL"],
-        "2026-03-12": ["UCL", "UEL"],
-        "2026-03-13": ["UEL", "UECL"],
         
-        # April 2026 - Quarter-finals
-        "2026-04-08": ["UCL", "UEL"],
-        "2026-04-09": ["UCL", "UEL"],
-        "2026-04-10": ["UECL"],
-        "2026-04-15": ["UCL", "UEL"],
-        "2026-04-16": ["UCL", "UEL"],
-        "2026-04-17": ["UECL"],
+        # March 2026 - Round of 16 (Leg 2)
+        "2026-03-17": ["UCL"],
+        "2026-03-18": ["UCL"],
+        
+        # April 2026 - Quarter-finals (Leg 1)
+        "2026-04-07": ["UCL"],
+        "2026-04-08": ["UCL"],
+        
+        # April 2026 - Quarter-finals (Leg 2)
+        "2026-04-14": ["UCL"],
+        "2026-04-15": ["UCL"],
+        
+        # April-May 2026 - Semi-finals (Leg 1)
+        "2026-04-28": ["UCL"],
+        "2026-04-29": ["UCL"],
+        
+        # May 2026 - Semi-finals (Leg 2)
+        "2026-05-05": ["UCL"],
+        "2026-05-06": ["UCL"],
+        
+        # Note: UEL and UECL dates follow similar patterns but may have slight variations
+        # Adding key UEL/UECL dates (typically same weeks as UCL)
+        "2025-09-25": ["UEL", "UECL"],  # UEL/UECL Matchday 1
+        "2025-10-09": ["UEL", "UECL"],  # UEL/UECL Matchday 2
+        "2025-10-23": ["UEL", "UECL"],  # UEL/UECL Matchday 3
+        "2025-11-06": ["UEL", "UECL"],  # UEL/UECL Matchday 4
+        "2025-11-27": ["UEL", "UECL"],  # UEL/UECL Matchday 5
+        "2025-12-11": ["UEL", "UECL"],  # UEL/UECL Matchday 6
+        "2026-01-22": ["UEL"],  # UEL Matchday 7
+        "2026-01-29": ["UEL"],  # UEL Matchday 8
+        "2026-02-19": ["UEL", "UECL"],  # Knockout Play-offs
+        "2026-02-20": ["UEL", "UECL"],
+        "2026-03-12": ["UEL", "UECL"],  # Round of 16
+        "2026-03-13": ["UEL", "UECL"],
+        "2026-04-09": ["UEL", "UECL"],  # Quarter-finals
+        "2026-04-10": ["UEL", "UECL"],
     },
 }
 
