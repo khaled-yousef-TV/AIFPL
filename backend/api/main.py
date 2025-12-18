@@ -618,6 +618,7 @@ async def get_transfer_suggestions(request: TransferRequest):
         players = fpl_client.get_players()
         teams = fpl_client.get_teams()
         team_names = {t.id: t.short_name for t in teams}
+        players_by_id = {p.id: p for p in players}
         
         next_gw = fpl_client.get_next_gameweek()
         fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
@@ -650,18 +651,44 @@ async def get_transfer_suggestions(request: TransferRequest):
         for team_id, diffs in long_term_fixtures.items():
             avg_fixture_difficulty[team_id] = sum(diffs) / len(diffs) if diffs else 3.0
         
-        feature_eng = FeatureEngineer(fpl_client)
-        
         # Get squad player IDs
         squad_ids = {p.id for p in request.squad}
         squad_by_pos = {"GK": [], "DEF": [], "MID": [], "FWD": []}
         for p in request.squad:
             squad_by_pos[p.position].append(p)
+
+        # Basic validation (doesn't block, but helps the UI explain odd results)
+        warnings: List[str] = []
+        if len(request.squad) != len(squad_ids):
+            warnings.append("Duplicate player(s) detected in squad input.")
+        if len(request.squad) not in (11, 12, 13, 14, 15):
+            warnings.append("Squad size looks unusual. FPL squads are 15 players (or at least 11 to get suggestions).")
+        pos_counts = {k: len(v) for k, v in squad_by_pos.items()}
+        if any(k not in ("GK", "DEF", "MID", "FWD") for k in pos_counts.keys()):
+            warnings.append("Unknown position detected in squad input.")
+        # Expected full squad composition (FYI)
+        if len(request.squad) == 15 and pos_counts != {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}:
+            warnings.append(f"Full squad composition is unusual (expected 2/5/5/3, got {pos_counts}).")
+
+        # Current club counts (used to enforce max 3 per club on suggested IN moves)
+        current_team_counts: Dict[int, int] = {}
+        missing_ids: List[int] = []
+        for sp in request.squad:
+            pl = players_by_id.get(sp.id)
+            if not pl:
+                missing_ids.append(sp.id)
+                continue
+            current_team_counts[pl.team] = current_team_counts.get(pl.team, 0) + 1
+        if missing_ids:
+            warnings.append(f"{len(missing_ids)} squad player(s) not found in current FPL data. Suggestions may be incomplete.")
+        invalid_clubs = [team_names.get(tid, str(tid)) for tid, c in current_team_counts.items() if c > 3]
+        if invalid_clubs:
+            warnings.append(f"Squad violates max 3 players per club for: {', '.join(invalid_clubs)}")
         
         # Analyze each player in squad - find worst performers
         squad_analysis = []
         for squad_player in request.squad:
-            player = next((p for p in players if p.id == squad_player.id), None)
+            player = players_by_id.get(squad_player.id)
             if not player:
                 continue
             
@@ -707,6 +734,7 @@ async def get_transfer_suggestions(request: TransferRequest):
                 "id": player.id,
                 "name": player.web_name,
                 "team": team_name,
+                "team_id": player.team,
                 "position": squad_player.position,
                 "price": squad_player.price,
                 "predicted": round(pred, 2),
@@ -729,6 +757,13 @@ async def get_transfer_suggestions(request: TransferRequest):
         for out_player in transfer_out_candidates:
             pos = out_player["position"]
             max_price = out_player["price"] + request.bank
+
+            # Enforce "max 3 from a club" on the resulting squad after OUT -> IN
+            # Simulate removing the OUT player from its club count.
+            counts_after_out = dict(current_team_counts)
+            out_team_id = out_player.get("team_id")
+            if isinstance(out_team_id, int):
+                counts_after_out[out_team_id] = max(0, counts_after_out.get(out_team_id, 0) - 1)
             
             # Find best replacements
             replacements = []
@@ -751,6 +786,10 @@ async def get_transfer_suggestions(request: TransferRequest):
                 
                 # Allow players with at least 1 minute (includes new signings, rotation players)
                 if player.minutes < 1:
+                    continue
+
+                # FPL RULE: max 3 players per club after the transfer
+                if counts_after_out.get(player.team, 0) >= 3:
                     continue
                 
                 team_name = team_names.get(player.team, "???")
@@ -797,6 +836,7 @@ async def get_transfer_suggestions(request: TransferRequest):
                     "id": player.id,
                     "name": player.web_name,
                     "team": team_name,
+                    "team_id": player.team,
                     "position": pos,
                     "price": player.price,
                     "predicted": round(pred, 2),
@@ -851,6 +891,7 @@ async def get_transfer_suggestions(request: TransferRequest):
             "suggestions": top_suggestions,
             "bank": request.bank,
             "free_transfers": request.free_transfers,
+            "warnings": warnings,
         }
         
     except Exception as e:
