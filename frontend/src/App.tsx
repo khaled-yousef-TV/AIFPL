@@ -56,6 +56,8 @@ interface SquadPlayer {
   // Search results provide current price, which may differ from selling price.
   price: number
   team?: string
+  rotation_risk?: string
+  european_comp?: string
 }
 
 interface TransferSuggestion {
@@ -77,7 +79,7 @@ function App() {
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
-  const [activeTab, setActiveTab] = useState('squad_combined')
+  const [activeTab, setActiveTab] = useState('transfers')
   const [error, setError] = useState<string | null>(null)
   
   // Transfer tab state
@@ -92,36 +94,105 @@ function App() {
   const [transferLoading, setTransferLoading] = useState(false)
 
   useEffect(() => {
-    loadData()
+    loadInitial()
   }, [])
 
-  const loadData = async () => {
+  const loadInitial = async () => {
+    // Only load lightweight header data on boot (keeps My Transfers instant).
     setLoading(true)
     setError(null)
-    
     try {
-      const [gwRes, squadCombined, squadHeur, squadFrm, squadFix, topsRes, diffsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/gameweek`).then(r => r.json()),
-        fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json()),
-        fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json()),
-        fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json()),
-        fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json()),
-        fetch(`${API_BASE}/api/top-picks`).then(r => r.json()),
-        fetch(`${API_BASE}/api/differentials`).then(r => r.json()),
-      ])
-      
+      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
       setGameweek(gwRes)
-      setSquad(squadCombined)
-      setSquadHeuristic(squadHeur)
-      setSquadForm(squadFrm)
-      setSquadFixture(squadFix)
-      setTopPicks(topsRes)
-      setDifferentials(diffsRes.differentials || [])
     } catch (err: any) {
       setError(err.message || 'Failed to load data')
       console.error('Load error:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const ensureSquadLoaded = async (method: 'combined' | 'heuristic' | 'form' | 'fixture') => {
+    const hasData =
+      method === 'combined' ? squad :
+      method === 'heuristic' ? squadHeuristic :
+      method === 'form' ? squadForm :
+      squadFixture
+    if (hasData) return
+
+    try {
+      const res = await fetch(`${API_BASE}/api/suggested-squad?method=${method}`).then(r => r.json())
+      if (method === 'combined') setSquad(res)
+      if (method === 'heuristic') setSquadHeuristic(res)
+      if (method === 'form') setSquadForm(res)
+      if (method === 'fixture') setSquadFixture(res)
+    } catch (err) {
+      console.error('Squad load error:', err)
+    }
+  }
+
+  const ensurePicksLoaded = async () => {
+    if (Object.keys(topPicks).length > 0) return
+    try {
+      const topsRes = await fetch(`${API_BASE}/api/top-picks`).then(r => r.json())
+      setTopPicks(topsRes)
+    } catch (err) {
+      console.error('Top picks load error:', err)
+    }
+  }
+
+  const ensureDifferentialsLoaded = async () => {
+    if (differentials.length > 0) return
+    try {
+      const diffsRes = await fetch(`${API_BASE}/api/differentials`).then(r => r.json())
+      setDifferentials(diffsRes.differentials || [])
+    } catch (err) {
+      console.error('Differentials load error:', err)
+    }
+  }
+
+  useEffect(() => {
+    // Lazy-load heavy tabs only when the user opens them
+    if (activeTab === 'squad_combined') ensureSquadLoaded('combined')
+    if (activeTab === 'squad_heuristic') ensureSquadLoaded('heuristic')
+    if (activeTab === 'squad_form') ensureSquadLoaded('form')
+    if (activeTab === 'squad_fixture') ensureSquadLoaded('fixture')
+    if (activeTab === 'picks') ensurePicksLoaded()
+    if (activeTab === 'differentials') ensureDifferentialsLoaded()
+  }, [activeTab])
+
+  const refresh = async () => {
+    setError(null)
+    try {
+      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
+      setGameweek(gwRes)
+    } catch (err) {
+      console.error('Gameweek refresh error:', err)
+    }
+
+    // Refresh only the currently active heavy tab to keep UX snappy.
+    try {
+      if (activeTab === 'squad_combined') {
+        setSquad(null)
+        await ensureSquadLoaded('combined')
+      } else if (activeTab === 'squad_heuristic') {
+        setSquadHeuristic(null)
+        await ensureSquadLoaded('heuristic')
+      } else if (activeTab === 'squad_form') {
+        setSquadForm(null)
+        await ensureSquadLoaded('form')
+      } else if (activeTab === 'squad_fixture') {
+        setSquadFixture(null)
+        await ensureSquadLoaded('fixture')
+      } else if (activeTab === 'picks') {
+        setTopPicks({})
+        await ensurePicksLoaded()
+      } else if (activeTab === 'differentials') {
+        setDifferentials([])
+        await ensureDifferentialsLoaded()
+      }
+    } catch (err) {
+      console.error('Refresh error:', err)
     }
   }
 
@@ -156,6 +227,8 @@ function App() {
       // Default to CURRENT price; user can edit to their SELLING price.
       price: typeof player.price === 'number' ? Math.round(player.price * 10) / 10 : 0,
       team: player.team,
+      rotation_risk: player.rotation_risk,
+      european_comp: player.european_comp,
     }])
     setSearchQuery('')
     setSearchResults([])
@@ -245,7 +318,7 @@ function App() {
       <div className="min-h-screen bg-[#0f0f1a] flex items-center justify-center p-4">
         <div className="card max-w-md w-full text-center">
           <p className="text-red-400 mb-4">{error}</p>
-          <button onClick={loadData} className="btn btn-primary">
+          <button onClick={loadInitial} className="btn btn-primary">
             Try Again
           </button>
         </div>
@@ -270,7 +343,7 @@ function App() {
             </div>
           </div>
           
-          <button onClick={loadData} className="btn btn-secondary flex items-center gap-2">
+          <button onClick={refresh} className="btn btn-secondary flex items-center gap-2">
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
@@ -281,11 +354,11 @@ function App() {
       <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-6">
         <div className="max-w-6xl mx-auto flex gap-1">
           {[
+            { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers' },
             { id: 'squad_combined', icon: Users, label: 'Squad • Combined' },
             { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic' },
             { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form' },
             { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture' },
-            { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers' },
             { id: 'picks', icon: Star, label: 'Top Picks' },
             { id: 'differentials', icon: Target, label: 'Differentials' },
           ].map(tab => (
@@ -570,7 +643,16 @@ function App() {
                             <div className="text-left">
                               <div className="font-medium">{player.name}</div>
                               <div className="text-xs text-gray-400">
-                                {player.team}
+                                <span>{player.team}</span>
+                                {player.european_comp && (
+                                  <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
+                                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                    'bg-blue-500/20 text-blue-400'
+                                  }`}>
+                                    {player.european_comp}
+                                  </span>
+                                )}
                                 {typeof (player as any).minutes === 'number' && (
                                   <span className="text-gray-500"> • {(player as any).minutes}m</span>
                                 )}
@@ -623,6 +705,15 @@ function App() {
                                 </span>
                                 <span className="text-sm">{player.name}</span>
                                 <span className="text-xs text-gray-500">{player.team}</span>
+                                {player.european_comp && (
+                                  <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                    'bg-blue-500/20 text-blue-400'
+                                  }`}>
+                                    {player.european_comp}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1 text-xs font-mono text-gray-400">

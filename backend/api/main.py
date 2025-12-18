@@ -979,6 +979,16 @@ async def search_players(q: str = "", position: Optional[str] = None, limit: int
         teams = fpl_client.get_teams()
         team_names = {t.id: t.short_name for t in teams}
 
+        # Rotation/EU badges are based on the upcoming gameweek context.
+        next_gw = fpl_client.get_next_gameweek()
+        fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
+        gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+
+        fixture_info: Dict[int, Dict[str, Any]] = {}
+        for f in fixtures:
+            fixture_info[f.team_h] = {"difficulty": f.team_h_difficulty, "is_home": True}
+            fixture_info[f.team_a] = {"difficulty": f.team_a_difficulty, "is_home": False}
+
         q_lower = (q or "").strip().lower()
         limit = max(1, min(100, int(limit or 50)))
 
@@ -1028,16 +1038,24 @@ async def search_players(q: str = "", position: Optional[str] = None, limit: int
             ranked.sort()
             filtered = [x[-1] for x in ranked][:limit]
 
-        results = [{
-            "id": p.id,
-            "name": p.web_name,
-            "full_name": p.full_name,
-            "team": team_names.get(p.team, "???"),
-            "position": p.position,
-            "price": p.price,
-            "minutes": p.minutes,
-            "status": p.status,
-        } for p in filtered]
+        results = []
+        for p in filtered:
+            team_short = team_names.get(p.team, "???")
+            fix = fixture_info.get(p.team, {})
+            difficulty = fix.get("difficulty", 3)
+            rotation = assess_rotation_risk(team_short, gw_deadline, difficulty)
+            results.append({
+                "id": p.id,
+                "name": p.web_name,
+                "full_name": p.full_name,
+                "team": team_short,
+                "position": p.position,
+                "price": p.price,
+                "minutes": p.minutes,
+                "status": p.status,
+                "rotation_risk": rotation.risk_level,
+                "european_comp": rotation.competition,
+            })
 
         return {"players": results}
         
