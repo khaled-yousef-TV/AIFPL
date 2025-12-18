@@ -1,6 +1,8 @@
-# 🤖 FPL AI Agent
+# 🤖 FPL AI Squad Suggester
 
-An AI-powered Fantasy Premier League agent that automatically manages your FPL team using machine learning predictions and intelligent decision-making.
+An AI-powered Fantasy Premier League **squad + transfers suggester** with a fast dashboard UI.
+
+Built for **manual decision support** (no login required): it uses public FPL data and explains its picks.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green)
@@ -8,13 +10,19 @@ An AI-powered Fantasy Premier League agent that automatically manages your FPL t
 
 ## ✨ Features
 
-- **🎯 Points Prediction** - ML-powered player points predictions
-- **👑 Captain Selection** - Intelligent captain and vice-captain picks
-- **📊 Lineup Optimization** - Optimal starting XI and bench order
-- **🔄 Transfer Suggestions** - Smart transfer recommendations
-- **🎲 Differential Finder** - Low-ownership high-potential picks
-- **⚡ Auto-Execution** - Automatically apply changes before deadline
-- **📱 Web Dashboard** - Beautiful UI to monitor your agent
+- **🧠 Multi-method predictions**: Heuristic / Form-focused / Fixture-focused + **Combined average**
+- **👥 Suggested Squad**: full 15-man squad + best XI + formation
+- **🧢 Captain & Vice**: picked from the suggested XI
+- **🔁 My Transfers**: enter your squad and get transfer ideas with reasons
+  - **FPL rules enforced** (e.g. **max 3 players per club**)
+  - **Hold / Save transfer** suggestion when the best move is marginal
+  - **“Why this player over teammates?”** comparisons (same club + position)
+  - Supports **more suggestions** via `suggestions_limit` (UI uses your Free Transfers as the default)
+- **🛫 European rotation risk**: UCL/UEL/UECL congestion affects scores + displayed badges
+- **📈 Trend reversal signal**: “bounce-back spots” for strong teams underperforming recently
+- **💾 Saved squads**: save/load/edit squads locally so you don’t re-enter weekly
+- **💷 Selling price editing**: use your **selling price** (can differ from current price)
+- **🔎 Player search**: search by player name or team (e.g. `Spurs`, `TOT`) + cheap bench fodder lists
 
 ## 🏗️ Architecture
 
@@ -32,7 +40,7 @@ An AI-powered Fantasy Premier League agent that automatically manages your FPL t
                         └──────────────────┘
 ```
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Local)
 
 ### 1. Clone & Setup
 
@@ -48,23 +56,14 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure
-
-Create a `.env` file:
-
-```env
-FPL_EMAIL=your-fpl-email@example.com
-FPL_PASSWORD=your-fpl-password
-```
-
-### 3. Start Backend
+### 2. Start Backend
 
 ```bash
 cd backend
-python -m uvicorn api.main:app --reload --port 8000
+python -m uvicorn api.main:app --reload --port 8001
 ```
 
-### 4. Start Frontend (Optional)
+### 3. Start Frontend (Dashboard)
 
 ```bash
 cd frontend
@@ -107,42 +106,13 @@ AIFPL/
 ```
 
 ## 🔌 API Endpoints
-
-### Authentication
-- `POST /api/auth/login` - Login to FPL
-- `GET /api/auth/status` - Check auth status
-- `POST /api/auth/logout` - Logout
-
-### Team
-- `GET /api/team/current` - Get current team
-- `GET /api/team/info` - Get team stats
-
-### Predictions
-- `GET /api/predictions` - Get player predictions
-
-### Recommendations
-- `GET /api/recommendations/captain` - Captain pick
-- `GET /api/recommendations/transfers` - Transfer suggestions
-- `GET /api/recommendations/differentials` - Differential picks
-
-### Actions
-- `POST /api/actions/set-lineup` - Set team lineup
-
-## ⚙️ Configuration
-
-### Settings
-
-| Setting | Description |
-|---------|-------------|
-| `auto_execute` | Auto-apply decisions before deadline |
-| `differential_mode` | Prefer low-ownership picks |
-| `notification_email` | Email for notifications |
-
-### Scheduler
-
-The scheduler runs:
-- **Daily at 8 AM** - Update predictions
-- **1 hour before deadline** - Execute decisions (if enabled)
+- `GET /api/gameweek` – current/next gameweek info
+- `GET /api/suggested-squad?method=combined|heuristic|form|fixture`
+- `GET /api/top-picks`
+- `GET /api/differentials`
+- `POST /api/transfer-suggestions` – transfer ideas (supports `suggestions_limit`)
+- `GET /api/players/search?q=&position=&limit=` – search by player or team; includes EU badges
+- `GET /api/team-trends` – debug trend reversal scores
 
 ## 🧠 How It Works
 
@@ -163,17 +133,14 @@ Uses a hybrid approach:
 
 ## 🔒 Security
 
-- Credentials stored locally in `.env`
-- Session cookies encrypted
-- No data sent to external servers
+- Uses **public FPL data** (no login) and runs locally.
+- Saved squads are stored in your browser via **localStorage**.
 
-## 🛣️ Roadmap
+## 🛣️ Next Ideas
 
-- [ ] XGBoost model training on historical data
+- [ ] Better long-term planning (price changes, fixture runs, minutes prediction)
 - [ ] Chip strategy (Wildcard, Bench Boost, Triple Captain)
-- [ ] Mini-league tracking
-- [ ] Mobile app
-- [ ] Discord/Slack notifications
+- [ ] Hosted deployment + user accounts (optional)
 
 ## 🤝 Contributing
 
