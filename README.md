@@ -114,6 +114,29 @@ AIFPL/
 - `GET /api/players/search?q=&position=&limit=` – search by player or team; includes EU badges
 - `GET /api/team-trends` – debug trend reversal scores
 
+## 🚢 Deployment (Option A: GitHub Pages + separate backend)
+
+### Frontend (GitHub Pages → `fplai.nl`)
+- This repo includes a GitHub Actions workflow: `.github/workflows/deploy-pages.yml`
+- It builds the Vite dashboard from `frontend/` and publishes `frontend/dist` to GitHub Pages.
+- The workflow bakes in the production API base via:
+  - `VITE_API_BASE=https://api.fplai.nl`
+- The domain is set via `frontend/public/CNAME` (copied into the build output).
+
+GitHub repo settings you must set once:
+- **Repo → Settings → Pages → Source**: **GitHub Actions**
+- **Custom domain**: `fplai.nl` (then enable **Enforce HTTPS** once available)
+
+### Backend (hosted at `api.fplai.nl`)
+GitHub Pages can’t run Python/FastAPI. Host the backend on a service like:
+- Render / Fly.io / Railway / a VPS (Docker)
+
+Backend must expose the FastAPI app on HTTPS at:
+- `https://api.fplai.nl`
+
+Notes:
+- CORS is currently permissive (`allow_origins=["*"]`), so the Pages frontend can call the API.
+
 ## 🧠 How It Works
 
 ### Points Prediction

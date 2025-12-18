@@ -5,7 +5,9 @@ import {
   ArrowRightLeft, Search, Plus, X, Trash2
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8001'
+// In production (GitHub Pages) set this to your hosted backend, e.g. https://api.fplai.nl
+// In local dev it defaults to http://localhost:8001
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
 // Types
 interface Player {
