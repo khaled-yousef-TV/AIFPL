@@ -52,6 +52,8 @@ interface SquadPlayer {
   id: number
   name: string
   position: string
+  // IMPORTANT: For "My Transfers" this should be the user's SELLING price.
+  // Search results provide current price, which may differ from selling price.
   price: number
   team?: string
 }
@@ -151,7 +153,8 @@ function App() {
       id: player.id,
       name: player.name,
       position: player.position,
-      price: player.price,
+      // Default to CURRENT price; user can edit to their SELLING price.
+      price: typeof player.price === 'number' ? Math.round(player.price * 10) / 10 : 0,
       team: player.team,
     }])
     setSearchQuery('')
@@ -160,6 +163,11 @@ function App() {
 
   const removeFromSquad = (playerId: number) => {
     setMySquad(mySquad.filter(p => p.id !== playerId))
+  }
+
+  const updateSquadPrice = (playerId: number, newPrice: number) => {
+    const price = Number.isFinite(newPrice) ? Math.round(newPrice * 10) / 10 : 0
+    setMySquad(mySquad.map(p => p.id === playerId ? { ...p, price } : p))
   }
 
   const getTransferSuggestions = async () => {
@@ -597,6 +605,11 @@ function App() {
                   </div>
                   
                   <div className="space-y-2 max-h-80 overflow-y-auto">
+                    <div className="text-xs text-gray-500 mb-2">
+                      Prices from search are <span className="text-gray-300">current FPL prices</span>. Your in-game
+                      <span className="text-gray-300"> selling price</span> can be different (e.g. you bought before a price rise).
+                      Edit the £ value below to match your selling price.
+                    </div>
                     {['GK', 'DEF', 'MID', 'FWD'].map(pos => {
                       const posPlayers = mySquad.filter(p => p.position === pos)
                       return (
@@ -612,7 +625,18 @@ function App() {
                                 <span className="text-xs text-gray-500">{player.team}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono text-gray-400">£{player.price}m</span>
+                                <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
+                                  <span>£</span>
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    value={Number.isFinite(player.price) ? player.price : 0}
+                                    onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
+                                    className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
+                                  />
+                                  <span>m</span>
+                                </div>
                                 <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
                                   <X className="w-4 h-4" />
                                 </button>
