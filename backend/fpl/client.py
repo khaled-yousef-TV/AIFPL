@@ -25,7 +25,9 @@ class FPLClient:
     BASE_URL = "https://fantasy.premierleague.com/api"
     
     # Rate limiting
-    MIN_REQUEST_INTERVAL = 1.0  # seconds between requests
+    # Keep this conservative, but fast enough for local iteration.
+    # Public FPL endpoints are fairly tolerant, and we also cache aggressively below.
+    MIN_REQUEST_INTERVAL = 0.25  # seconds between requests
     
     def __init__(self, auth: Optional[FPLAuth] = None):
         """
@@ -42,6 +44,17 @@ class FPLClient:
         self._bootstrap_cache: Optional[Dict[str, Any]] = None
         self._bootstrap_cache_time: Optional[datetime] = None
         self._cache_ttl = timedelta(minutes=30)
+        
+        # Derived model caches (built from bootstrap-static)
+        self._models_cache_time: Optional[datetime] = None
+        self._players_models_cache: Optional[List[Player]] = None
+        self._players_by_id: Dict[int, Player] = {}
+        self._teams_models_cache: Optional[List[Team]] = None
+        self._teams_by_id: Dict[int, Team] = {}
+        self._gameweeks_models_cache: Optional[List[GameWeek]] = None
+        
+        # Fixtures cache (keyed by gameweek id or "all")
+        self._fixtures_cache: Dict[str, Dict[str, Any]] = {}
     
     def _rate_limit(self) -> None:
         """Enforce rate limiting between requests."""
@@ -129,20 +142,48 @@ class FPLClient:
         self._bootstrap_cache = data
         self._bootstrap_cache_time = now
         
+        # Invalidate derived caches whenever bootstrap refreshes.
+        self._models_cache_time = None
+        self._players_models_cache = None
+        self._players_by_id = {}
+        self._teams_models_cache = None
+        self._teams_by_id = {}
+        self._gameweeks_models_cache = None
+        
         return data
+
+    def _ensure_models_cache(self) -> None:
+        """Build Player/Team/GameWeek model caches from bootstrap data if needed."""
+        data = self.get_bootstrap()
+        if self._bootstrap_cache_time is None:
+            return
+
+        if (
+            self._models_cache_time == self._bootstrap_cache_time
+            and self._players_models_cache is not None
+        ):
+            return
+
+        players = [Player(**p) for p in data.get("elements", [])]
+        teams = [Team(**t) for t in data.get("teams", [])]
+        gameweeks = [GameWeek(**gw) for gw in data.get("events", [])]
+
+        self._players_models_cache = players
+        self._players_by_id = {p.id: p for p in players}
+        self._teams_models_cache = teams
+        self._teams_by_id = {t.id: t for t in teams}
+        self._gameweeks_models_cache = gameweeks
+        self._models_cache_time = self._bootstrap_cache_time
     
     def get_players(self) -> List[Player]:
         """Get all players."""
-        data = self.get_bootstrap()
-        return [Player(**p) for p in data.get("elements", [])]
+        self._ensure_models_cache()
+        return self._players_models_cache or []
     
     def get_player(self, player_id: int) -> Optional[Player]:
         """Get a specific player by ID."""
-        players = self.get_players()
-        for player in players:
-            if player.id == player_id:
-                return player
-        return None
+        self._ensure_models_cache()
+        return self._players_by_id.get(player_id)
     
     def get_player_details(self, player_id: int) -> Dict[str, Any]:
         """
@@ -158,21 +199,18 @@ class FPLClient:
     
     def get_teams(self) -> List[Team]:
         """Get all teams."""
-        data = self.get_bootstrap()
-        return [Team(**t) for t in data.get("teams", [])]
+        self._ensure_models_cache()
+        return self._teams_models_cache or []
     
     def get_team(self, team_id: int) -> Optional[Team]:
         """Get a specific team by ID."""
-        teams = self.get_teams()
-        for team in teams:
-            if team.id == team_id:
-                return team
-        return None
+        self._ensure_models_cache()
+        return self._teams_by_id.get(team_id)
     
     def get_gameweeks(self) -> List[GameWeek]:
         """Get all gameweeks."""
-        data = self.get_bootstrap()
-        return [GameWeek(**gw) for gw in data.get("events", [])]
+        self._ensure_models_cache()
+        return self._gameweeks_models_cache or []
     
     def get_current_gameweek(self) -> Optional[GameWeek]:
         """Get the current gameweek."""
@@ -204,12 +242,20 @@ class FPLClient:
         Returns:
             List of fixtures
         """
+        key = str(gameweek) if gameweek else "all"
+        now = datetime.now()
+        cached = self._fixtures_cache.get(key)
+        if cached and (now - cached["time"] < self._cache_ttl):
+            return cached["data"]
+
         endpoint = "fixtures/"
         if gameweek:
             endpoint += f"?event={gameweek}"
-        
+
         data = self._get(endpoint)
-        return [Fixture(**f) for f in data]
+        fixtures = [Fixture(**f) for f in data]
+        self._fixtures_cache[key] = {"time": now, "data": fixtures}
+        return fixtures
     
     # ==================== Authenticated Endpoints ====================
     

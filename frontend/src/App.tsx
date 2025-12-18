@@ -519,7 +519,7 @@ function App() {
                         setSearchQuery(e.target.value)
                         searchPlayers(e.target.value, searchPosition)
                       }}
-                      placeholder="Search player name..."
+                              placeholder="Search player name or team (e.g., Spurs / TOT)..."
                       className="w-full pl-10 pr-4 py-2 bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg focus:border-[#00ff87] focus:outline-none"
                     />
                   </div>

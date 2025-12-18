@@ -9,6 +9,8 @@ import os
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from time import time
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +37,32 @@ fpl_client = FPLClient(auth=None)
 predictor_heuristic = HeuristicPredictor()
 predictor_form = FormPredictor()
 predictor_fixture = FixturePredictor()
+feature_eng = FeatureEngineer(fpl_client)
+
+# Simple in-memory caches to keep the UI snappy (especially in dev with single uvicorn worker)
+_CACHE_TTL_SECONDS = int(os.getenv("FPL_CACHE_TTL_SECONDS", "300"))
+_cache_lock = Lock()
+_cache: Dict[str, Dict[Any, Any]] = {
+    "predictions": {},  # key -> (ts, list)
+    "squad": {},        # key -> (ts, dict)
+}
+
+
+def _cache_get(namespace: str, key: Any):
+    with _cache_lock:
+        item = _cache.get(namespace, {}).get(key)
+        if not item:
+            return None
+        ts, data = item
+        if time() - ts > _CACHE_TTL_SECONDS:
+            _cache[namespace].pop(key, None)
+            return None
+        return data
+
+
+def _cache_set(namespace: str, key: Any, data: Any):
+    with _cache_lock:
+        _cache.setdefault(namespace, {})[key] = (time(), data)
 
 
 # Create FastAPI app
@@ -97,104 +125,113 @@ async def get_gameweek():
 async def get_predictions(position: Optional[int] = None, top_n: int = 100):
     """Get player predictions for next gameweek."""
     try:
-        players = fpl_client.get_players()
-        teams = fpl_client.get_teams()
-        team_names = {t.id: t.short_name for t in teams}
-        
         next_gw = fpl_client.get_next_gameweek()
-        fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
-        gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
-        
-        # Build fixture info
-        fixture_info = {}
-        for f in fixtures:
-            fixture_info[f.team_h] = {
-                "opponent": team_names.get(f.team_a, "???"),
-                "difficulty": f.team_h_difficulty,
-                "is_home": True,
-            }
-            fixture_info[f.team_a] = {
-                "opponent": team_names.get(f.team_h, "???"),
-                "difficulty": f.team_a_difficulty,
-                "is_home": False,
-            }
-        
-        feature_eng = FeatureEngineer(fpl_client)
-        
-        predictions = []
-        total_players = len(players)
-        filtered_minutes = 0
-        filtered_status = 0
-        errors = 0
-        
-        for player in players:
-            if position and player.element_type != position:
-                continue
-            # Allow players with at least 1 minute (includes new signings, rotation players)
-            if player.minutes < 1:
-                filtered_minutes += 1
-                continue
-            # Skip unavailable players (injured/suspended) but allow doubtful
-            if player.status in ["i", "s", "u"]:
-                filtered_status += 1
-                continue
-            
-            try:
-                features = feature_eng.extract_features(player.id, include_history=False)
-                pred = predictor_heuristic.predict_player(features)
-                
-                fix = fixture_info.get(player.team, {})
-                opponent = fix.get("opponent", "???")
-                difficulty = fix.get("difficulty", 3)
-                is_home = fix.get("is_home", False)
-                
-                team_name = team_names.get(player.team, "???")
-                rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
-                
-                reasons = []
-                if rotation.risk_level in ["high", "medium"]:
-                    reasons.append(f"⚠️ {rotation.competition} rotation risk")
-                if float(player.form) >= 5.0:
-                    reasons.append(f"Form: {player.form}")
-                if difficulty <= 2:
-                    reasons.append(f"Easy fixture (FDR {difficulty})")
-                if is_home:
-                    reasons.append("Home advantage")
-                if not reasons:
-                    reasons.append(f"vs {opponent}")
-                
-                predictions.append({
-                    "id": player.id,
-                    "name": player.web_name,
-                    "full_name": player.full_name,
-                    "team": team_name,
-                    "team_id": player.team,
-                    "position": player.position,
-                    "position_id": player.element_type,
-                    "price": player.price,
-                    "predicted_points": round(pred, 2),
-                    "form": float(player.form),
-                    "total_points": player.total_points,
-                    "ownership": float(player.selected_by_percent),
-                    "opponent": opponent,
-                    "difficulty": difficulty,
-                    "is_home": is_home,
-                    "rotation_risk": rotation.risk_level,
-                    "european_comp": rotation.competition,
-                    "reason": " • ".join(reasons[:2]),
-                    "status": player.status,
-                    "news": player.news,
-                })
-            except Exception as e:
-                errors += 1
-                if errors <= 5:  # Log first 5 errors
-                    logger.warning(f"Error predicting {player.web_name}: {e}")
-                continue
-        
-        logger.info(f"Predictions: {total_players} total, {filtered_minutes} filtered (minutes), {filtered_status} filtered (status), {errors} errors, {len(predictions)} successful")
-        
-        predictions.sort(key=lambda x: x["predicted_points"], reverse=True)
-        return {"predictions": predictions[:top_n]}
+        gw_id = next_gw.id if next_gw else 0
+
+        cache_key = ("heuristic", gw_id)
+        all_predictions = _cache_get("predictions", cache_key)
+
+        if all_predictions is None:
+            players = fpl_client.get_players()
+            teams = fpl_client.get_teams()
+            team_names = {t.id: t.short_name for t in teams}
+
+            fixtures = fpl_client.get_fixtures(gameweek=gw_id if gw_id else None)
+            gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+
+            fixture_info = {}
+            for f in fixtures:
+                fixture_info[f.team_h] = {
+                    "opponent": team_names.get(f.team_a, "???"),
+                    "difficulty": f.team_h_difficulty,
+                    "is_home": True,
+                }
+                fixture_info[f.team_a] = {
+                    "opponent": team_names.get(f.team_h, "???"),
+                    "difficulty": f.team_a_difficulty,
+                    "is_home": False,
+                }
+
+            predictions = []
+            total_players = len(players)
+            filtered_minutes = 0
+            filtered_status = 0
+            errors = 0
+
+            for player in players:
+                if player.minutes < 1:
+                    filtered_minutes += 1
+                    continue
+                if player.status in ["i", "s", "u"]:
+                    filtered_status += 1
+                    continue
+
+                try:
+                    features = feature_eng.extract_features(player.id, include_history=False)
+                    pred = predictor_heuristic.predict_player(features)
+
+                    fix = fixture_info.get(player.team, {})
+                    opponent = fix.get("opponent", "???")
+                    difficulty = fix.get("difficulty", 3)
+                    is_home = fix.get("is_home", False)
+
+                    team_name = team_names.get(player.team, "???")
+                    rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
+
+                    reasons = []
+                    if rotation.risk_level in ["high", "medium"]:
+                        reasons.append(f"⚠️ {rotation.competition} rotation risk")
+                    if float(player.form) >= 5.0:
+                        reasons.append(f"Form: {player.form}")
+                    if difficulty <= 2:
+                        reasons.append(f"Easy fixture (FDR {difficulty})")
+                    if is_home:
+                        reasons.append("Home advantage")
+                    if not reasons:
+                        reasons.append(f"vs {opponent}")
+
+                    predictions.append({
+                        "id": player.id,
+                        "name": player.web_name,
+                        "full_name": player.full_name,
+                        "team": team_name,
+                        "team_id": player.team,
+                        "position": player.position,
+                        "position_id": player.element_type,
+                        "price": player.price,
+                        "predicted_points": round(pred, 2),
+                        "form": float(player.form),
+                        "total_points": player.total_points,
+                        "ownership": float(player.selected_by_percent),
+                        "opponent": opponent,
+                        "difficulty": difficulty,
+                        "is_home": is_home,
+                        "rotation_risk": rotation.risk_level,
+                        "european_comp": rotation.competition,
+                        "reason": " • ".join(reasons[:2]),
+                        "status": player.status,
+                        "news": player.news,
+                    })
+                except Exception as e:
+                    errors += 1
+                    if errors <= 5:
+                        logger.warning(f"Error predicting {player.web_name}: {e}")
+                    continue
+
+            logger.info(
+                f"Predictions: {total_players} total, {filtered_minutes} filtered (minutes), "
+                f"{filtered_status} filtered (status), {errors} errors, {len(predictions)} successful"
+            )
+
+            predictions.sort(key=lambda x: x["predicted_points"], reverse=True)
+            all_predictions = predictions
+            _cache_set("predictions", cache_key, all_predictions)
+
+        filtered = all_predictions
+        if position is not None:
+            filtered = [p for p in filtered if p.get("position_id") == position]
+
+        return {"predictions": filtered[:top_n]}
         
     except Exception as e:
         logger.error(f"Prediction error: {e}")
@@ -209,12 +246,18 @@ async def _build_squad_with_predictor(
     budget: float = 100.0
 ) -> Dict[str, Any]:
     """Build squad using a specific predictor method."""
+    next_gw = fpl_client.get_next_gameweek()
+    gw_id = next_gw.id if next_gw else 0
+    cache_key = (method_name, gw_id, round(budget, 1))
+    cached = _cache_get("squad", cache_key)
+    if cached is not None:
+        return cached
+
     players = fpl_client.get_players()
     teams = fpl_client.get_teams()
     team_names = {t.id: t.short_name for t in teams}
-    
-    next_gw = fpl_client.get_next_gameweek()
-    fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
+
+    fixtures = fpl_client.get_fixtures(gameweek=gw_id if gw_id else None)
     gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
     
     fixture_info = {}
@@ -229,8 +272,6 @@ async def _build_squad_with_predictor(
             "difficulty": f.team_a_difficulty,
             "is_home": False,
         }
-    
-    feature_eng = FeatureEngineer(fpl_client)
     
     player_predictions = []
     for player in players:
@@ -305,7 +346,7 @@ async def _build_squad_with_predictor(
     total_cost = sum(p["price"] for p in squad)
     total_predicted = sum(p["predicted"] for p in starting_xi) + captain["predicted"]
     
-    return {
+    result = {
         "method": method_name,
         "gameweek": next_gw.id if next_gw else None,
         "formation": formation,
@@ -320,6 +361,9 @@ async def _build_squad_with_predictor(
         "remaining_budget": round(budget - total_cost, 1),
         "predicted_points": round(total_predicted, 1),
     }
+
+    _cache_set("squad", cache_key, result)
+    return result
 
 
 # ==================== Suggested Squad ====================
@@ -817,14 +861,15 @@ async def get_transfer_suggestions(request: TransferRequest):
 # ==================== Search Players ====================
 
 @app.get("/api/players/search")
-async def search_players(q: str = "", position: Optional[str] = None):
-    """Search players by name for squad input."""
+async def search_players(q: str = "", position: Optional[str] = None, limit: int = 50):
+    """Search players by name or team for squad input."""
     try:
         players = fpl_client.get_players()
         teams = fpl_client.get_teams()
         team_names = {t.id: t.short_name for t in teams}
 
         q_lower = (q or "").strip().lower()
+        limit = max(1, min(100, int(limit or 50)))
 
         # Filter by position first
         filtered = players
@@ -834,12 +879,43 @@ async def search_players(q: str = "", position: Optional[str] = None):
         # If q is empty, return cheapest players for that position (bench fodder)
         if not q_lower:
             filtered.sort(key=lambda p: (p.price, -p.minutes))
-            filtered = filtered[:20]
+            filtered = filtered[: min(20, limit)]
         else:
-            filtered = [
-                p for p in filtered
-                if (q_lower in p.web_name.lower() or q_lower in p.full_name.lower())
-            ][:20]
+            # Allow searching by team name/short code too (e.g., "spurs", "tottenham", "TOT")
+            team_match_ids = set()
+            for t in teams:
+                t_name = (t.name or "").lower()
+                t_short = (t.short_name or "").lower()
+                if q_lower in t_name or q_lower == t_short or q_lower in t_short:
+                    team_match_ids.add(t.id)
+
+            # Small alias support (common fan names)
+            if q_lower in {"spurs", "tottenham", "tot"}:
+                for t in teams:
+                    if (t.short_name or "").lower() == "tot" or "spurs" in (t.name or "").lower():
+                        team_match_ids.add(t.id)
+
+            ranked = []
+            for p in filtered:
+                web = p.web_name.lower()
+                full = p.full_name.lower()
+                name_hit = (q_lower in web) or (q_lower in full)
+                team_hit = p.team in team_match_ids
+                if not (name_hit or team_hit):
+                    continue
+
+                rank = 0
+                if web == q_lower or full == q_lower:
+                    rank += 3
+                if name_hit:
+                    rank += 2
+                if team_hit:
+                    rank += 1
+
+                ranked.append((-rank, -p.minutes, p.price, p.web_name, p))
+
+            ranked.sort()
+            filtered = [x[-1] for x in ranked][:limit]
 
         results = [{
             "id": p.id,
