@@ -31,6 +31,7 @@ from fpl.client import FPLClient
 from ml.features import FeatureEngineer
 from ml.predictor import HeuristicPredictor, FormPredictor, FixturePredictor
 from data.european_teams import assess_rotation_risk, get_european_competition
+from data.trends import compute_team_trends
 
 # Initialize components (no auth needed for public data)
 fpl_client = FPLClient(auth=None)
@@ -273,6 +274,13 @@ async def _build_squad_with_predictor(
             "is_home": False,
         }
     
+    # Team trend/reversal signals (computed from all finished fixtures so far)
+    try:
+        all_fixtures = fpl_client.get_fixtures(gameweek=None)
+        team_trends = compute_team_trends(teams, all_fixtures, window=6, previous_window=6)
+    except Exception:
+        team_trends = {}
+
     player_predictions = []
     for player in players:
         # Allow players with at least 1 minute (includes new signings, rotation players)
@@ -293,6 +301,8 @@ async def _build_squad_with_predictor(
             
             team_name = team_names.get(player.team, "???")
             rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
+            trend = team_trends.get(player.team)
+            reversal = trend.reversal_score if trend else 0.0
             
             reasons = []
             if rotation.risk_level == "high":
@@ -310,6 +320,8 @@ async def _build_squad_with_predictor(
                 reasons.append(f"Differential ({player.selected_by_percent}% owned)")
             if player.total_points >= 70:
                 reasons.append(f"Season performer ({player.total_points} pts)")
+            if reversal >= 1.2:
+                reasons.append(f"Bounce-back spot ({team_name})")
             
             if not reasons:
                 reasons.append(f"vs {opponent} ({'H' if is_home else 'A'})")
@@ -332,6 +344,7 @@ async def _build_squad_with_predictor(
                 "rotation_risk": rotation.risk_level,
                 "european_comp": rotation.competition,
                 "rotation_factor": rotation.risk_factor,
+                "team_reversal": reversal,
                 "reason": " • ".join(reasons[:2]),
             })
         except:
@@ -459,6 +472,7 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
         price = max(p["price"], 4.0)
         rotation_risk = p.get("rotation_risk", "none")
         rotation_factor = p.get("rotation_factor", 0)
+        team_reversal = float(p.get("team_reversal", 0.0) or 0.0)
         
         fixture_bonus = (4 - difficulty) * 1.5
         if difficulty == 2:
@@ -478,7 +492,11 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
         if rotation_factor > 0.3 and difficulty <= 2:
             rotation_penalty *= 1.5
         
-        score = pred + fixture_bonus + form_bonus + home_bonus + rotation_penalty
+        # Team reversal bonus: strong teams that recently underperformed get a small uplift.
+        # This helps "get ahead of templates" by catching trend reversals early.
+        reversal_bonus = max(0.0, min(1.2, team_reversal)) * 0.6
+
+        score = pred + fixture_bonus + form_bonus + home_bonus + rotation_penalty + reversal_bonus
         value_factor = pred / price
         
         return score + value_factor * 0.3
@@ -585,6 +603,39 @@ async def get_differentials(max_ownership: float = 10.0, top_n: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== Team Trends (Debug/QA) ====================
+
+@app.get("/api/team-trends")
+async def get_team_trends(window: int = 6, previous_window: int = 6):
+    """Inspect team trend/reversal signals used by the suggester."""
+    try:
+        teams = fpl_client.get_teams()
+        fixtures = fpl_client.get_fixtures(gameweek=None)
+        trends = compute_team_trends(teams, fixtures, window=window, previous_window=previous_window)
+
+        # Sort by reversal_score desc
+        rows = sorted(trends.values(), key=lambda t: t.reversal_score, reverse=True)
+        return {
+            "window": window,
+            "previous_window": previous_window,
+            "teams": [
+                {
+                    "team": t.short_name,
+                    "strength": t.strength,
+                    "played": t.played,
+                    "season_ppm": t.season_ppm,
+                    "recent_ppm": t.recent_ppm,
+                    "momentum": t.momentum,
+                    "reversal_score": t.reversal_score,
+                }
+                for t in rows
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Team trends error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== Transfer Suggestions ====================
 
 class SquadPlayer(BaseModel):
@@ -650,6 +701,13 @@ async def get_transfer_suggestions(request: TransferRequest):
         avg_fixture_difficulty = {}
         for team_id, diffs in long_term_fixtures.items():
             avg_fixture_difficulty[team_id] = sum(diffs) / len(diffs) if diffs else 3.0
+
+        # Team trend/reversal signals (for "trend reversal" style thinking)
+        try:
+            all_fixtures = fpl_client.get_fixtures(gameweek=None)
+            team_trends = compute_team_trends(teams, all_fixtures, window=6, previous_window=6)
+        except Exception:
+            team_trends = {}
         
         # Get squad player IDs
         squad_ids = {p.id for p in request.squad}
@@ -695,6 +753,8 @@ async def get_transfer_suggestions(request: TransferRequest):
             team_name = team_names.get(player.team, "???")
             fix = fixture_info.get(player.team, {})
             rotation = assess_rotation_risk(team_name, gw_deadline, fix.get("difficulty", 3))
+            trend = team_trends.get(player.team)
+            reversal = trend.reversal_score if trend else 0.0
             
             try:
                 features = feature_eng.extract_features(player.id, include_history=False)
@@ -719,6 +779,10 @@ async def get_transfer_suggestions(request: TransferRequest):
                 keep_score -= 2.0
             elif rotation.risk_level == "medium":
                 keep_score -= 1.0
+
+            # Small boost to "keep" if the team is in a bounce-back spot (avoid rage-selling good teams at the bottom)
+            if reversal >= 1.2:
+                keep_score += 0.4
             
             # Penalize poor form
             if float(player.form) < 3.0:
@@ -796,6 +860,8 @@ async def get_transfer_suggestions(request: TransferRequest):
                 fix = fixture_info.get(player.team, {})
                 rotation = assess_rotation_risk(team_name, gw_deadline, fix.get("difficulty", 3))
                 avg_diff = avg_fixture_difficulty.get(player.team, 3.0)
+                trend = team_trends.get(player.team)
+                reversal = trend.reversal_score if trend else 0.0
                 
                 try:
                     features = feature_eng.extract_features(player.id, include_history=False)
@@ -831,6 +897,10 @@ async def get_transfer_suggestions(request: TransferRequest):
                 # Bonus for differentials
                 if float(player.selected_by_percent) < 10:
                     buy_score += 0.5
+
+                # Bounce-back bonus
+                if reversal >= 1.2:
+                    buy_score += 0.6
                 
                 replacements.append({
                     "id": player.id,
