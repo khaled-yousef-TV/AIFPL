@@ -76,8 +76,14 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    # Render backend will be called by GitHub Pages frontend at https://fplai.nl
+    # Keep dev localhost allowed too.
+    allow_origins=[
+        "https://fplai.nl",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
