@@ -909,6 +909,7 @@ async def get_transfer_suggestions(request: TransferRequest):
                     "team_id": player.team,
                     "position": pos,
                     "price": player.price,
+                    "minutes": player.minutes,
                     "predicted": round(pred, 2),
                     "form": float(player.form),
                     "buy_score": round(buy_score, 2),
@@ -926,6 +927,86 @@ async def get_transfer_suggestions(request: TransferRequest):
             if replacements:
                 best_replacement = replacements[0]
                 points_gain = best_replacement["predicted"] - out_player["predicted"]
+
+                # If we recommend a player from a club, explain why that player beats same-club
+                # alternatives in the same position (e.g., "Dias over Gvardiol").
+                teammate_comparison = None
+                try:
+                    risk_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+                    same_team = [
+                        r for r in replacements
+                        if r.get("team_id") == best_replacement.get("team_id")
+                        and r.get("id") != best_replacement.get("id")
+                    ]
+                    if same_team:
+                        same_team.sort(key=lambda x: x.get("buy_score", 0), reverse=True)
+                        alternatives = same_team[:3]
+                        top_alt = alternatives[0]
+
+                        why_bits = []
+                        if (best_replacement.get("predicted", 0) - top_alt.get("predicted", 0)) >= 0.3:
+                            why_bits.append(
+                                f"higher predicted points ({best_replacement['predicted']} vs {top_alt['predicted']})"
+                            )
+                        if (best_replacement.get("form", 0) - top_alt.get("form", 0)) >= 0.6:
+                            why_bits.append(
+                                f"better form ({best_replacement['form']} vs {top_alt['form']})"
+                            )
+                        if (best_replacement.get("price", 0) - top_alt.get("price", 0)) <= -0.2:
+                            why_bits.append(
+                                f"cheaper (£{best_replacement['price']}m vs £{top_alt['price']}m)"
+                            )
+                        if (best_replacement.get("minutes", 0) - top_alt.get("minutes", 0)) >= 180:
+                            why_bits.append("more nailed minutes")
+
+                        br = risk_rank.get(best_replacement.get("rotation_risk", "none"), 99)
+                        ar = risk_rank.get(top_alt.get("rotation_risk", "none"), 99)
+                        if br < ar:
+                            why_bits.append("lower rotation risk")
+
+                        if not why_bits:
+                            why_bits.append("best overall score among same-team options")
+
+                        why = (
+                            f"Picked {best_replacement['name']} over "
+                            f"{top_alt['name']} (same {best_replacement['team']} {pos}) because "
+                            + ", ".join(why_bits)
+                            + "."
+                        )
+
+                        teammate_comparison = {
+                            "team": best_replacement.get("team"),
+                            "team_id": best_replacement.get("team_id"),
+                            "position": pos,
+                            "why": why,
+                            "chosen": {
+                                "id": best_replacement.get("id"),
+                                "name": best_replacement.get("name"),
+                                "price": best_replacement.get("price"),
+                                "predicted": best_replacement.get("predicted"),
+                                "form": best_replacement.get("form"),
+                                "minutes": best_replacement.get("minutes"),
+                                "rotation_risk": best_replacement.get("rotation_risk"),
+                                "european_comp": best_replacement.get("european_comp"),
+                                "buy_score": best_replacement.get("buy_score"),
+                            },
+                            "alternatives": [
+                                {
+                                    "id": a.get("id"),
+                                    "name": a.get("name"),
+                                    "price": a.get("price"),
+                                    "predicted": a.get("predicted"),
+                                    "form": a.get("form"),
+                                    "minutes": a.get("minutes"),
+                                    "rotation_risk": a.get("rotation_risk"),
+                                    "european_comp": a.get("european_comp"),
+                                    "buy_score": a.get("buy_score"),
+                                }
+                                for a in alternatives
+                            ],
+                        }
+                except Exception:
+                    teammate_comparison = None
                 
                 # Generate reason
                 reasons = []
@@ -950,6 +1031,7 @@ async def get_transfer_suggestions(request: TransferRequest):
                     "priority_score": round(best_replacement["buy_score"] - out_player["keep_score"], 2),
                     "reason": reasons[0],
                     "all_reasons": reasons,
+                    "teammate_comparison": teammate_comparison,
                 })
         
         # Sort by priority score and take top 3

@@ -68,6 +68,13 @@ interface TransferSuggestion {
   priority_score: number
   reason: string
   all_reasons: string[]
+  teammate_comparison?: {
+    team?: string
+    position?: string
+    why?: string
+    chosen?: any
+    alternatives?: any[]
+  }
 }
 
 function App() {
@@ -841,6 +848,16 @@ function App() {
                         {suggestion.all_reasons.length > 1 && (
                           <div className="text-xs text-gray-500 mt-1">
                             Also: {suggestion.all_reasons.slice(1).join(' • ')}
+                          </div>
+                        )}
+                        {suggestion.teammate_comparison?.why && (
+                          <div className="mt-2 p-2 bg-[#1a1a2e]/40 border border-[#2a2a4a] rounded">
+                            <div className="text-[11px] text-gray-400 mb-1">
+                              Why {suggestion.in.name} over other {suggestion.teammate_comparison.team} {suggestion.teammate_comparison.position} options?
+                            </div>
+                            <div className="text-xs text-gray-300">
+                              {suggestion.teammate_comparison.why}
+                            </div>
                           </div>
                         )}
                         <div className="flex gap-4 mt-2 text-xs text-gray-400">
