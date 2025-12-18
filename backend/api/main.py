@@ -823,32 +823,35 @@ async def search_players(q: str = "", position: Optional[str] = None):
         players = fpl_client.get_players()
         teams = fpl_client.get_teams()
         team_names = {t.id: t.short_name for t in teams}
-        
-        results = []
-        q_lower = q.lower()
-        
-        for player in players:
-            if q_lower and q_lower not in player.web_name.lower() and q_lower not in player.full_name.lower():
-                continue
-            
-            if position and player.position != position:
-                continue
-            
-            if player.minutes < 1:  # Skip players with 0 minutes
-                continue
-            
-            results.append({
-                "id": player.id,
-                "name": player.web_name,
-                "full_name": player.full_name,
-                "team": team_names.get(player.team, "???"),
-                "position": player.position,
-                "price": player.price,
-            })
-            
-            if len(results) >= 20:
-                break
-        
+
+        q_lower = (q or "").strip().lower()
+
+        # Filter by position first
+        filtered = players
+        if position:
+            filtered = [p for p in filtered if p.position == position]
+
+        # If q is empty, return cheapest players for that position (bench fodder)
+        if not q_lower:
+            filtered.sort(key=lambda p: (p.price, -p.minutes))
+            filtered = filtered[:20]
+        else:
+            filtered = [
+                p for p in filtered
+                if (q_lower in p.web_name.lower() or q_lower in p.full_name.lower())
+            ][:20]
+
+        results = [{
+            "id": p.id,
+            "name": p.web_name,
+            "full_name": p.full_name,
+            "team": team_names.get(p.team, "???"),
+            "position": p.position,
+            "price": p.price,
+            "minutes": p.minutes,
+            "status": p.status,
+        } for p in filtered]
+
         return {"players": results}
         
     except Exception as e:
