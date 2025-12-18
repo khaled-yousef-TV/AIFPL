@@ -1036,7 +1036,57 @@ async def get_transfer_suggestions(request: TransferRequest):
         
         # Sort by priority score and take top 3
         transfer_suggestions.sort(key=lambda x: x["priority_score"], reverse=True)
+
+        # Consider "Hold / Save transfer" as a first-class suggestion when squad looks healthy
+        # and the best move is only a marginal improvement.
+        hold_suggestion = None
+        if squad_analysis:
+            best_move = transfer_suggestions[0] if transfer_suggestions else None
+            hit_cost = 0 if request.free_transfers and request.free_transfers > 0 else 4
+            best_net_gain = None
+            if best_move is not None:
+                best_net_gain = round(float(best_move.get("points_gain", 0)) - hit_cost, 2)
+
+            # "Squad health": avoid recommending holds when there are clear fires.
+            worst = squad_analysis[0]  # lowest keep_score
+            has_fire = (
+                worst.get("status") in ["i", "s", "u"]
+                or (worst.get("status") == "d" and worst.get("keep_score", 0) < 3.5)
+                or worst.get("fixture_difficulty", 3) >= 5
+            )
+
+            # If the best move is small, and we don't have obvious fires, recommend holding.
+            # Thresholds are intentionally conservative to reduce "point-chasing noise".
+            should_hold = (best_move is None) or (
+                (best_net_gain is not None and best_net_gain < 1.0 and not has_fire)
+            )
+            # Also: when it would require a -4 hit, require a stronger reason to move.
+            if not should_hold and best_move is not None and hit_cost == 4 and best_net_gain is not None:
+                if best_net_gain < 2.5 and not has_fire:
+                    should_hold = True
+
+            if should_hold:
+                why_bits = []
+                if best_move is None:
+                    why_bits.append("No clear upgrades found within budget/team constraints.")
+                else:
+                    why_bits.append(f"Best move is only ~{best_net_gain:+.2f} points after considering a -{hit_cost} hit." if hit_cost else f"Best move is only ~{best_net_gain:+.2f} points.")
+                why_bits.append("Squad looks healthy (no major injury/suspension fires).")
+                why_bits.append("Saving a transfer keeps flexibility for injuries/price moves.")
+
+                hold_suggestion = {
+                    "type": "hold",
+                    "hit_cost": hit_cost,
+                    "best_net_gain": best_net_gain,
+                    "reason": "Hold / Save transfer",
+                    "why": why_bits,
+                    "best_alternative": best_move,
+                }
+
         top_suggestions = transfer_suggestions[:3]
+        if hold_suggestion is not None:
+            # Put hold first, then include up to 3 transfer options after it
+            top_suggestions = [hold_suggestion] + top_suggestions[:3]
         
         return {
             "squad_analysis": squad_analysis,

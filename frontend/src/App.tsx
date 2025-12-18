@@ -75,6 +75,11 @@ interface TransferSuggestion {
     chosen?: any
     alternatives?: any[]
   }
+  type?: 'hold' | 'transfer'
+  why?: string[]
+  best_net_gain?: number | null
+  hit_cost?: number
+  best_alternative?: any
 }
 
 function App() {
@@ -801,6 +806,43 @@ function App() {
                 
                 <div className="space-y-4">
                   {transferSuggestions.map((suggestion, i) => (
+                    (suggestion as any).type === 'hold' ? (
+                      <div key={i} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-lg font-bold text-[#00ff87]">✅ Hold</span>
+                          <span className="px-2 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-300">
+                            Save FT
+                          </span>
+                        </div>
+
+                        <div className="text-sm text-gray-200 mb-2">
+                          {(suggestion as any).reason || 'Hold / Save transfer'}
+                        </div>
+                        {Array.isArray((suggestion as any).why) && (suggestion as any).why.length > 0 && (
+                          <ul className="text-xs text-gray-400 space-y-1 list-disc pl-4">
+                            {(suggestion as any).why.slice(0, 4).map((w: string, idx: number) => (
+                              <li key={idx}>{w}</li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {(suggestion as any).best_alternative && (
+                          <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                            <div className="text-[11px] text-gray-400 mb-2">Best alternative if you still want to move:</div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-red-400 font-semibold">OUT</span>
+                              <span className="text-gray-200">{(suggestion as any).best_alternative.out?.name}</span>
+                              <span className="text-gray-500">→</span>
+                              <span className="text-[#00ff87] font-semibold">IN</span>
+                              <span className="text-gray-200">{(suggestion as any).best_alternative.in?.name}</span>
+                              <span className="text-gray-500 text-xs">
+                                ({((suggestion as any).best_alternative.points_gain ?? 0)} pts, hit {(suggestion as any).hit_cost ?? 0})
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
                     <div key={i} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-lg font-bold text-[#00ff87]">#{i + 1}</span>
@@ -866,6 +908,7 @@ function App() {
                         </div>
                       </div>
                     </div>
+                    )
                   ))}
                 </div>
               </div>
