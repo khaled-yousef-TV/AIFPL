@@ -808,6 +808,7 @@ async def get_transfer_suggestions(request: TransferRequest):
                 "fixture_difficulty": fix.get("difficulty", 3),
                 "avg_fixture_5gw": round(avg_diff, 2),
                 "rotation_risk": rotation.risk_level,
+                "european_comp": rotation.competition,
                 "status": player.status,
             })
         

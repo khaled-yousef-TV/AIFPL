@@ -857,7 +857,18 @@ function App() {
                         {/* Out */}
                         <div className="flex-1 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
                           <div className="text-xs text-red-400 mb-1">Transfer Out</div>
-                          <div className="font-medium">{suggestion.out.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{suggestion.out.name}</span>
+                            {suggestion.out.european_comp && (
+                              <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                suggestion.out.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                suggestion.out.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                'bg-blue-500/20 text-blue-400'
+                              }`}>
+                                {suggestion.out.european_comp}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-sm text-gray-400">{suggestion.out.team} • £{suggestion.out.price}m</div>
                           <div className="text-xs text-gray-500 mt-1">
                             vs {suggestion.out.fixture} (FDR {suggestion.out.fixture_difficulty}) • Form: {suggestion.out.form}
