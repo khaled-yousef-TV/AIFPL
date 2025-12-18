@@ -80,6 +80,7 @@ app.add_middleware(
     # Keep dev localhost allowed too.
     allow_origins=[
         "https://fplai.nl",
+        "https://www.fplai.nl",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
