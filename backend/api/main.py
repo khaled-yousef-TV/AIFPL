@@ -651,12 +651,13 @@ class TransferRequest(BaseModel):
     squad: List[SquadPlayer]
     bank: float = 0.0  # Money in the bank
     free_transfers: int = 1
+    suggestions_limit: int = 3  # How many transfer moves to return (hold suggestion may be added on top)
 
 
 @app.post("/api/transfer-suggestions")
 async def get_transfer_suggestions(request: TransferRequest):
     """
-    Get top 3 transfer suggestions based on user's current squad.
+    Get transfer suggestions based on user's current squad.
     
     Considers:
     - Next GW predicted points
@@ -814,10 +815,14 @@ async def get_transfer_suggestions(request: TransferRequest):
         
         # Sort by keep_score - worst players first (transfer out candidates)
         squad_analysis.sort(key=lambda x: x["keep_score"])
-        transfer_out_candidates = squad_analysis[:5]  # Top 5 worst
+        transfer_out_candidates = squad_analysis[: min(10, len(squad_analysis))]  # Top 10 worst
         
-        # Find best replacements for each position
+        # Find replacements for each position
         transfer_suggestions = []
+
+        suggestions_limit = max(1, min(20, int(getattr(request, "suggestions_limit", 3) or 3)))
+        # How many replacement options per OUT candidate to consider as distinct suggestions
+        per_out_replacements = 3
         
         for out_player in transfer_out_candidates:
             pos = out_player["position"]
@@ -924,73 +929,70 @@ async def get_transfer_suggestions(request: TransferRequest):
             
             # Sort by buy_score
             replacements.sort(key=lambda x: x["buy_score"], reverse=True)
-            
+
             if replacements:
-                best_replacement = replacements[0]
-                points_gain = best_replacement["predicted"] - out_player["predicted"]
+                # Create multiple suggestions per OUT candidate for variety
+                for chosen in replacements[: min(per_out_replacements, len(replacements))]:
+                    points_gain = chosen["predicted"] - out_player["predicted"]
 
-                # If we recommend a player from a club, explain why that player beats same-club
-                # alternatives in the same position (e.g., "Dias over Gvardiol").
-                teammate_comparison = None
-                try:
-                    risk_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
-                    same_team = [
-                        r for r in replacements
-                        if r.get("team_id") == best_replacement.get("team_id")
-                        and r.get("id") != best_replacement.get("id")
-                    ]
-                    if same_team:
+                    # Compare to ALL viable same-team same-position options (within constraints)
+                    teammate_comparison = None
+                    try:
+                        risk_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+                        same_team = [
+                            r for r in replacements
+                            if r.get("team_id") == chosen.get("team_id") and r.get("id") != chosen.get("id")
+                        ]
                         same_team.sort(key=lambda x: x.get("buy_score", 0), reverse=True)
-                        alternatives = same_team[:3]
-                        top_alt = alternatives[0]
 
-                        why_bits = []
-                        if (best_replacement.get("predicted", 0) - top_alt.get("predicted", 0)) >= 0.3:
-                            why_bits.append(
-                                f"higher predicted points ({best_replacement['predicted']} vs {top_alt['predicted']})"
-                            )
-                        if (best_replacement.get("form", 0) - top_alt.get("form", 0)) >= 0.6:
-                            why_bits.append(
-                                f"better form ({best_replacement['form']} vs {top_alt['form']})"
-                            )
-                        if (best_replacement.get("price", 0) - top_alt.get("price", 0)) <= -0.2:
-                            why_bits.append(
-                                f"cheaper (£{best_replacement['price']}m vs £{top_alt['price']}m)"
-                            )
-                        if (best_replacement.get("minutes", 0) - top_alt.get("minutes", 0)) >= 180:
-                            why_bits.append("more nailed minutes")
+                        # Rank within same team options (chosen + same_team)
+                        combined = [chosen] + same_team
+                        combined.sort(key=lambda x: x.get("buy_score", 0), reverse=True)
+                        rank = next((i for i, x in enumerate(combined) if x.get("id") == chosen.get("id")), 0) + 1
+                        total = len(combined)
 
-                        br = risk_rank.get(best_replacement.get("rotation_risk", "none"), 99)
-                        ar = risk_rank.get(top_alt.get("rotation_risk", "none"), 99)
-                        if br < ar:
-                            why_bits.append("lower rotation risk")
+                        top_alts = same_team[:12]  # send a meaningful list, avoid huge payloads
+                        alt_names = [a.get("name") for a in top_alts if a.get("name")]
 
-                        if not why_bits:
-                            why_bits.append("best overall score among same-team options")
+                        why_bits = [f"ranked #{rank} among {total} viable {chosen.get('team')} {pos} options"]
+                        if same_team:
+                            why_bits.append("ahead of: " + ", ".join(alt_names[:6]) + ("…" if len(alt_names) > 6 else ""))
 
-                        why = (
-                            f"Picked {best_replacement['name']} over "
-                            f"{top_alt['name']} (same {best_replacement['team']} {pos}) because "
-                            + ", ".join(why_bits)
-                            + "."
-                        )
+                        # Add concrete differentiators vs best alternative (if exists)
+                        if same_team:
+                            top_alt = same_team[0]
+                            if (chosen.get("predicted", 0) - top_alt.get("predicted", 0)) >= 0.3:
+                                why_bits.append(f"higher predicted ({chosen['predicted']} vs {top_alt['predicted']})")
+                            if (chosen.get("form", 0) - top_alt.get("form", 0)) >= 0.6:
+                                why_bits.append(f"better form ({chosen['form']} vs {top_alt['form']})")
+                            if (chosen.get("price", 0) - top_alt.get("price", 0)) <= -0.2:
+                                why_bits.append(f"cheaper (£{chosen['price']}m vs £{top_alt['price']}m)")
+                            if (chosen.get("minutes", 0) - top_alt.get("minutes", 0)) >= 180:
+                                why_bits.append("more nailed minutes")
+                            cr = risk_rank.get(chosen.get("rotation_risk", "none"), 99)
+                            ar = risk_rank.get(top_alt.get("rotation_risk", "none"), 99)
+                            if cr < ar:
+                                why_bits.append("lower rotation risk")
 
                         teammate_comparison = {
-                            "team": best_replacement.get("team"),
-                            "team_id": best_replacement.get("team_id"),
+                            "team": chosen.get("team"),
+                            "team_id": chosen.get("team_id"),
                             "position": pos,
-                            "why": why,
+                            "rank": rank,
+                            "total": total,
+                            "why": "; ".join(why_bits) + ".",
                             "chosen": {
-                                "id": best_replacement.get("id"),
-                                "name": best_replacement.get("name"),
-                                "price": best_replacement.get("price"),
-                                "predicted": best_replacement.get("predicted"),
-                                "form": best_replacement.get("form"),
-                                "minutes": best_replacement.get("minutes"),
-                                "rotation_risk": best_replacement.get("rotation_risk"),
-                                "european_comp": best_replacement.get("european_comp"),
-                                "buy_score": best_replacement.get("buy_score"),
+                                "id": chosen.get("id"),
+                                "name": chosen.get("name"),
+                                "price": chosen.get("price"),
+                                "predicted": chosen.get("predicted"),
+                                "form": chosen.get("form"),
+                                "minutes": chosen.get("minutes"),
+                                "rotation_risk": chosen.get("rotation_risk"),
+                                "european_comp": chosen.get("european_comp"),
+                                "buy_score": chosen.get("buy_score"),
                             },
+                            "alternatives_total": max(0, total - 1),
                             "alternatives": [
                                 {
                                     "id": a.get("id"),
@@ -1003,37 +1005,37 @@ async def get_transfer_suggestions(request: TransferRequest):
                                     "european_comp": a.get("european_comp"),
                                     "buy_score": a.get("buy_score"),
                                 }
-                                for a in alternatives
+                                for a in top_alts
                             ],
                         }
-                except Exception:
-                    teammate_comparison = None
-                
-                # Generate reason
-                reasons = []
-                if out_player["fixture_difficulty"] >= 4 and best_replacement["fixture_difficulty"] <= 2:
-                    reasons.append(f"Fixture swing: {out_player['fixture']} (FDR {out_player['fixture_difficulty']}) → {best_replacement['fixture']} (FDR {best_replacement['fixture_difficulty']})")
-                if out_player["avg_fixture_5gw"] > best_replacement["avg_fixture_5gw"] + 0.5:
-                    reasons.append(f"Better long-term fixtures ({best_replacement['avg_fixture_5gw']} vs {out_player['avg_fixture_5gw']} avg FDR)")
-                if best_replacement["form"] > out_player["form"] + 2:
-                    reasons.append(f"Form upgrade: {out_player['form']} → {best_replacement['form']}")
-                if out_player["status"] != "a":
-                    reasons.append(f"{out_player['name']} is {out_player['status']} (doubtful/injured)")
-                if out_player["rotation_risk"] in ["high", "medium"] and best_replacement["rotation_risk"] == "none":
-                    reasons.append("Avoids European rotation")
-                if not reasons:
-                    reasons.append(f"+{round(points_gain, 1)} predicted points")
-                
-                transfer_suggestions.append({
-                    "out": out_player,
-                    "in": best_replacement,
-                    "cost": round(best_replacement["price"] - out_player["price"], 1),
-                    "points_gain": round(points_gain, 2),
-                    "priority_score": round(best_replacement["buy_score"] - out_player["keep_score"], 2),
-                    "reason": reasons[0],
-                    "all_reasons": reasons,
-                    "teammate_comparison": teammate_comparison,
-                })
+                    except Exception:
+                        teammate_comparison = None
+
+                    # Generate reason
+                    reasons = []
+                    if out_player["fixture_difficulty"] >= 4 and chosen["fixture_difficulty"] <= 2:
+                        reasons.append(f"Fixture swing: {out_player['fixture']} (FDR {out_player['fixture_difficulty']}) → {chosen['fixture']} (FDR {chosen['fixture_difficulty']})")
+                    if out_player["avg_fixture_5gw"] > chosen["avg_fixture_5gw"] + 0.5:
+                        reasons.append(f"Better long-term fixtures ({chosen['avg_fixture_5gw']} vs {out_player['avg_fixture_5gw']} avg FDR)")
+                    if chosen["form"] > out_player["form"] + 2:
+                        reasons.append(f"Form upgrade: {out_player['form']} → {chosen['form']}")
+                    if out_player["status"] != "a":
+                        reasons.append(f"{out_player['name']} is {out_player['status']} (doubtful/injured)")
+                    if out_player["rotation_risk"] in ["high", "medium"] and chosen["rotation_risk"] == "none":
+                        reasons.append("Avoids European rotation")
+                    if not reasons:
+                        reasons.append(f"+{round(points_gain, 1)} predicted points")
+
+                    transfer_suggestions.append({
+                        "out": out_player,
+                        "in": chosen,
+                        "cost": round(chosen["price"] - out_player["price"], 1),
+                        "points_gain": round(points_gain, 2),
+                        "priority_score": round(chosen["buy_score"] - out_player["keep_score"], 2),
+                        "reason": reasons[0],
+                        "all_reasons": reasons,
+                        "teammate_comparison": teammate_comparison,
+                    })
         
         # Sort by priority score and take top 3
         transfer_suggestions.sort(key=lambda x: x["priority_score"], reverse=True)
@@ -1084,10 +1086,12 @@ async def get_transfer_suggestions(request: TransferRequest):
                     "best_alternative": best_move,
                 }
 
-        top_suggestions = transfer_suggestions[:3]
+        top_transfers = transfer_suggestions[:suggestions_limit]
         if hold_suggestion is not None:
-            # Put hold first, then include up to 3 transfer options after it
-            top_suggestions = [hold_suggestion] + top_suggestions[:3]
+            # Put hold first, then include up to N transfer options after it
+            top_suggestions = [hold_suggestion] + top_transfers
+        else:
+            top_suggestions = top_transfers
         
         return {
             "squad_analysis": squad_analysis,

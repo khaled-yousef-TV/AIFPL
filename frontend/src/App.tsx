@@ -82,6 +82,15 @@ interface TransferSuggestion {
   best_alternative?: any
 }
 
+type SavedSquad = {
+  id: string
+  name: string
+  updatedAt: number
+  squad: SquadPlayer[]
+  bank: number
+  freeTransfers: number
+}
+
 function App() {
   const [loading, setLoading] = useState(true)
   const [squad, setSquad] = useState<SuggestedSquad | null>(null)
@@ -105,9 +114,88 @@ function App() {
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
 
+  // Saved squads (persist between weeks)
+  const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
+  const [selectedSavedId, setSelectedSavedId] = useState<string>('')
+  const [saveName, setSaveName] = useState<string>('My Squad')
+
+  const SAVED_KEY = 'fpl_saved_squads_v1'
+  const DRAFT_KEY = 'fpl_squad_draft_v1'
+
   useEffect(() => {
     loadInitial()
   }, [])
+
+  // Load saved squads + last draft squad on mount
+  useEffect(() => {
+    try {
+      const rawSaved = localStorage.getItem(SAVED_KEY)
+      if (rawSaved) {
+        const parsed = JSON.parse(rawSaved)
+        if (Array.isArray(parsed)) setSavedSquads(parsed)
+      }
+    } catch {}
+
+    try {
+      const rawDraft = localStorage.getItem(DRAFT_KEY)
+      if (rawDraft) {
+        const d = JSON.parse(rawDraft)
+        if (d && Array.isArray(d.squad)) {
+          setMySquad(d.squad)
+          if (typeof d.bank === 'number') setBank(d.bank)
+          if (typeof d.freeTransfers === 'number') setFreeTransfers(d.freeTransfers)
+        }
+      }
+    } catch {}
+  }, [])
+
+  // Auto-save draft whenever squad/bank/freeTransfers change
+  useEffect(() => {
+    try {
+      const payload = { squad: mySquad, bank, freeTransfers, updatedAt: Date.now() }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload))
+    } catch {}
+  }, [mySquad, bank, freeTransfers])
+
+  const persistSavedSquads = (next: SavedSquad[]) => {
+    setSavedSquads(next)
+    try {
+      localStorage.setItem(SAVED_KEY, JSON.stringify(next))
+    } catch {}
+  }
+
+  const loadSavedSquad = () => {
+    const s = savedSquads.find(x => x.id === selectedSavedId)
+    if (!s) return
+    setMySquad(s.squad || [])
+    setBank(s.bank ?? 0)
+    setFreeTransfers(s.freeTransfers ?? 1)
+    setSaveName(s.name || 'My Squad')
+  }
+
+  const saveOrUpdateSquad = (mode: 'update' | 'new') => {
+    const name = (saveName || 'My Squad').trim()
+    const now = Date.now()
+    if (mode === 'update' && selectedSavedId) {
+      const next = savedSquads.map(s =>
+        s.id === selectedSavedId ? { ...s, name, updatedAt: now, squad: mySquad, bank, freeTransfers } : s
+      )
+      persistSavedSquads(next)
+      return
+    }
+
+    const id = `sq_${now}_${Math.random().toString(16).slice(2)}`
+    const next = [{ id, name, updatedAt: now, squad: mySquad, bank, freeTransfers }, ...savedSquads]
+    persistSavedSquads(next)
+    setSelectedSavedId(id)
+  }
+
+  const deleteSavedSquad = () => {
+    if (!selectedSavedId) return
+    const next = savedSquads.filter(s => s.id !== selectedSavedId)
+    persistSavedSquads(next)
+    setSelectedSavedId('')
+  }
 
   const loadInitial = async () => {
     // Only load lightweight header data on boot (keeps My Transfers instant).
@@ -264,6 +352,7 @@ function App() {
     setTransferLoading(true)
     
     try {
+      const suggestionsLimit = Math.max(3, Number.isFinite(freeTransfers) ? freeTransfers : 3)
       const res = await fetch(`${API_BASE}/api/transfer-suggestions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -271,6 +360,7 @@ function App() {
           squad: mySquad,
           bank: bank,
           free_transfers: freeTransfers,
+          suggestions_limit: suggestionsLimit,
         }),
       })
       
@@ -598,6 +688,52 @@ function App() {
                 Add your current squad below and get AI-powered transfer suggestions considering both short-term (next GW) and long-term (next 5 GWs) fixtures.
               </p>
               
+              {/* Saved squads */}
+              <div className="mt-4 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Saved squads</span>
+                    <select
+                      value={selectedSavedId}
+                      onChange={(e) => setSelectedSavedId(e.target.value)}
+                      className="px-3 py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                    >
+                      <option value="">— Select —</option>
+                      {savedSquads.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={loadSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary">
+                      Load
+                    </button>
+                    <button onClick={() => saveOrUpdateSquad('update')} disabled={!selectedSavedId} className="btn btn-secondary">
+                      Update
+                    </button>
+                    <button onClick={() => saveOrUpdateSquad('new')} className="btn btn-secondary">
+                      Save as new
+                    </button>
+                    <button onClick={deleteSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary">
+                      Delete
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Name</span>
+                    <input
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      className="px-3 py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                      placeholder="My Squad"
+                    />
+                  </div>
+                </div>
+                <div className="text-[11px] text-gray-500 mt-2">
+                  Your current squad is also auto-saved locally, so you won’t need to re-enter it next week.
+                </div>
+              </div>
+
               {/* Squad Input */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Search & Add */}
@@ -801,7 +937,7 @@ function App() {
               <div className="card">
                 <div className="card-header">
                   <TrendingUp className="w-5 h-5 text-[#00ff87]" />
-                  Top 3 Transfer Suggestions
+                  Transfer Suggestions
                 </div>
                 
                 <div className="space-y-4">
