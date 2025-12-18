@@ -474,6 +474,7 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
     
     def player_score(p):
         pred = p["predicted"]
+        pos_id = p.get("position_id")
         difficulty = p.get("difficulty", 3)
         form = p.get("form", 2)
         price = max(p["price"], 4.0)
@@ -505,33 +506,125 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
 
         score = pred + fixture_bonus + form_bonus + home_bonus + rotation_penalty + reversal_bonus
         value_factor = pred / price
-        
-        return score + value_factor * 0.3
+
+        # Premium attackers get extra weight due to captaincy ceiling.
+        captain_uplift = 0.0
+        if pos_id in (3, 4) and pred >= 6.0:
+            captain_uplift = max(0.0, min(1.5, (pred - 6.0) * 0.6))
+
+        # Reduce value-penalty for MID/FWD so we don't over-prefer cheap picks.
+        value_weight = 0.18 if pos_id in (3, 4) else 0.30
+
+        return score + captain_uplift + value_factor * value_weight
     
     for pos in by_position:
         by_position[pos].sort(key=player_score, reverse=True)
     
-    squad = []
-    team_counts = {}
+    # Selection with budget reservation:
+    # - Greedy-by-score within each position
+    # - But we reserve enough budget to still fill remaining slots with cheapest valid players.
+    squad: List[Dict] = []
+    selected_ids = set()
+    team_counts: Dict[int, int] = {}
     remaining_budget = budget
-    
+
     requirements = {1: 2, 2: 5, 3: 5, 4: 3}
-    
-    for pos_id, count in requirements.items():
-        selected = 0
-        for player in by_position[pos_id]:
-            if selected >= count:
+    requirements_left = dict(requirements)
+
+    # Prefer attackers first to avoid starving FWD/MID budgets (common reason premiums disappear).
+    selection_order = [4, 3, 2, 1]
+
+    # Cheapest-first lists per position for reserve estimation
+    by_price = {
+        pos: sorted(by_position[pos], key=lambda x: x.get("price", 999))
+        for pos in by_position
+    }
+
+    def estimate_min_remaining_cost(req_left: Dict[int, int], sel_ids: set, counts: Dict[int, int]) -> float:
+        temp_counts = dict(counts)
+        temp_sel = set(sel_ids)
+        cost = 0.0
+        for pos in selection_order:
+            need = int(req_left.get(pos, 0) or 0)
+            if need <= 0:
+                continue
+            for cand in by_price.get(pos, []):
+                if need <= 0:
+                    break
+                cid = cand.get("id")
+                if cid in temp_sel:
+                    continue
+                tid = cand.get("team_id")
+                if tid is None:
+                    continue
+                if temp_counts.get(tid, 0) >= 3:
+                    continue
+                cprice = float(cand.get("price", 999))
+                cost += cprice
+                temp_sel.add(cid)
+                temp_counts[tid] = temp_counts.get(tid, 0) + 1
+                need -= 1
+            if need > 0:
+                return float("inf")
+        return cost
+
+    for pos_id in selection_order:
+        while requirements_left[pos_id] > 0:
+            picked = False
+
+            for cand in by_position[pos_id]:
+                cid = cand.get("id")
+                if cid in selected_ids:
+                    continue
+                cprice = float(cand.get("price", 999))
+                if cprice > remaining_budget:
+                    continue
+                tid = cand.get("team_id")
+                if tid is None:
+                    continue
+                if team_counts.get(tid, 0) >= 3:
+                    continue
+
+                # Budget reservation check
+                req_sim = dict(requirements_left)
+                req_sim[pos_id] = req_sim.get(pos_id, 0) - 1
+                team_sim = dict(team_counts)
+                team_sim[tid] = team_sim.get(tid, 0) + 1
+                sel_sim = set(selected_ids)
+                sel_sim.add(cid)
+                rem = remaining_budget - cprice
+                min_needed = estimate_min_remaining_cost(req_sim, sel_sim, team_sim)
+                if rem >= min_needed:
+                    squad.append(cand)
+                    selected_ids.add(cid)
+                    team_counts[tid] = team_counts.get(tid, 0) + 1
+                    remaining_budget = rem
+                    requirements_left[pos_id] -= 1
+                    picked = True
+                    break
+
+            if not picked:
+                # Fallback: take the best affordable candidate (even if it might reduce future optimality)
+                for cand in by_position[pos_id]:
+                    cid = cand.get("id")
+                    if cid in selected_ids:
+                        continue
+                    cprice = float(cand.get("price", 999))
+                    if cprice > remaining_budget:
+                        continue
+                    tid = cand.get("team_id")
+                    if tid is None or team_counts.get(tid, 0) >= 3:
+                        continue
+                    squad.append(cand)
+                    selected_ids.add(cid)
+                    team_counts[tid] = team_counts.get(tid, 0) + 1
+                    remaining_budget -= cprice
+                    requirements_left[pos_id] -= 1
+                    picked = True
+                    break
+
+            if not picked:
                 break
-            if player["price"] > remaining_budget:
-                continue
-            team_id = player["team_id"]
-            if team_counts.get(team_id, 0) >= 3:
-                continue
-            
-            squad.append(player)
-            remaining_budget -= player["price"]
-            team_counts[team_id] = team_counts.get(team_id, 0) + 1
-            selected += 1
     
     return squad
 
