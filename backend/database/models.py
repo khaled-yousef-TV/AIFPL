@@ -168,6 +168,23 @@ class PerformanceLog(Base):
     recorded_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SelectedTeam(Base):
+    """Store suggested squad ('team of the week') for each gameweek."""
+    __tablename__ = "selected_teams"
+    
+    id = Column(Integer, primary_key=True)
+    gameweek = Column(Integer, nullable=False, unique=True, index=True)
+    
+    # Squad data (stored as JSON)
+    squad_data = Column(JSON, nullable=False)  # Full SuggestedSquad dict
+    
+    # Timestamps
+    saved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    def __repr__(self):
+        return f"<SelectedTeam(gameweek={self.gameweek}, saved_at={self.saved_at})>"
+
+
 def init_db(db_url: str = "sqlite:///fpl_agent.db"):
     """
     Initialize the database.

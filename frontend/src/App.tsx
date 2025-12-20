@@ -166,19 +166,18 @@ function App() {
   const [selectedSavedId, setSelectedSavedId] = useState<string>('')
   const [saveName, setSaveName] = useState<string>('My Squad')
 
-  // Selected teams (suggested squads for each gameweek)
+  // Selected teams (suggested squads for each gameweek) - fetched from API
   type SelectedTeam = {
     gameweek: number
     squad: SuggestedSquad
-    savedAt: number
+    saved_at: string
   }
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
-  const [loadingSelectedTeam, setLoadingSelectedTeam] = useState(false)
+  const [loadingSelectedTeams, setLoadingSelectedTeams] = useState(false)
   const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
 
   const SAVED_KEY = 'fpl_saved_squads_v1'
   const DRAFT_KEY = 'fpl_squad_draft_v1'
-  const SELECTED_TEAMS_KEY = 'fpl_selected_teams_v1'
 
   useEffect(() => {
     loadInitial()
@@ -206,89 +205,37 @@ function App() {
       }
     } catch {}
 
-    try {
-      const rawSelected = localStorage.getItem(SELECTED_TEAMS_KEY)
-      if (rawSelected) {
-        const parsed = JSON.parse(rawSelected)
-        if (parsed && typeof parsed === 'object') {
-          setSelectedTeams(parsed)
-        }
-      }
-    } catch {}
   }, [])
 
-  // Save selected teams to localStorage
-  const saveSelectedTeams = (teams: Record<number, SelectedTeam>) => {
-    setSelectedTeams(teams)
+  // Load selected teams from API
+  const loadSelectedTeams = async () => {
+    setLoadingSelectedTeams(true)
     try {
-      localStorage.setItem(SELECTED_TEAMS_KEY, JSON.stringify(teams))
-    } catch (e) {
-      console.error('Failed to save selected teams:', e)
+      const res = await fetch(`${API_BASE}/api/selected-teams`).then(r => r.json())
+      const teams: Record<number, SelectedTeam> = {}
+      if (res.teams && Array.isArray(res.teams)) {
+        res.teams.forEach((team: SelectedTeam) => {
+          teams[team.gameweek] = team
+        })
+      }
+      setSelectedTeams(teams)
+      // Set first gameweek as selected tab if none selected
+      if (!selectedGameweekTab && res.teams && res.teams.length > 0) {
+        setSelectedGameweekTab(res.teams[0].gameweek)
+      }
+    } catch (err) {
+      console.error('Failed to load selected teams:', err)
+    } finally {
+      setLoadingSelectedTeams(false)
     }
   }
 
-  // Save current suggested squad for current gameweek (called 30 min before deadline)
-  const saveCurrentSelectedTeam = useCallback(async () => {
-    if (!gameweek?.next) return
-    
-    const gwId = gameweek.next.id
-    // Don't save if already exists
-    if (selectedTeams[gwId]) return
-    
-    setLoadingSelectedTeam(true)
-    try {
-      // Fetch the current combined squad suggestion
-      const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
-      setSelectedTeams(prev => {
-        const updated = {
-          ...prev,
-          [gwId]: {
-            gameweek: gwId,
-            squad: res,
-            savedAt: Date.now()
-          }
-        }
-        try {
-          localStorage.setItem(SELECTED_TEAMS_KEY, JSON.stringify(updated))
-        } catch (e) {
-          console.error('Failed to save selected teams:', e)
-        }
-        return updated
-      })
-      console.log(`Saved suggested squad for Gameweek ${gwId} (30 min before deadline)`)
-    } catch (err) {
-      console.error('Failed to save selected team:', err)
-    } finally {
-      setLoadingSelectedTeam(false)
-    }
-  }, [gameweek?.next?.id, selectedTeams])
-
-  // Check if we're within 30 minutes of deadline and auto-save
+  // Load selected teams when the tab is active
   useEffect(() => {
-    if (!gameweek?.next?.deadline || !gameweek?.next?.id) return
-    
-    const gwId = gameweek.next.id
-    // Skip if already saved for this gameweek
-    if (selectedTeams[gwId]) return
-
-    const deadline = new Date(gameweek.next.deadline).getTime()
-    const now = Date.now()
-    const thirtyMinutesBeforeDeadline = deadline - (30 * 60 * 1000)
-    const timeUntilSave = thirtyMinutesBeforeDeadline - now
-
-    // If we're already past 30 min before deadline, save immediately
-    if (timeUntilSave <= 0) {
-      saveCurrentSelectedTeam()
-      return
+    if (activeTab === 'selected_teams') {
+      loadSelectedTeams()
     }
-
-    // Schedule save 30 minutes before deadline
-    const timeoutId = setTimeout(() => {
-      saveCurrentSelectedTeam()
-    }, timeUntilSave)
-
-    return () => clearTimeout(timeoutId)
-  }, [gameweek?.next?.deadline, gameweek?.next?.id, saveCurrentSelectedTeam, selectedTeams])
+  }, [activeTab])
 
   // Auto-save draft whenever squad/bank/freeTransfers change
   useEffect(() => {
@@ -1398,7 +1345,7 @@ function App() {
                           >
                             <span className="text-sm font-medium">GW{team.gameweek}</span>
                             <span className="text-xs text-gray-500 ml-2">
-                              {new Date(team.savedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {new Date(team.saved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </span>
                           </button>
                         ))}
@@ -1412,7 +1359,7 @@ function App() {
                           <div>
                             <h3 className="text-xl font-semibold text-[#00ff87] mb-1">Gameweek {currentTeam.gameweek}</h3>
                             <p className="text-xs text-gray-400">
-                              Saved {new Date(currentTeam.savedAt).toLocaleDateString('en-US', {
+                              Saved {new Date(currentTeam.saved_at).toLocaleDateString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',

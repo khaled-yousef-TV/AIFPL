@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
-    TransferHistory, PerformanceLog, init_db
+    TransferHistory, PerformanceLog, SelectedTeam, init_db
 )
 
 logger = logging.getLogger(__name__)
@@ -359,6 +359,76 @@ class DatabaseManager:
                     "predictions_accuracy": p.predictions_accuracy,
                 }
                 for p in perfs
+            ]
+    
+    # ==================== Selected Teams ====================
+    
+    def save_selected_team(self, gameweek: int, squad_data: Dict[str, Any]) -> bool:
+        """
+        Save or update a selected team (suggested squad) for a gameweek.
+        
+        Args:
+            gameweek: Gameweek number
+            squad_data: Full SuggestedSquad dictionary (JSON-serializable)
+            
+        Returns:
+            True if saved, False if error
+        """
+        try:
+            with self.get_session() as session:
+                existing = session.query(SelectedTeam).filter(
+                    SelectedTeam.gameweek == gameweek
+                ).first()
+                
+                if existing:
+                    # Update existing
+                    existing.squad_data = squad_data
+                    existing.saved_at = datetime.utcnow()
+                else:
+                    # Create new
+                    selected_team = SelectedTeam(
+                        gameweek=gameweek,
+                        squad_data=squad_data,
+                        saved_at=datetime.utcnow()
+                    )
+                    session.add(selected_team)
+                
+                session.commit()
+                logger.info(f"Saved selected team for Gameweek {gameweek}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save selected team for GW{gameweek}: {e}")
+            return False
+    
+    def get_selected_team(self, gameweek: int) -> Optional[Dict[str, Any]]:
+        """Get selected team for a gameweek."""
+        with self.get_session() as session:
+            team = session.query(SelectedTeam).filter(
+                SelectedTeam.gameweek == gameweek
+            ).first()
+            
+            if team:
+                return {
+                    "gameweek": team.gameweek,
+                    "squad": team.squad_data,
+                    "saved_at": team.saved_at.isoformat() if team.saved_at else None
+                }
+            return None
+    
+    def get_all_selected_teams(self) -> List[Dict[str, Any]]:
+        """Get all selected teams, sorted by gameweek (newest first)."""
+        with self.get_session() as session:
+            teams = session.query(SelectedTeam).order_by(
+                SelectedTeam.gameweek.desc()
+            ).all()
+            
+            return [
+                {
+                    "gameweek": team.gameweek,
+                    "squad": team.squad_data,
+                    "saved_at": team.saved_at.isoformat() if team.saved_at else None
+                }
+                for team in teams
             ]
 
 

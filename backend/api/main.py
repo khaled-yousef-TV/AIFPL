@@ -18,6 +18,9 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.date import DateTrigger
+from datetime import timedelta
 
 # Configure logging first (needed for messages below)
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +70,7 @@ from ml.predictor import HeuristicPredictor, FormPredictor, FixturePredictor
 from data.european_teams import assess_rotation_risk, get_european_competition
 from data.trends import compute_team_trends
 from data.betting_odds import BettingOddsClient
+from database.crud import DatabaseManager
 
 # Initialize components (no auth needed for public data)
 fpl_client = FPLClient(auth=None)
@@ -80,6 +84,9 @@ logger.info(f"Initializing BettingOddsClient...")
 logger.info(f"Environment check: THE_ODDS_API_KEY={'SET' if os.getenv('THE_ODDS_API_KEY') else 'NOT SET'}, BETTING_ODDS_ENABLED={os.getenv('BETTING_ODDS_ENABLED', 'NOT SET')}")
 betting_odds_client = BettingOddsClient()
 logger.info(f"BettingOddsClient initialized: enabled={betting_odds_client.enabled}, has_key={bool(betting_odds_client.api_key)}")
+
+# Initialize database manager
+db_manager = DatabaseManager()
 
 # Simple in-memory caches to keep the UI snappy (especially in dev with single uvicorn worker)
 _CACHE_TTL_SECONDS = int(os.getenv("FPL_CACHE_TTL_SECONDS", "300"))
@@ -129,6 +136,131 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==================== Scheduler for Auto-Saving Selected Teams ====================
+
+scheduler = BackgroundScheduler()
+
+def save_selected_team_job():
+    """Job to save selected team 30 minutes before deadline (sync wrapper for scheduler)."""
+    import asyncio
+    try:
+        # Run the async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_save_selected_team_async())
+        loop.close()
+    except Exception as e:
+        logger.error(f"Error in save_selected_team_job: {e}")
+
+async def _save_selected_team_async():
+    """Async function to save selected team."""
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
+            logger.warning("No next gameweek found for selected team save job")
+            return
+        
+        # Check if already saved
+        existing = db_manager.get_selected_team(next_gw.id)
+        if existing:
+            logger.info(f"Selected team for GW{next_gw.id} already saved, skipping")
+            return
+        
+        # Get the current combined squad suggestion
+        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        
+        # Save to database
+        success = db_manager.save_selected_team(next_gw.id, squad_data)
+        if success:
+            logger.info(f"Successfully saved selected team for Gameweek {next_gw.id} (30 min before deadline)")
+        else:
+            logger.error(f"Failed to save selected team for Gameweek {next_gw.id}")
+    except Exception as e:
+        logger.error(f"Error in _save_selected_team_async: {e}")
+
+def schedule_next_save():
+    """Schedule the next selected team save job 30 minutes before deadline."""
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw or not next_gw.deadline_time:
+            logger.warning("No next gameweek deadline found")
+            return
+        
+        deadline_str = next_gw.deadline_time
+        # Parse deadline (should be datetime object from Pydantic model)
+        if isinstance(deadline_str, datetime):
+            deadline = deadline_str
+        elif isinstance(deadline_str, str):
+            # Handle ISO format with timezone
+            deadline_str = deadline_str.replace('Z', '+00:00')
+            try:
+                deadline = datetime.fromisoformat(deadline_str)
+            except ValueError:
+                # Fallback: try parsing common formats (requires python-dateutil)
+                try:
+                    from dateutil import parser
+                    deadline = parser.parse(deadline_str)
+                except ImportError:
+                    logger.error("dateutil not installed, cannot parse deadline string")
+                    return
+        else:
+            deadline = deadline_str
+        
+        # Calculate 30 minutes before deadline
+        save_time = deadline - timedelta(minutes=30)
+        now = datetime.now(deadline.tzinfo) if hasattr(deadline, 'tzinfo') and deadline.tzinfo else datetime.now()
+        
+        # Check if we're already past the save time
+        if save_time <= now:
+            # Save immediately if past the 30-minute mark
+            logger.info(f"Already past 30 min before deadline for GW{next_gw.id}, saving immediately")
+            save_selected_team_job()
+            return
+        
+        # Remove existing job if any
+        try:
+            scheduler.remove_job("save_selected_team")
+        except:
+            pass
+        
+        # Schedule the job (sync function)
+        scheduler.add_job(
+            save_selected_team_job,
+            DateTrigger(run_date=save_time),
+            id="save_selected_team",
+            name="Save Selected Team 30min Before Deadline",
+            replace_existing=True
+        )
+        
+        logger.info(f"Scheduled selected team save for GW{next_gw.id} at {save_time} (30 min before deadline)")
+    except Exception as e:
+        logger.error(f"Error scheduling selected team save: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the scheduler on app startup."""
+    import asyncio
+    scheduler.start()
+    logger.info("Selected team scheduler started")
+    # Schedule the first save job
+    schedule_next_save()
+    # Also schedule a check every 6 hours to reschedule if needed
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler.add_job(
+        schedule_next_save,
+        CronTrigger(hour="*/6"),  # Every 6 hours
+        id="check_and_schedule_selected_team",
+        name="Check and Schedule Selected Team Save",
+        replace_existing=True
+    )
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the scheduler on app shutdown."""
+    scheduler.shutdown()
+    logger.info("Selected team scheduler stopped")
 
 
 # ==================== Health Check ====================
@@ -1539,6 +1671,67 @@ async def search_players(q: str = "", position: Optional[str] = None, limit: int
         
     except Exception as e:
         logger.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/selected-teams")
+async def get_selected_teams():
+    """Get all saved selected teams (suggested squads) for all gameweeks."""
+    try:
+        teams = db_manager.get_all_selected_teams()
+        return {"teams": teams}
+    except Exception as e:
+        logger.error(f"Error fetching selected teams: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/selected-teams/{gameweek}")
+async def get_selected_team(gameweek: int):
+    """Get saved selected team for a specific gameweek."""
+    try:
+        team = db_manager.get_selected_team(gameweek)
+        if not team:
+            raise HTTPException(status_code=404, detail=f"No selected team found for Gameweek {gameweek}")
+        return team
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching selected team for GW{gameweek}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/selected-teams")
+async def save_selected_team():
+    """
+    Save the current suggested squad for the next gameweek.
+    Called by scheduled job 30 minutes before deadline.
+    """
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
+            raise HTTPException(status_code=400, detail="No next gameweek found")
+        
+        # Check if already saved
+        existing = db_manager.get_selected_team(next_gw.id)
+        if existing:
+            return {"success": True, "gameweek": next_gw.id, "message": f"Already saved for Gameweek {next_gw.id}"}
+        
+        # Get the current combined squad suggestion by calling the existing endpoint logic
+        # We'll reuse the get_suggested_squad logic
+        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        
+        # Save to database
+        success = db_manager.save_selected_team(next_gw.id, squad_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save selected team")
+        
+        logger.info(f"Saved selected team for Gameweek {next_gw.id} (30 min before deadline)")
+        return {"success": True, "gameweek": next_gw.id, "message": f"Saved selected team for Gameweek {next_gw.id}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving selected team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
