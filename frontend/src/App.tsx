@@ -480,8 +480,8 @@ function App() {
       <header className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-4 sm:px-6 py-3 sm:py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg border border-[#00ff87]/20">
-              <FPLLogo className="w-5 h-5 sm:w-6 sm:h-6" />
+            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg border border-[#00ff87]/20">
+              <FPLLogo className="w-8 h-8 sm:w-10 sm:h-10" />
             </div>
             <div className="min-w-0">
               <h1 className="font-bold text-sm sm:text-lg truncate">FPL Squad Suggester</h1>
