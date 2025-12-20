@@ -170,7 +170,7 @@ async def get_predictions(position: Optional[int] = None, top_n: int = 100):
                 if player.minutes < 1:
                     filtered_minutes += 1
                     continue
-                if player.status in ["i", "s", "u"]:
+                if player.status in ["i", "s", "u", "n"]:
                     filtered_status += 1
                     continue
 
@@ -293,8 +293,9 @@ async def _build_squad_with_predictor(
         # Allow players with at least 1 minute (includes new signings, rotation players)
         if player.minutes < 1:
             continue
-        # Skip unavailable players (injured/suspended) but allow doubtful
-        if player.status in ["i", "s", "u"]:
+        # Skip unavailable players (injured/suspended/not available) but allow doubtful
+        # Status: a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available
+        if player.status in ["i", "s", "u", "n"]:
             continue
         
         try:
@@ -418,7 +419,8 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
                 for player in squad["starting_xi"] + squad["bench"]:
                     pid = player["id"]
                     # Skip players that don't have status or are unavailable (safety check)
-                    if player.get("status", "") in ["i", "s", "u"]:
+                    # Status: a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available
+                    if player.get("status", "") in ["i", "s", "u", "n"]:
                         continue
                     if pid not in all_players:
                         all_players[pid] = {
@@ -433,8 +435,9 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
             averaged_players = []
             for pid, pdata in all_players.items():
                 # Double-check status before including (safety check)
+                # Status: a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available
                 status = pdata.get("status", "")
-                if status in ["i", "s", "u"]:
+                if status in ["i", "s", "u", "n"]:
                     continue
                 avg_pred = sum(pdata["predictions"]) / len(pdata["predictions"])
                 averaged_players.append({
@@ -476,11 +479,12 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
 
 def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
     """Build optimal 15-player squad within budget."""
-    # Filter out unavailable players (injured, suspended, unavailable)
+    # Filter out unavailable players (injured, suspended, unavailable, not available)
+    # Status: a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available
     # This is a safety check in case status wasn't filtered earlier
     available_players = [
         p for p in players 
-        if p.get("status", "a") not in ["i", "s", "u"]
+        if p.get("status", "a") not in ["i", "s", "u", "n"]
     ]
     
     by_position = {1: [], 2: [], 3: [], 4: []}
@@ -920,7 +924,7 @@ async def get_transfer_suggestions(request: TransferRequest):
             # Penalize injury doubts
             if player.status == "d":
                 keep_score -= 1.5
-            elif player.status in ["i", "s", "u"]:
+            elif player.status in ["i", "s", "u", "n"]:
                 keep_score -= 5.0
             
             squad_analysis.append({
@@ -978,8 +982,8 @@ async def get_transfer_suggestions(request: TransferRequest):
                 if player.price > max_price:
                     continue
                 
-                # Skip unavailable players (injured/suspended) but allow doubtful
-                if player.status in ["i", "s", "u"]:
+                # Skip unavailable players (injured/suspended/not available) but allow doubtful
+                if player.status in ["i", "s", "u", "n"]:
                     continue
                 
                 # Allow players with at least 1 minute (includes new signings, rotation players)
@@ -1181,7 +1185,7 @@ async def get_transfer_suggestions(request: TransferRequest):
             # "Squad health": avoid recommending holds when there are clear fires.
             worst = squad_analysis[0]  # lowest keep_score
             has_fire = (
-                worst.get("status") in ["i", "s", "u"]
+                worst.get("status") in ["i", "s", "u", "n"]
                 or (worst.get("status") == "d" and worst.get("keep_score", 0) < 3.5)
                 or worst.get("fixture_difficulty", 3) >= 5
             )

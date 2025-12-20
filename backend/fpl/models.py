@@ -50,7 +50,7 @@ class Player(BaseModel):
     expected_goals_conceded: float = Field(0.0, alias="expected_goals_conceded")
     
     # Status
-    status: str = "a"  # a=available, d=doubtful, i=injured, s=suspended, u=unavailable
+    status: str = "a"  # a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available (e.g. international duty)
     chance_of_playing_next_round: Optional[int] = 100
     news: str = ""
     
@@ -181,4 +181,5 @@ class BootstrapData(BaseModel):
     
     class Config:
         populate_by_name = True
+
 
