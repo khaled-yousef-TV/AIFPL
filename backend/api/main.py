@@ -352,6 +352,7 @@ async def _build_squad_with_predictor(
                 "european_comp": rotation.competition,
                 "rotation_factor": rotation.risk_factor,
                 "team_reversal": reversal,
+                "status": player.status,  # Include status for filtering in squad builder
                 "reason": " • ".join(reasons[:2]),
             })
         except:
@@ -416,6 +417,9 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
             for squad in [heuristic_squad, form_squad, fixture_squad]:
                 for player in squad["starting_xi"] + squad["bench"]:
                     pid = player["id"]
+                    # Skip players that don't have status or are unavailable (safety check)
+                    if player.get("status", "") in ["i", "s", "u"]:
+                        continue
                     if pid not in all_players:
                         all_players[pid] = {
                             **player,
@@ -428,6 +432,10 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
             # Calculate averaged predictions
             averaged_players = []
             for pid, pdata in all_players.items():
+                # Double-check status before including (safety check)
+                status = pdata.get("status", "")
+                if status in ["i", "s", "u"]:
+                    continue
                 avg_pred = sum(pdata["predictions"]) / len(pdata["predictions"])
                 averaged_players.append({
                     **{k: v for k, v in pdata.items() if k not in ["predictions", "count"]},
@@ -468,8 +476,15 @@ async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
 
 def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
     """Build optimal 15-player squad within budget."""
+    # Filter out unavailable players (injured, suspended, unavailable)
+    # This is a safety check in case status wasn't filtered earlier
+    available_players = [
+        p for p in players 
+        if p.get("status", "a") not in ["i", "s", "u"]
+    ]
+    
     by_position = {1: [], 2: [], 3: [], 4: []}
-    for p in players:
+    for p in available_players:
         by_position[p["position_id"]].append(p)
     
     def player_score(p):
