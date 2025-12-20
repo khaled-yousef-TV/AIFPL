@@ -16,12 +16,34 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from pathlib import Path
+import os
 
-load_dotenv()
-
-# Configure logging
+# Configure logging first (needed for messages below)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Load .env from backend directory (where uvicorn typically runs from)
+# Try multiple paths to ensure we find it
+backend_dir = Path(__file__).parent.parent
+env_paths = [
+    backend_dir / '.env',  # backend/.env
+    Path.cwd() / '.env',   # Current working directory
+    Path.cwd() / 'backend' / '.env',  # If running from project root
+]
+
+env_loaded = False
+for env_path in env_paths:
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=False)
+        logger.info(f"Loaded .env from: {env_path}")
+        env_loaded = True
+        break
+
+if not env_loaded:
+    # Fallback: try loading from current directory (standard behavior)
+    load_dotenv()
+    logger.warning("Using default load_dotenv() - .env file might not be in expected location")
 
 # Import our modules
 import sys
