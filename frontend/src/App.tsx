@@ -442,22 +442,28 @@ function App() {
     try {
       if (activeTab === 'squad_combined') {
         setSquad(null)
-        await ensureSquadLoaded('combined')
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
+        setSquad(res)
       } else if (activeTab === 'squad_heuristic') {
         setSquadHeuristic(null)
-        await ensureSquadLoaded('heuristic')
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
+        setSquadHeuristic(res)
       } else if (activeTab === 'squad_form') {
         setSquadForm(null)
-        await ensureSquadLoaded('form')
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
+        setSquadForm(res)
       } else if (activeTab === 'squad_fixture') {
         setSquadFixture(null)
-        await ensureSquadLoaded('fixture')
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
+        setSquadFixture(res)
       } else if (activeTab === 'picks') {
         setTopPicks({})
-        await ensurePicksLoaded()
+        const res = await fetch(`${API_BASE}/api/top-picks`).then(r => r.json())
+        setTopPicks(res)
       } else if (activeTab === 'differentials') {
         setDifferentials([])
-        await ensureDifferentialsLoaded()
+        const res = await fetch(`${API_BASE}/api/differentials`).then(r => r.json())
+        setDifferentials(res.differentials || [])
       }
     } catch (err) {
       console.error('Refresh error:', err)
