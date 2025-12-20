@@ -25,25 +25,37 @@ logger = logging.getLogger(__name__)
 
 # Load .env from backend directory (where uvicorn typically runs from)
 # Try multiple paths to ensure we find it
-backend_dir = Path(__file__).parent.parent
+backend_dir = Path(__file__).parent.parent  # Goes from api/main.py to backend/
 env_paths = [
-    backend_dir / '.env',  # backend/.env
+    backend_dir / '.env',  # backend/.env (most common case)
     Path.cwd() / '.env',   # Current working directory
     Path.cwd() / 'backend' / '.env',  # If running from project root
 ]
 
+logger.info(f"Looking for .env file...")
+logger.info(f"  Current working directory: {Path.cwd()}")
+logger.info(f"  Backend directory (from __file__): {backend_dir}")
+logger.info(f"  Checking paths: {[str(p) for p in env_paths]}")
+
 env_loaded = False
 for env_path in env_paths:
     if env_path.exists():
-        load_dotenv(dotenv_path=env_path, override=False)
-        logger.info(f"Loaded .env from: {env_path}")
+        load_dotenv(dotenv_path=env_path, override=True)  # Use override=True to ensure it's loaded
+        logger.info(f"✓ Loaded .env from: {env_path.absolute()}")
+        # Verify it was loaded
+        test_key = os.getenv("THE_ODDS_API_KEY")
+        test_enabled = os.getenv("BETTING_ODDS_ENABLED")
+        logger.info(f"  Verified: THE_ODDS_API_KEY={'SET' if test_key else 'NOT SET'}, BETTING_ODDS_ENABLED={test_enabled}")
         env_loaded = True
         break
 
 if not env_loaded:
     # Fallback: try loading from current directory (standard behavior)
     load_dotenv()
-    logger.warning("Using default load_dotenv() - .env file might not be in expected location")
+    test_key = os.getenv("THE_ODDS_API_KEY")
+    test_enabled = os.getenv("BETTING_ODDS_ENABLED")
+    logger.warning(f"Using default load_dotenv() - .env file might not be in expected location")
+    logger.warning(f"  Current env vars: THE_ODDS_API_KEY={'SET' if test_key else 'NOT SET'}, BETTING_ODDS_ENABLED={test_enabled}")
 
 # Import our modules
 import sys
@@ -62,7 +74,12 @@ predictor_heuristic = HeuristicPredictor()
 predictor_form = FormPredictor()
 predictor_fixture = FixturePredictor()
 feature_eng = FeatureEngineer(fpl_client)
+
+# Initialize betting odds client (with debug logging)
+logger.info(f"Initializing BettingOddsClient...")
+logger.info(f"Environment check: THE_ODDS_API_KEY={'SET' if os.getenv('THE_ODDS_API_KEY') else 'NOT SET'}, BETTING_ODDS_ENABLED={os.getenv('BETTING_ODDS_ENABLED', 'NOT SET')}")
 betting_odds_client = BettingOddsClient()
+logger.info(f"BettingOddsClient initialized: enabled={betting_odds_client.enabled}, has_key={bool(betting_odds_client.api_key)}")
 
 # Simple in-memory caches to keep the UI snappy (especially in dev with single uvicorn worker)
 _CACHE_TTL_SECONDS = int(os.getenv("FPL_CACHE_TTL_SECONDS", "300"))

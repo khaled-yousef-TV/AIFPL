@@ -35,12 +35,19 @@ class BettingOddsClient:
             api_key: The Odds API key (defaults to env var THE_ODDS_API_KEY)
         """
         self.api_key = api_key or os.getenv("THE_ODDS_API_KEY")
-        self.enabled = os.getenv("BETTING_ODDS_ENABLED", "false").lower() == "true"
+        enabled_str = os.getenv("BETTING_ODDS_ENABLED", "false")
+        self.enabled = enabled_str.lower() == "true"
         self.weight = float(os.getenv("BETTING_ODDS_WEIGHT", "0.25"))
+        
+        # Debug logging
+        logger.info(f"BettingOddsClient init: enabled_str='{enabled_str}', enabled={self.enabled}, has_api_key={bool(self.api_key)}")
         
         if self.enabled and not self.api_key:
             logger.warning("BETTING_ODDS_ENABLED is true but THE_ODDS_API_KEY not set. Odds will be disabled.")
             self.enabled = False
+        
+        if not self.enabled:
+            logger.info(f"Betting odds disabled: enabled_str='{enabled_str}', enabled={self.enabled}, has_key={bool(self.api_key)}")
     
     def _is_cache_valid(self, cache_entry: Optional[Tuple[Dict, datetime]]) -> bool:
         """Check if cached odds are still valid."""
