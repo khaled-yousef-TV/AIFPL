@@ -238,3 +238,4 @@ class LineupOptimizer:
         sorted_bench = sorted(bench, key=sub_priority)
         return [p.player_id for p in sorted_bench]
 
+

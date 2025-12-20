@@ -32,6 +32,7 @@ from ml.features import FeatureEngineer
 from ml.predictor import HeuristicPredictor, FormPredictor, FixturePredictor
 from data.european_teams import assess_rotation_risk, get_european_competition
 from data.trends import compute_team_trends
+from data.betting_odds import BettingOddsClient
 
 # Initialize components (no auth needed for public data)
 fpl_client = FPLClient(auth=None)
@@ -39,6 +40,7 @@ predictor_heuristic = HeuristicPredictor()
 predictor_form = FormPredictor()
 predictor_fixture = FixturePredictor()
 feature_eng = FeatureEngineer(fpl_client)
+betting_odds_client = BettingOddsClient()
 
 # Simple in-memory caches to keep the UI snappy (especially in dev with single uvicorn worker)
 _CACHE_TTL_SECONDS = int(os.getenv("FPL_CACHE_TTL_SECONDS", "300"))
@@ -287,6 +289,21 @@ async def _build_squad_with_predictor(
         team_trends = compute_team_trends(teams, all_fixtures, window=6, previous_window=6)
     except Exception:
         team_trends = {}
+    
+    # Fetch betting odds for fixtures (cache fixture odds by team)
+    fixture_odds_cache = {}
+    if betting_odds_client.enabled:
+        try:
+            for f in fixtures:
+                home_team = team_names.get(f.team_h, "???")
+                away_team = team_names.get(f.team_a, "???")
+                odds = betting_odds_client.get_fixture_odds(home_team, away_team)
+                if odds:
+                    fixture_odds_cache[f.team_h] = {**odds, "is_home": True}
+                    fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
+        except Exception as e:
+            logger.warning(f"Error fetching betting odds: {e}. Continuing without odds.")
+            fixture_odds_cache = {}
 
     player_predictions = []
     for player in players:
@@ -311,6 +328,26 @@ async def _build_squad_with_predictor(
             rotation = assess_rotation_risk(team_name, gw_deadline, difficulty)
             trend = team_trends.get(player.team)
             reversal = trend.reversal_score if trend else 0.0
+            
+            # Get betting odds for this fixture
+            odds_data = fixture_odds_cache.get(player.team, {})
+            anytime_goalscorer_prob = 0.0
+            clean_sheet_prob = 0.0
+            team_win_prob = 0.5
+            
+            if odds_data:
+                # Get probabilities based on position
+                if player.element_type in [3, 4]:  # MID/FWD
+                    anytime_goalscorer_prob = betting_odds_client.get_player_goalscorer_odds(
+                        player.web_name, odds_data
+                    )
+                elif player.element_type in [1, 2]:  # GK/DEF
+                    clean_sheet_prob = betting_odds_client.get_clean_sheet_probability(
+                        is_home, odds_data
+                    )
+                
+                # Team win probability
+                team_win_prob = odds_data.get("home_win_prob" if is_home else "away_win_prob", 0.5)
             
             reasons = []
             if rotation.risk_level == "high":
@@ -354,6 +391,10 @@ async def _build_squad_with_predictor(
                 "rotation_factor": rotation.risk_factor,
                 "team_reversal": reversal,
                 "status": player.status,  # Include status for filtering in squad builder
+                # Betting odds probabilities
+                "anytime_goalscorer_prob": anytime_goalscorer_prob,
+                "clean_sheet_prob": clean_sheet_prob,
+                "team_win_prob": team_win_prob,
                 "reason": " • ".join(reasons[:2]),
             })
         except:
@@ -533,8 +574,32 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
 
         # Reduce value-penalty for MID/FWD so we don't over-prefer cheap picks.
         value_weight = 0.18 if pos_id in (3, 4) else 0.30
+        
+        # Betting odds bonus (if enabled)
+        odds_bonus = 0.0
+        if betting_odds_client.enabled:
+            odds_weight = betting_odds_client.weight
+            
+            if pos_id in (3, 4):  # MID/FWD
+                # Anytime goalscorer probability
+                goalscorer_prob = p.get("anytime_goalscorer_prob", 0.0)
+                if goalscorer_prob > 0:
+                    # Goal = 4-6 FPL points, so weight the probability accordingly
+                    odds_bonus += goalscorer_prob * 4.0 * odds_weight
+            
+            elif pos_id in (1, 2):  # GK/DEF
+                # Clean sheet probability
+                cs_prob = p.get("clean_sheet_prob", 0.0)
+                if cs_prob > 0:
+                    # Clean sheet = 4 FPL points for DEF/GK
+                    odds_bonus += cs_prob * 3.0 * odds_weight
+            
+            # Team win bonus (affects all positions - bonus points potential)
+            team_win_prob = p.get("team_win_prob", 0.5)
+            win_bonus = (team_win_prob - 0.5) * 0.3 * odds_weight  # Small bonus for favored teams
+            odds_bonus += win_bonus
 
-        return score + captain_uplift + value_factor * value_weight
+        return score + captain_uplift + value_factor * value_weight + odds_bonus
     
     for pos in by_position:
         by_position[pos].sort(key=player_score, reverse=True)

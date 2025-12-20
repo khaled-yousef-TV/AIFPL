@@ -5,3 +5,4 @@ from .crud import DatabaseManager
 
 __all__ = ["Base", "Decision", "Prediction", "Settings", "DatabaseManager"]
 
+

@@ -6,3 +6,4 @@ from .models import Player, Team, Fixture, GameWeek
 
 __all__ = ["FPLClient", "FPLAuth", "Player", "Team", "Fixture", "GameWeek"]
 
+

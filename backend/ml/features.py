@@ -67,6 +67,12 @@ class PlayerFeatures:
     avg_points_5: float
     avg_minutes_3: float
     
+    # Betting odds (probabilities, 0-1)
+    anytime_goalscorer_prob: float = 0.0  # For FWD/MID
+    clean_sheet_prob: float = 0.0  # For DEF/GK
+    team_win_prob: float = 0.5  # Team's win probability
+    btts_prob: float = 0.5  # Both teams to score probability
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for model input."""
         return {
@@ -408,4 +414,5 @@ class FeatureEngineer:
         player_ids = [f.player_id for f in features]
         
         return matrix, player_ids
+
 

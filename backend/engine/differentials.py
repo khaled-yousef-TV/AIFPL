@@ -259,3 +259,4 @@ class DifferentialFinder:
         # This rewards high points and low ownership
         return predicted_points / (ownership ** 0.5)
 
+

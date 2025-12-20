@@ -19,8 +19,9 @@ Built for **manual decision support** (no login required): it uses public FPL da
   - **“Why this player over teammates?”** comparisons (same club + position)
   - Supports **more suggestions** via `suggestions_limit` (UI uses your Free Transfers as the default)
 - **🛫 European rotation risk**: UCL/UEL/UECL congestion affects scores + displayed badges
-- **📈 Trend reversal signal**: “bounce-back spots” for strong teams underperforming recently
-- **💾 Saved squads**: save/load/edit squads locally so you don’t re-enter weekly
+- **📈 Trend reversal signal**: "bounce-back spots" for strong teams underperforming recently
+- **💰 Betting odds integration**: Incorporate bookmaker odds (goalscorer, clean sheets) to enhance predictions
+- **💾 Saved squads**: save/load/edit squads locally so you don't re-enter weekly
 - **💷 Selling price editing**: use your **selling price** (can differ from current price)
 - **🔎 Player search**: search by player name or team (e.g. `Spurs`, `TOT`) + cheap bench fodder lists
 
@@ -72,6 +73,31 @@ npm run dev
 ```
 
 Open http://localhost:3000
+
+### 4. (Optional) Betting Odds Integration
+
+To enable betting odds integration for enhanced predictions:
+
+1. **Get API key**: Sign up at [The Odds API](https://the-odds-api.com/) (free tier: 500 requests/month)
+
+2. **Set environment variables**:
+   ```bash
+   # In backend/.env or system environment
+   export THE_ODDS_API_KEY=your_api_key_here
+   export BETTING_ODDS_ENABLED=true
+   export BETTING_ODDS_WEIGHT=0.25  # 25% influence on player scores (0-1)
+   ```
+
+3. **Restart backend**: The betting odds client will automatically fetch odds for fixtures
+
+**How it works**:
+- Fetches odds for upcoming fixtures (match winner, BTTS, totals)
+- Converts odds to probabilities (goalscorer for FWD/MID, clean sheets for DEF/GK)
+- Adds odds-based bonuses to player scores in squad selection
+- Caches odds for 6 hours to respect API rate limits
+- Gracefully degrades if API unavailable (continues without odds)
+
+**Note**: Works without API key - system will continue using ML predictions only.
 
 ## 📁 Project Structure
 

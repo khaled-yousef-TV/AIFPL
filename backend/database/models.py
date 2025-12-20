@@ -183,3 +183,4 @@ def init_db(db_url: str = "sqlite:///fpl_agent.db"):
     SessionLocal = sessionmaker(bind=engine)
     return engine, SessionLocal
 
+
