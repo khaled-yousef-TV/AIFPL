@@ -34,9 +34,9 @@ const FPLLogo = ({ className }: { className?: string }) => (
     {/* FPL letters */}
     <text 
       x="20" 
-      y="30" 
+      y="32" 
       textAnchor="middle" 
-      className="text-[6px] font-bold fill-white"
+      className="text-[8px] font-bold fill-white"
       fontFamily="Arial, sans-serif"
       fontWeight="bold"
     >
