@@ -349,7 +349,7 @@ async def _build_squad_with_predictor(
             # Fetch all odds once (more efficient)
             all_odds_data = betting_odds_client._fetch_all_odds()
             
-                if all_odds_data:
+            if all_odds_data:
                 logger.info(f"Retrieved {len(all_odds_data)} fixtures from betting API")
                 # Match each FPL fixture to betting odds
                 unmatched = []
