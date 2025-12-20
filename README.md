@@ -157,11 +157,22 @@ GitHub repo settings you must set once:
 GitHub Pages can’t run Python/FastAPI. Host the backend on a service like:
 - Render / Fly.io / Railway / a VPS (Docker)
 
+**Render Setup:**
+1. Create a new **Web Service** on Render
+2. Connect your GitHub repository
+3. Set the following:
+   - **Root Directory**: `backend`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+   - **Environment Variables**: Add `THE_ODDS_API_KEY`, `BETTING_ODDS_ENABLED=true`, `BETTING_ODDS_WEIGHT=0.3` (or your preferred weight)
+4. Set a **Custom Domain**: `api.fplai.nl` (point your DNS to Render's provided CNAME)
+
 Backend must expose the FastAPI app on HTTPS at:
 - `https://api.fplai.nl`
 
 Notes:
-- CORS is currently permissive (`allow_origins=["*"]`), so the Pages frontend can call the API.
+- CORS is configured to allow `fplai.nl` and `www.fplai.nl`
+- Python version is pinned to 3.12.7 via `runtime.txt`
 
 ## 🧠 How It Works
 
