@@ -104,6 +104,7 @@ function App() {
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('transfers')
   const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
@@ -264,6 +265,7 @@ function App() {
   }, [activeTab])
 
   const refresh = async () => {
+    setRefreshing(true)
     setError(null)
     try {
       const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
@@ -295,6 +297,8 @@ function App() {
       }
     } catch (err) {
       console.error('Refresh error:', err)
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -433,57 +437,66 @@ function App() {
   return (
     <div className="min-h-screen bg-[#0f0f1a] text-white">
       {/* Header */}
-      <header className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-[#00ff87] to-[#00cc6a] rounded-lg flex items-center justify-center">
-              <Zap className="w-5 h-5 text-[#0f0f1a]" />
+      <header className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-4 sm:px-6 py-3 sm:py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-[#00ff87] to-[#00cc6a] rounded-lg flex items-center justify-center flex-shrink-0">
+              <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-[#0f0f1a]" />
             </div>
-            <div>
-              <h1 className="font-bold text-lg">FPL Squad Suggester</h1>
-              <p className="text-xs text-gray-400">
-                {gameweek?.next ? `GW${gameweek.next.id} • Deadline: ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm sm:text-lg truncate">FPL Squad Suggester</h1>
+              <p className="text-[10px] sm:text-xs text-gray-400 truncate">
+                {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
               </p>
             </div>
           </div>
           
-          <button onClick={refresh} className="btn btn-secondary flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+          <button 
+            onClick={refresh} 
+            disabled={refreshing}
+            className="btn btn-secondary flex items-center gap-1 sm:gap-2 text-xs sm:text-base px-2 sm:px-4 py-1.5 sm:py-2 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+          >
+            <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
           </button>
         </div>
       </header>
 
       {/* Navigation */}
-      <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-6">
-        <div className="max-w-6xl mx-auto flex gap-1">
-          {[
-            { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers' },
-            { id: 'squad_combined', icon: Users, label: 'Squad • Combined' },
-            { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic' },
-            { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form' },
-            { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture' },
-            { id: 'picks', icon: Star, label: 'Top Picks' },
-            { id: 'differentials', icon: Target, label: 'Differentials' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
-                activeTab === tab.id 
-                  ? 'border-[#00ff87] text-white' 
-                  : 'border-transparent text-gray-400 hover:text-white'
-              }`}
-            >
-              <tab.icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          ))}
+      <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-4 sm:px-6">
+        <div className="max-w-6xl mx-auto overflow-x-auto scrollbar-hide">
+          <div className="flex gap-1 min-w-max">
+            {[
+              { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers', shortLabel: 'Transfers' },
+              { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined' },
+              { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic' },
+              { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form' },
+              { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture', shortLabel: 'Fixture' },
+              { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks' },
+              { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-3 border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === tab.id 
+                    ? 'border-[#00ff87] text-white' 
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                <tab.icon className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                <span className="text-xs sm:text-sm">
+                  <span className="sm:hidden">{tab.shortLabel}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </nav>
 
       {/* Content */}
-      <main className="max-w-6xl mx-auto p-6">
+      <main className="max-w-6xl mx-auto p-4 sm:p-6">
         
         {/* Squad Tabs */}
         {isSquadTab && !currentSquad && (
@@ -493,7 +506,7 @@ function App() {
         {isSquadTab && currentSquad && (
           <div className="space-y-6">
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Method</div>
                 <div className="text-lg font-bold text-[#00ff87]">{(currentSquad as any).method || 'Combined'}</div>
@@ -545,7 +558,7 @@ function App() {
                 <Award className="w-5 h-5 text-yellow-400" />
                 Captain Pick
               </div>
-              <div className="flex gap-4">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <div className="flex-1 p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-yellow-400 text-lg font-bold">©</span>
@@ -638,7 +651,7 @@ function App() {
                 <ChevronRight className="w-5 h-5 text-gray-400" />
                 Bench
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 {currentSquad.bench.map((player: any, i) => (
                   <div key={player.id} className={`p-3 bg-[#0f0f1a] rounded-lg border ${
                     player.rotation_risk === 'high' ? 'border-orange-500/50' : 'border-[#2a2a4a]'
@@ -691,53 +704,57 @@ function App() {
               </p>
               
               {/* Saved squads */}
-              <div className="mt-4 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Saved squads</span>
-                    <select
-                      value={selectedSavedId}
-                      onChange={(e) => setSelectedSavedId(e.target.value)}
-                      className="px-3 py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
-                    >
-                      <option value="">— Select —</option>
-                      {savedSquads.map(s => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button onClick={loadSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary">
-                      Load
-                    </button>
-                    <button onClick={() => saveOrUpdateSquad('update')} disabled={!selectedSavedId} className="btn btn-secondary">
-                      Update
-                    </button>
-                    <button onClick={() => saveOrUpdateSquad('new')} className="btn btn-secondary">
-                      Save as new
-                    </button>
-                    <button onClick={deleteSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary">
-                      Delete
-                    </button>
+              <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">Saved squads</span>
+                      <select
+                        value={selectedSavedId}
+                        onChange={(e) => setSelectedSavedId(e.target.value)}
+                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                      >
+                        <option value="">— Select —</option>
+                        {savedSquads.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={loadSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
+                        Load
+                      </button>
+                      <button onClick={() => saveOrUpdateSquad('update')} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
+                        Update
+                      </button>
+                      <button onClick={() => saveOrUpdateSquad('new')} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
+                        Save
+                      </button>
+                      <button onClick={deleteSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
+                        Delete
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Name</span>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <span className="text-xs text-gray-400 whitespace-nowrap">Name</span>
                     <input
                       value={saveName}
                       onChange={(e) => setSaveName(e.target.value)}
-                      className="px-3 py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
                       placeholder="My Squad"
                     />
                   </div>
                 </div>
-                <div className="text-[11px] text-gray-500 mt-2">
-                  Your current squad is also auto-saved locally, so you won’t need to re-enter it next week.
+                <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
+                  Your current squad is also auto-saved locally, so you won't need to re-enter it next week.
                 </div>
               </div>
 
               {/* Squad Input */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {/* Search & Add */}
                 <div>
                   <h3 className="font-medium mb-3">Add Players to Squad</h3>
@@ -898,35 +915,38 @@ function App() {
               </div>
               
               {/* Bank & Free Transfers */}
-              <div className="flex gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
-                <div>
-                  <label className="text-sm text-gray-400">Bank (£m)</label>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-400 whitespace-nowrap">Bank (£m)</label>
                   <input
                     type="number"
                     step="0.1"
                     value={bank}
                     onChange={(e) => setBank(parseFloat(e.target.value) || 0)}
-                    className="w-24 ml-2 px-3 py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none"
+                    className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
                   />
                 </div>
-                <div>
-                  <label className="text-sm text-gray-400">Free Transfers</label>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
                   <input
                     type="number"
                     min="0"
                     max="5"
                     value={freeTransfers}
                     onChange={(e) => setFreeTransfers(parseInt(e.target.value) || 1)}
-                    className="w-16 ml-2 px-3 py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none"
+                    className="w-20 sm:w-16 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
                   />
                 </div>
                 <button
                   onClick={getTransferSuggestions}
                   disabled={mySquad.length < 11 || transferLoading}
-                  className="btn btn-primary ml-auto"
+                  className="btn btn-primary sm:ml-auto w-full sm:w-auto text-sm sm:text-base"
                 >
                   {transferLoading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />
+                      Loading...
+                    </>
                   ) : (
                     'Get Suggestions'
                   )}
@@ -991,12 +1011,12 @@ function App() {
                         </span>
                       </div>
                       
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
                         {/* Out */}
                         <div className="flex-1 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
                           <div className="text-xs text-red-400 mb-1">Transfer Out</div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{suggestion.out.name}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm sm:text-base">{suggestion.out.name}</span>
                             {suggestion.out.european_comp && (
                               <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
                                 suggestion.out.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
@@ -1007,27 +1027,27 @@ function App() {
                               </span>
                             )}
                           </div>
-                          <div className="text-sm text-gray-400">{suggestion.out.team} • £{suggestion.out.price}m</div>
-                          <div className="text-xs text-gray-500 mt-1">
+                          <div className="text-xs sm:text-sm text-gray-400">{suggestion.out.team} • £{suggestion.out.price}m</div>
+                          <div className="text-[10px] sm:text-xs text-gray-500 mt-1">
                             vs {suggestion.out.fixture} (FDR {suggestion.out.fixture_difficulty}) • Form: {suggestion.out.form}
                           </div>
                         </div>
                         
-                        <ArrowRightLeft className="w-6 h-6 text-gray-500" />
+                        <ArrowRightLeft className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 mx-auto sm:mx-0 rotate-90 sm:rotate-0 flex-shrink-0" />
                         
                         {/* In */}
                         <div className="flex-1 p-3 bg-green-500/10 rounded-lg border border-green-500/30">
                           <div className="text-xs text-green-400 mb-1">Transfer In</div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{suggestion.in.name}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm sm:text-base">{suggestion.in.name}</span>
                             {suggestion.in.european_comp && (
                               <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">
                                 {suggestion.in.european_comp}
                               </span>
                             )}
                           </div>
-                          <div className="text-sm text-gray-400">{suggestion.in.team} • £{suggestion.in.price}m</div>
-                          <div className="text-xs text-gray-500 mt-1">
+                          <div className="text-xs sm:text-sm text-gray-400">{suggestion.in.team} • £{suggestion.in.price}m</div>
+                          <div className="text-[10px] sm:text-xs text-gray-500 mt-1">
                             vs {suggestion.in.fixture} (FDR {suggestion.in.fixture_difficulty}) • Form: {suggestion.in.form}
                           </div>
                         </div>
@@ -1121,7 +1141,7 @@ function App() {
 
         {/* Top Picks Tab */}
         {activeTab === 'picks' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
             {Object.entries(topPicks).map(([position, players]) => (
               <div key={position} className="card">
                 <div className="card-header capitalize">

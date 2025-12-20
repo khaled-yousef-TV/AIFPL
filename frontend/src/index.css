@@ -10,15 +10,15 @@
 
 @layer components {
   .card {
-    @apply bg-[#1a1a2e] rounded-xl p-5 border border-[#2a2a4a] shadow-lg;
+    @apply bg-[#1a1a2e] rounded-xl p-4 sm:p-5 border border-[#2a2a4a] shadow-lg;
   }
   
   .card-header {
-    @apply flex items-center gap-2 font-semibold text-lg mb-4;
+    @apply flex items-center gap-2 font-semibold text-base sm:text-lg mb-3 sm:mb-4;
   }
   
   .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+    @apply px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-medium transition-all duration-200 text-sm sm:text-base;
   }
   
   .btn-primary {
@@ -27,5 +27,26 @@
   
   .btn-secondary {
     @apply bg-[#2a2a4a] text-white hover:bg-[#3a3a5a];
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Mobile table improvements */
+@media (max-width: 640px) {
+  table {
+    font-size: 0.75rem;
+  }
+  
+  th, td {
+    padding: 0.5rem 0.25rem;
   }
 }
