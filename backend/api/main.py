@@ -349,9 +349,10 @@ async def _build_squad_with_predictor(
             # Fetch all odds once (more efficient)
             all_odds_data = betting_odds_client._fetch_all_odds()
             
-            if all_odds_data:
+                if all_odds_data:
                 logger.info(f"Retrieved {len(all_odds_data)} fixtures from betting API")
                 # Match each FPL fixture to betting odds
+                unmatched = []
                 for f in fixtures:
                     home_team = team_names.get(f.team_h, "???")
                     away_team = team_names.get(f.team_a, "???")
@@ -361,8 +362,11 @@ async def _build_squad_with_predictor(
                         fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
                         odds_fetched_count += 1
                     else:
-                        logger.debug(f"No betting odds found for {home_team} vs {away_team}")
+                        unmatched.append(f"{home_team} vs {away_team}")
+                
                 logger.info(f"Matched betting odds for {odds_fetched_count}/{len(fixtures)} fixtures")
+                if unmatched:
+                    logger.info(f"Unmatched fixtures: {', '.join(unmatched)}")
             else:
                 logger.warning("Could not fetch odds from betting API")
         except Exception as e:

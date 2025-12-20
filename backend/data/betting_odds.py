@@ -119,9 +119,9 @@ class BettingOddsClient:
             return cached
         
         try:
-            # Map FPL team names to betting API team names
-            home_betting = self._map_team_name(home_team)
-            away_betting = self._map_team_name(away_team)
+            # Map FPL team names to betting API team name variations
+            home_variations = self._map_team_name(home_team)
+            away_variations = self._map_team_name(away_team)
             
             # Use provided data or fetch if not provided
             if all_odds_data is None:
@@ -131,12 +131,21 @@ class BettingOddsClient:
                 return None
             
             # Find matching fixture
-            fixture_odds = self._find_fixture_odds(all_odds_data, home_betting, away_betting)
+            fixture_odds = self._find_fixture_odds(all_odds_data, home_variations, away_variations)
             
             if fixture_odds:
                 self._store_in_cache(cache_key, fixture_odds)
             else:
-                logger.debug(f"No odds found for {home_team} vs {away_team} (mapped: {home_betting} vs {away_betting})")
+                # Log available teams from betting API for debugging
+                available_teams = set()
+                for fixture in all_odds_data[:5]:  # Check first 5 fixtures
+                    available_teams.add(fixture.get("home_team", ""))
+                    available_teams.add(fixture.get("away_team", ""))
+                logger.debug(
+                    f"No odds match for {home_team} vs {away_team}. "
+                    f"Tried variations: {home_variations[:2]} vs {away_variations[:2]}. "
+                    f"Sample teams in API: {list(available_teams)[:4]}"
+                )
             
             return fixture_odds
             
@@ -144,54 +153,114 @@ class BettingOddsClient:
             logger.error(f"Error processing odds for {home_team} vs {away_team}: {e}")
             return None
     
-    def _map_team_name(self, fpl_team_name: str) -> str:
+    def _map_team_name(self, fpl_team_name: str) -> List[str]:
         """
-        Map FPL team name to betting API team name format.
+        Map FPL team name to possible betting API team name variations.
         
-        The Odds API may use different naming conventions.
-        This is a basic mapping - may need adjustment based on actual API responses.
+        Returns a list of possible names to try (most likely first).
+        The Odds API may use different naming conventions, so we try multiple variations.
         """
-        # Basic mappings for common variations
+        # Comprehensive mapping: FPL name -> [possible betting API names, ordered by likelihood]
         team_mapping = {
-            "Tottenham": "Tottenham Hotspur",
-            "Spurs": "Tottenham Hotspur",
-            "Man United": "Manchester United",
-            "Man Utd": "Manchester United",
-            "Man City": "Manchester City",
-            "Brighton": "Brighton & Hove Albion",
-            "Wolves": "Wolverhampton Wanderers",
-            "Leicester": "Leicester City",
-            "West Ham": "West Ham United",
-            "Crystal Palace": "Crystal Palace",
-            "Newcastle": "Newcastle United",
-            "Norwich": "Norwich City",
-            "Sheffield Utd": "Sheffield United",
-            "Sheffield United": "Sheffield United",
+            "Arsenal": ["Arsenal", "Arsenal FC"],
+            "Aston Villa": ["Aston Villa", "Aston Villa FC"],
+            "Bournemouth": ["Bournemouth", "AFC Bournemouth"],
+            "Brentford": ["Brentford", "Brentford FC"],
+            "Brighton": ["Brighton & Hove Albion", "Brighton", "Brighton Hove Albion"],
+            "Chelsea": ["Chelsea", "Chelsea FC"],
+            "Crystal Palace": ["Crystal Palace", "Crystal Palace FC", "Palace"],
+            "Everton": ["Everton", "Everton FC"],
+            "Fulham": ["Fulham", "Fulham FC"],
+            "Ipswich": ["Ipswich Town", "Ipswich"],
+            "Leicester": ["Leicester City", "Leicester"],
+            "Liverpool": ["Liverpool", "Liverpool FC"],
+            "Man City": ["Manchester City", "Man City", "Man. City"],
+            "Man United": ["Manchester United", "Man United", "Man Utd", "Man. United"],
+            "Man Utd": ["Manchester United", "Man United", "Man Utd", "Man. United"],
+            "Newcastle": ["Newcastle United", "Newcastle", "Newcastle Utd"],
+            "Nott'm Forest": ["Nottingham Forest", "Nott'm Forest", "Nottingham"],
+            "Nottingham Forest": ["Nottingham Forest", "Nott'm Forest", "Nottingham"],
+            "Sheffield Utd": ["Sheffield United", "Sheffield Utd", "Sheffield"],
+            "Sheffield United": ["Sheffield United", "Sheffield Utd", "Sheffield"],
+            "Spurs": ["Tottenham Hotspur", "Tottenham", "Spurs"],
+            "Tottenham": ["Tottenham Hotspur", "Tottenham", "Spurs"],
+            "West Ham": ["West Ham United", "West Ham", "West Ham Utd"],
+            "Wolves": ["Wolverhampton Wanderers", "Wolves", "Wolverhampton"],
         }
         
-        # Check if we have a mapping
-        if fpl_team_name in team_mapping:
-            return team_mapping[fpl_team_name]
+        # Normalize the input (trim, handle variations)
+        normalized = fpl_team_name.strip()
         
-        # Otherwise return as-is (API may accept it)
-        return fpl_team_name
+        # Check exact match first
+        if normalized in team_mapping:
+            return team_mapping[normalized]
+        
+        # Try case-insensitive match
+        for key, values in team_mapping.items():
+            if key.lower() == normalized.lower():
+                return values
+        
+        # If no mapping found, return original and some variations
+        return [normalized, normalized.replace(" ", "")]
     
-    def _find_fixture_odds(self, odds_data: List[Dict], home_team: str, away_team: str) -> Optional[Dict]:
-        """Find odds for a specific fixture in the API response."""
+    def _find_fixture_odds(self, odds_data: List[Dict], home_team_variations: List[str], away_team_variations: List[str]) -> Optional[Dict]:
+        """
+        Find odds for a specific fixture in the API response.
+        
+        Args:
+            odds_data: List of fixtures from The Odds API
+            home_team_variations: List of possible home team names to try
+            away_team_variations: List of possible away team names to try
+        """
         if not odds_data:
             return None
         
         # The Odds API structure: each item has home_team and away_team fields
         for fixture in odds_data:
-            fixture_home = fixture.get("home_team", "").lower()
-            fixture_away = fixture.get("away_team", "").lower()
+            fixture_home = fixture.get("home_team", "").strip()
+            fixture_away = fixture.get("away_team", "").strip()
             
-            # Check if this fixture matches
-            if (home_team.lower() in fixture_home or fixture_home in home_team.lower()) and \
-               (away_team.lower() in fixture_away or fixture_away in away_team.lower()):
-                return self._parse_odds_response(fixture)
+            # Try all combinations of team name variations
+            for home_var in home_team_variations:
+                for away_var in away_team_variations:
+                    if self._team_names_match(home_var, fixture_home) and \
+                       self._team_names_match(away_var, fixture_away):
+                        return self._parse_odds_response(fixture)
         
         return None
+    
+    def _team_names_match(self, name1: str, name2: str) -> bool:
+        """Check if two team names match (flexible matching)."""
+        n1 = name1.lower().strip()
+        n2 = name2.lower().strip()
+        
+        # Exact match
+        if n1 == n2:
+            return True
+        
+        # One contains the other (handles "Man United" vs "Manchester United")
+        if n1 in n2 or n2 in n1:
+            # But avoid false positives (e.g., "Man" matching "Manchester" alone)
+            if len(n1) >= 4 and len(n2) >= 4:
+                return True
+        
+        # Check if key words match (handles "Wolves" vs "Wolverhampton Wanderers")
+        n1_words = set(w for w in n1.split() if len(w) >= 3)
+        n2_words = set(w for w in n2.split() if len(w) >= 3)
+        
+        if n1_words and n2_words:
+            # If they share at least one significant word
+            if n1_words.intersection(n2_words):
+                return True
+        
+        # Check last word match (handles "Brighton" vs "Brighton & Hove Albion")
+        n1_last = n1.split()[-1] if n1.split() else ""
+        n2_last = n2.split()[-1] if n2.split() else ""
+        
+        if n1_last and n2_last and len(n1_last) >= 4 and n1_last == n2_last:
+            return True
+        
+        return False
     
     def _parse_odds_response(self, fixture_data: Dict) -> Dict:
         """
