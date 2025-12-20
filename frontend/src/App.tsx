@@ -405,7 +405,8 @@ function App() {
     if (activeTab === 'squad_fixture') ensureSquadLoaded('fixture')
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-  }, [activeTab, gameweek, selectedTeams, saveCurrentSelectedTeam])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, gameweek?.next?.id])
 
   const refresh = async () => {
     setRefreshing(true)
