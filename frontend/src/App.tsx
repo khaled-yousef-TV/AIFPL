@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, Star, Target, Flame, AlertTriangle, Plane,
@@ -166,14 +166,24 @@ function App() {
   const [selectedSavedId, setSelectedSavedId] = useState<string>('')
   const [saveName, setSaveName] = useState<string>('My Squad')
 
+  // Selected teams (suggested squads for each gameweek)
+  type SelectedTeam = {
+    gameweek: number
+    squad: SuggestedSquad
+    savedAt: number
+  }
+  const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
+  const [loadingSelectedTeam, setLoadingSelectedTeam] = useState(false)
+
   const SAVED_KEY = 'fpl_saved_squads_v1'
   const DRAFT_KEY = 'fpl_squad_draft_v1'
+  const SELECTED_TEAMS_KEY = 'fpl_selected_teams_v1'
 
   useEffect(() => {
     loadInitial()
   }, [])
 
-  // Load saved squads + last draft squad on mount
+  // Load saved squads + last draft squad + selected teams on mount
   useEffect(() => {
     try {
       const rawSaved = localStorage.getItem(SAVED_KEY)
@@ -194,7 +204,62 @@ function App() {
         }
       }
     } catch {}
+
+    try {
+      const rawSelected = localStorage.getItem(SELECTED_TEAMS_KEY)
+      if (rawSelected) {
+        const parsed = JSON.parse(rawSelected)
+        if (parsed && typeof parsed === 'object') {
+          setSelectedTeams(parsed)
+        }
+      }
+    } catch {}
   }, [])
+
+  // Save selected teams to localStorage
+  const saveSelectedTeams = (teams: Record<number, SelectedTeam>) => {
+    setSelectedTeams(teams)
+    try {
+      localStorage.setItem(SELECTED_TEAMS_KEY, JSON.stringify(teams))
+    } catch (e) {
+      console.error('Failed to save selected teams:', e)
+    }
+  }
+
+  // Save current suggested squad for current gameweek
+  const saveCurrentSelectedTeam = useCallback(async () => {
+    if (!gameweek?.next) return
+    
+    const gwId = gameweek.next.id
+    // Don't save if already exists
+    if (selectedTeams[gwId]) return
+    
+    setLoadingSelectedTeam(true)
+    try {
+      // Fetch the current combined squad suggestion
+      const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
+      setSelectedTeams(prev => {
+        const updated = {
+          ...prev,
+          [gwId]: {
+            gameweek: gwId,
+            squad: res,
+            savedAt: Date.now()
+          }
+        }
+        try {
+          localStorage.setItem(SELECTED_TEAMS_KEY, JSON.stringify(updated))
+        } catch (e) {
+          console.error('Failed to save selected teams:', e)
+        }
+        return updated
+      })
+    } catch (err) {
+      console.error('Failed to save selected team:', err)
+    } finally {
+      setLoadingSelectedTeam(false)
+    }
+  }, [gameweek, selectedTeams])
 
   // Auto-save draft whenever squad/bank/freeTransfers change
   useEffect(() => {
@@ -328,13 +393,19 @@ function App() {
 
   useEffect(() => {
     // Lazy-load heavy tabs only when the user opens them
+    if (activeTab === 'selected_teams') {
+      // Auto-save current suggested squad when viewing selected teams tab
+      if (gameweek?.next && !selectedTeams[gameweek.next.id]) {
+        saveCurrentSelectedTeam()
+      }
+    }
     if (activeTab === 'squad_combined') ensureSquadLoaded('combined')
     if (activeTab === 'squad_heuristic') ensureSquadLoaded('heuristic')
     if (activeTab === 'squad_form') ensureSquadLoaded('form')
     if (activeTab === 'squad_fixture') ensureSquadLoaded('fixture')
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-  }, [activeTab])
+  }, [activeTab, gameweek, selectedTeams, saveCurrentSelectedTeam])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -540,6 +611,7 @@ function App() {
           <div className="flex gap-1 min-w-max">
             {[
               { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers', shortLabel: 'Transfers' },
+              { id: 'selected_teams', icon: Trophy, label: 'Selected Teams', shortLabel: 'Selected' },
               { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined' },
               { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic' },
               { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form' },
@@ -1253,6 +1325,102 @@ function App() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Selected Teams Tab */}
+        {activeTab === 'selected_teams' && (
+          <div className="space-y-6">
+            <div className="card">
+              <div className="card-header">
+                <Trophy className="w-5 h-5 text-[#00ff87]" />
+                Selected Teams
+              </div>
+              <p className="text-gray-400 text-sm mb-4">
+                View your saved suggested squads for each gameweek. Squads are automatically saved when you visit this tab.
+              </p>
+
+              {loadingSelectedTeam && (
+                <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Saving current gameweek squad...
+                </div>
+              )}
+
+              {Object.keys(selectedTeams).length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No selected teams saved yet.</p>
+                  <p className="text-xs mt-2">Visit this tab to automatically save the current suggested squad.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {Object.values(selectedTeams)
+                    .sort((a, b) => b.gameweek - a.gameweek)
+                    .map((team) => (
+                      <div key={team.gameweek} className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-[#00ff87]">Gameweek {team.gameweek}</h3>
+                            <p className="text-xs text-gray-400 mt-1">
+                              Saved {new Date(team.savedAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-mono text-[#00ff87]">
+                              {(team.squad.predicted_points ?? 0).toFixed(1)} pts
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              £{team.squad.total_cost}m
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <h4 className="text-xs text-gray-400 mb-2 uppercase">Starting XI</h4>
+                            <div className="space-y-1">
+                              {team.squad.starting_xi.map((player) => (
+                                <div key={player.id} className="flex items-center justify-between text-sm py-1 border-b border-[#2a2a4a]/50">
+                                  <span>{player.name}</span>
+                                  <span className="text-gray-400 text-xs">{player.team} • £{player.price}m</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="text-xs text-gray-400 mb-2 uppercase">Bench</h4>
+                            <div className="space-y-1">
+                              {team.squad.bench.map((player) => (
+                                <div key={player.id} className="flex items-center justify-between text-sm py-1 border-b border-[#2a2a4a]/50">
+                                  <span className="text-gray-500">{player.name}</span>
+                                  <span className="text-gray-500 text-xs">{player.team} • £{player.price}m</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-gray-400">Captain:</span>
+                                <span className="font-semibold">{team.squad.captain.name}</span>
+                                <span className="text-[#00ff87]">({(team.squad.captain.predicted ?? 0).toFixed(1)} × 2)</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs mt-1">
+                                <span className="text-gray-400">Vice:</span>
+                                <span>{team.squad.vice_captain.name}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
