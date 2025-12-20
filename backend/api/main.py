@@ -102,6 +102,17 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
     }
 
+@app.get("/api/betting-odds-status")
+async def get_betting_odds_status():
+    """Debug endpoint to check betting odds configuration."""
+    return {
+        "enabled": betting_odds_client.enabled,
+        "has_api_key": bool(betting_odds_client.api_key),
+        "weight": betting_odds_client.weight,
+        "api_key_set": bool(os.getenv("THE_ODDS_API_KEY")),
+        "enabled_env": os.getenv("BETTING_ODDS_ENABLED", "false"),
+    }
+
 
 # ==================== Gameweek Info ====================
 
