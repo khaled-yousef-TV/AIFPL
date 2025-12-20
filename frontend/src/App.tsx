@@ -557,7 +557,7 @@ function App() {
               </div>
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Predicted Points</div>
-                <div className="text-2xl font-bold text-[#00ff87]">{currentSquad.predicted_points}</div>
+                <div className="text-2xl font-bold text-[#00ff87]">{(currentSquad.predicted_points ?? 0).toFixed(1)}</div>
               </div>
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Squad Cost</div>
@@ -604,14 +604,14 @@ function App() {
                     <span className="text-yellow-400 text-lg font-bold">©</span>
                     <span className="font-semibold text-lg">{currentSquad.captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{currentSquad.captain.predicted} × 2 = {(currentSquad.captain.predicted * 2).toFixed(1)}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{currentSquad.captain.predicted.toFixed(1)} × 2 = {(currentSquad.captain.predicted * 2).toFixed(1)}</span></span>
                 </div>
                 <div className="flex-1 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-gray-400">V</span>
                     <span className="font-medium">{currentSquad.vice_captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="font-mono">{currentSquad.vice_captain.predicted}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="font-mono">{(currentSquad.vice_captain.predicted ?? 0).toFixed(1)}</span></span>
                 </div>
               </div>
             </div>
@@ -676,7 +676,7 @@ function App() {
                           </span>
                         </td>
                         <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
-                        <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted}</td>
+                        <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted?.toFixed(1) ?? '0.0'}</td>
                         <td className="py-3 text-xs text-gray-400 max-w-[220px]">{player.reason}</td>
                       </tr>
                     ))}
@@ -721,7 +721,7 @@ function App() {
                     </div>
                     <div className="font-medium">{player.name}</div>
                     <div className="text-sm text-gray-400">{player.team} • £{player.price}m</div>
-                    <div className="text-sm text-[#00ff87] font-mono mt-1">{player.predicted} pts</div>
+                    <div className="text-sm text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'} pts</div>
                     <div className="text-xs text-gray-500 mt-1">{player.reason}</div>
                   </div>
                 ))}
@@ -1160,7 +1160,7 @@ function App() {
                               {player.fixture} ({player.fixture_difficulty})
                             </span>
                           </td>
-                          <td className="py-2 text-right font-mono">{player.predicted}</td>
+                          <td className="py-2 text-right font-mono">{player.predicted?.toFixed(1) ?? '0.0'}</td>
                           <td className="py-2 text-right font-mono">{player.form}</td>
                           <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
                           <td className={`py-2 text-right font-mono font-bold ${
@@ -1200,7 +1200,7 @@ function App() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[#00ff87] font-mono font-semibold">{player.predicted_points}</div>
+                          <div className="text-[#00ff87] font-mono font-semibold">{player.predicted_points?.toFixed(1) ?? '0.0'}</div>
                           <span className={`text-xs px-1.5 py-0.5 rounded ${
                             player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
                             player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
@@ -1267,7 +1267,7 @@ function App() {
                       </td>
                       <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
                       <td className="py-3 text-right font-mono text-orange-400">{player.ownership}%</td>
-                      <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted_points}</td>
+                      <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted_points?.toFixed(1) ?? '0.0'}</td>
                       <td className="py-3 text-xs text-gray-400 max-w-[150px]">{player.reason}</td>
                     </tr>
                   ))}
