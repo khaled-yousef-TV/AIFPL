@@ -174,6 +174,7 @@ function App() {
   }
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
   const [loadingSelectedTeam, setLoadingSelectedTeam] = useState(false)
+  const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
 
   const SAVED_KEY = 'fpl_saved_squads_v1'
   const DRAFT_KEY = 'fpl_squad_draft_v1'
@@ -226,7 +227,7 @@ function App() {
     }
   }
 
-  // Save current suggested squad for current gameweek
+  // Save current suggested squad for current gameweek (called 30 min before deadline)
   const saveCurrentSelectedTeam = useCallback(async () => {
     if (!gameweek?.next) return
     
@@ -254,12 +255,38 @@ function App() {
         }
         return updated
       })
+      console.log(`Saved suggested squad for Gameweek ${gwId} (30 min before deadline)`)
     } catch (err) {
       console.error('Failed to save selected team:', err)
     } finally {
       setLoadingSelectedTeam(false)
     }
-  }, [gameweek, selectedTeams])
+  }, [gameweek?.next?.id, selectedTeams])
+
+  // Check if we're within 30 minutes of deadline and auto-save
+  useEffect(() => {
+    if (!gameweek?.next?.deadline) return
+
+    const deadline = new Date(gameweek.next.deadline).getTime()
+    const now = Date.now()
+    const thirtyMinutesBeforeDeadline = deadline - (30 * 60 * 1000)
+    const timeUntilSave = thirtyMinutesBeforeDeadline - now
+
+    // If we're already past 30 min before deadline, save immediately
+    if (timeUntilSave <= 0) {
+      if (!selectedTeams[gameweek.next.id]) {
+        saveCurrentSelectedTeam()
+      }
+      return
+    }
+
+    // Schedule save 30 minutes before deadline
+    const timeoutId = setTimeout(() => {
+      saveCurrentSelectedTeam()
+    }, timeUntilSave)
+
+    return () => clearTimeout(timeoutId)
+  }, [gameweek?.next?.deadline, gameweek?.next?.id, saveCurrentSelectedTeam, selectedTeams])
 
   // Auto-save draft whenever squad/bank/freeTransfers change
   useEffect(() => {
@@ -393,20 +420,13 @@ function App() {
 
   useEffect(() => {
     // Lazy-load heavy tabs only when the user opens them
-    if (activeTab === 'selected_teams') {
-      // Auto-save current suggested squad when viewing selected teams tab
-      if (gameweek?.next && !selectedTeams[gameweek.next.id]) {
-        saveCurrentSelectedTeam()
-      }
-    }
     if (activeTab === 'squad_combined') ensureSquadLoaded('combined')
     if (activeTab === 'squad_heuristic') ensureSquadLoaded('heuristic')
     if (activeTab === 'squad_form') ensureSquadLoaded('form')
     if (activeTab === 'squad_fixture') ensureSquadLoaded('fixture')
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, gameweek?.next?.id])
+  }, [activeTab])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -1330,41 +1350,61 @@ function App() {
         )}
 
         {/* Selected Teams Tab */}
-        {activeTab === 'selected_teams' && (
-          <div className="space-y-6">
-            <div className="card">
-              <div className="card-header">
-                <Trophy className="w-5 h-5 text-[#00ff87]" />
-                Selected Teams
-              </div>
-              <p className="text-gray-400 text-sm mb-4">
-                View your saved suggested squads for each gameweek. Squads are automatically saved when you visit this tab.
-              </p>
+        {activeTab === 'selected_teams' && (() => {
+          const sortedTeams = Object.values(selectedTeams).sort((a, b) => b.gameweek - a.gameweek)
+          // Initialize selected gameweek tab if not set
+          const selectedGameweek = selectedGameweekTab || (sortedTeams.length > 0 ? sortedTeams[0].gameweek : null)
+          const currentTeam = selectedGameweek ? selectedTeams[selectedGameweek] : null
 
-              {loadingSelectedTeam && (
-                <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  Saving current gameweek squad...
+          return (
+            <div className="space-y-6">
+              <div className="card">
+                <div className="card-header">
+                  <Trophy className="w-5 h-5 text-[#00ff87]" />
+                  Selected Teams
                 </div>
-              )}
+                <p className="text-gray-400 text-sm mb-4">
+                  View your saved suggested squads. Squads are automatically saved 30 minutes before each gameweek deadline.
+                </p>
 
-              {Object.keys(selectedTeams).length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
-                  <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No selected teams saved yet.</p>
-                  <p className="text-xs mt-2">Visit this tab to automatically save the current suggested squad.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {Object.values(selectedTeams)
-                    .sort((a, b) => b.gameweek - a.gameweek)
-                    .map((team) => (
-                      <div key={team.gameweek} className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4">
-                        <div className="flex items-center justify-between mb-4">
+                {Object.keys(selectedTeams).length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No selected teams saved yet.</p>
+                    <p className="text-xs mt-2">Squads are automatically saved 30 minutes before the gameweek deadline.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Gameweek Tabs */}
+                    <div className="border-b border-[#2a2a4a] overflow-x-auto scrollbar-hide">
+                      <div className="flex gap-1 min-w-max">
+                        {sortedTeams.map((team) => (
+                          <button
+                            key={team.gameweek}
+                            onClick={() => setSelectedGameweekTab(team.gameweek)}
+                            className={`px-4 py-2 border-b-2 transition-colors whitespace-nowrap ${
+                              selectedGameweek === team.gameweek
+                                ? 'border-[#00ff87] text-white'
+                                : 'border-transparent text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-sm font-medium">GW{team.gameweek}</span>
+                            <span className="text-xs text-gray-500 ml-2">
+                              {new Date(team.savedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Selected Gameweek Content */}
+                    {currentTeam && (
+                      <div className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4 sm:p-6">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6">
                           <div>
-                            <h3 className="text-lg font-semibold text-[#00ff87]">Gameweek {team.gameweek}</h3>
-                            <p className="text-xs text-gray-400 mt-1">
-                              Saved {new Date(team.savedAt).toLocaleDateString('en-US', {
+                            <h3 className="text-xl font-semibold text-[#00ff87] mb-1">Gameweek {currentTeam.gameweek}</h3>
+                            <p className="text-xs text-gray-400">
+                              Saved {new Date(currentTeam.savedAt).toLocaleDateString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
@@ -1372,58 +1412,91 @@ function App() {
                               })}
                             </p>
                           </div>
-                          <div className="text-right">
-                            <div className="text-sm font-mono text-[#00ff87]">
-                              {(team.squad.predicted_points ?? 0).toFixed(1)} pts
+                          <div className="flex gap-4 mt-2 sm:mt-0">
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400">Predicted Points</div>
+                              <div className="text-lg font-mono font-semibold text-[#00ff87]">
+                                {(currentTeam.squad.predicted_points ?? 0).toFixed(1)}
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-400">
-                              £{team.squad.total_cost}m
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400">Total Cost</div>
+                              <div className="text-lg font-mono">
+                                £{currentTeam.squad.total_cost}m
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-gray-400">Formation</div>
+                              <div className="text-lg font-mono">
+                                {currentTeam.squad.formation}
+                              </div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          {/* Starting XI */}
                           <div>
-                            <h4 className="text-xs text-gray-400 mb-2 uppercase">Starting XI</h4>
-                            <div className="space-y-1">
-                              {team.squad.starting_xi.map((player) => (
-                                <div key={player.id} className="flex items-center justify-between text-sm py-1 border-b border-[#2a2a4a]/50">
-                                  <span>{player.name}</span>
-                                  <span className="text-gray-400 text-xs">{player.team} • £{player.price}m</span>
+                            <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Starting XI</h4>
+                            <div className="space-y-2">
+                              {currentTeam.squad.starting_xi.map((player) => (
+                                <div key={player.id} className="flex items-center justify-between text-sm py-2 px-3 bg-[#0b0b14] rounded border border-[#2a2a4a]/50">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{player.name}</span>
+                                    <span className={`px-1.5 py-0.5 rounded text-xs ${getPositionClass(player.position)}`}>
+                                      {player.position}
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs text-gray-400">{player.team}</div>
+                                    <div className="font-mono text-xs">£{player.price}m</div>
+                                  </div>
                                 </div>
                               ))}
                             </div>
                           </div>
+
+                          {/* Bench */}
                           <div>
-                            <h4 className="text-xs text-gray-400 mb-2 uppercase">Bench</h4>
-                            <div className="space-y-1">
-                              {team.squad.bench.map((player) => (
-                                <div key={player.id} className="flex items-center justify-between text-sm py-1 border-b border-[#2a2a4a]/50">
-                                  <span className="text-gray-500">{player.name}</span>
-                                  <span className="text-gray-500 text-xs">{player.team} • £{player.price}m</span>
+                            <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Bench</h4>
+                            <div className="space-y-2">
+                              {currentTeam.squad.bench.map((player) => (
+                                <div key={player.id} className="flex items-center justify-between text-sm py-2 px-3 bg-[#0b0b14] rounded border border-[#2a2a4a]/50 opacity-75">
+                                  <div className="flex items-center gap-2">
+                                    <span>{player.name}</span>
+                                    <span className={`px-1.5 py-0.5 rounded text-xs ${getPositionClass(player.position)}`}>
+                                      {player.position}
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs text-gray-500">{player.team}</div>
+                                    <div className="font-mono text-xs text-gray-500">£{player.price}m</div>
+                                  </div>
                                 </div>
                               ))}
                             </div>
-                            <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
-                              <div className="flex items-center gap-2 text-xs">
+                            <div className="mt-4 pt-4 border-t border-[#2a2a4a]">
+                              <div className="flex items-center gap-2 text-sm mb-2">
                                 <span className="text-gray-400">Captain:</span>
-                                <span className="font-semibold">{team.squad.captain.name}</span>
-                                <span className="text-[#00ff87]">({(team.squad.captain.predicted ?? 0).toFixed(1)} × 2)</span>
+                                <span className="font-semibold text-[#00ff87]">{currentTeam.squad.captain.name}</span>
+                                <span className="text-[#00ff87] font-mono">({(currentTeam.squad.captain.predicted ?? 0).toFixed(1)} × 2)</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs mt-1">
-                                <span className="text-gray-400">Vice:</span>
-                                <span>{team.squad.vice_captain.name}</span>
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-gray-400">Vice-Captain:</span>
+                                <span>{currentTeam.squad.vice_captain.name}</span>
+                                <span className="text-gray-500 font-mono">({(currentTeam.squad.vice_captain.predicted ?? 0).toFixed(1)})</span>
                               </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    ))}
-                </div>
-              )}
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Top Picks Tab */}
         {activeTab === 'picks' && (
