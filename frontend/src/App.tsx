@@ -145,6 +145,10 @@ function App() {
   const [activeTab, setActiveTab] = useState('transfers')
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [savingSquad, setSavingSquad] = useState(false)
+  const [loadingSquad, setLoadingSquad] = useState(false)
+  const [updatingSquad, setUpdatingSquad] = useState(false)
+  const [deletingSquad, setDeletingSquad] = useState(false)
   
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
@@ -207,37 +211,65 @@ function App() {
     } catch {}
   }
 
-  const loadSavedSquad = () => {
+  const loadSavedSquad = async () => {
     const s = savedSquads.find(x => x.id === selectedSavedId)
     if (!s) return
-    setMySquad(s.squad || [])
-    setBank(s.bank ?? 0)
-    setFreeTransfers(s.freeTransfers ?? 1)
-    setSaveName(s.name || 'My Squad')
+    
+    setLoadingSquad(true)
+    try {
+      // Small delay to show loading indicator
+      await new Promise(resolve => setTimeout(resolve, 200))
+      setMySquad(s.squad || [])
+      setBank(s.bank ?? 0)
+      setFreeTransfers(s.freeTransfers ?? 1)
+      setSaveName(s.name || 'My Squad')
+    } finally {
+      setLoadingSquad(false)
+    }
   }
 
-  const saveOrUpdateSquad = (mode: 'update' | 'new') => {
+  const saveOrUpdateSquad = async (mode: 'update' | 'new') => {
     const name = (saveName || 'My Squad').trim()
     const now = Date.now()
+    
     if (mode === 'update' && selectedSavedId) {
-      const next = savedSquads.map(s =>
-        s.id === selectedSavedId ? { ...s, name, updatedAt: now, squad: mySquad, bank, freeTransfers } : s
-      )
-      persistSavedSquads(next)
+      setUpdatingSquad(true)
+      try {
+        await new Promise(resolve => setTimeout(resolve, 200))
+        const next = savedSquads.map(s =>
+          s.id === selectedSavedId ? { ...s, name, updatedAt: now, squad: mySquad, bank, freeTransfers } : s
+        )
+        persistSavedSquads(next)
+      } finally {
+        setUpdatingSquad(false)
+      }
       return
     }
 
-    const id = `sq_${now}_${Math.random().toString(16).slice(2)}`
-    const next = [{ id, name, updatedAt: now, squad: mySquad, bank, freeTransfers }, ...savedSquads]
-    persistSavedSquads(next)
-    setSelectedSavedId(id)
+    setSavingSquad(true)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const id = `sq_${now}_${Math.random().toString(16).slice(2)}`
+      const next = [{ id, name, updatedAt: now, squad: mySquad, bank, freeTransfers }, ...savedSquads]
+      persistSavedSquads(next)
+      setSelectedSavedId(id)
+    } finally {
+      setSavingSquad(false)
+    }
   }
 
-  const deleteSavedSquad = () => {
+  const deleteSavedSquad = async () => {
     if (!selectedSavedId) return
-    const next = savedSquads.filter(s => s.id !== selectedSavedId)
-    persistSavedSquads(next)
-    setSelectedSavedId('')
+    
+    setDeletingSquad(true)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const next = savedSquads.filter(s => s.id !== selectedSavedId)
+      persistSavedSquads(next)
+      setSelectedSavedId('')
+    } finally {
+      setDeletingSquad(false)
+    }
   }
 
   const loadInitial = async () => {
@@ -763,17 +795,61 @@ function App() {
                       </select>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={loadSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
-                        Load
+                      <button 
+                        onClick={loadSavedSquad} 
+                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {loadingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Loading...</span>
+                          </>
+                        ) : (
+                          'Load'
+                        )}
                       </button>
-                      <button onClick={() => saveOrUpdateSquad('update')} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
-                        Update
+                      <button 
+                        onClick={() => saveOrUpdateSquad('update')} 
+                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {updatingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Updating...</span>
+                          </>
+                        ) : (
+                          'Update'
+                        )}
                       </button>
-                      <button onClick={() => saveOrUpdateSquad('new')} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
-                        Save
+                      <button 
+                        onClick={() => saveOrUpdateSquad('new')} 
+                        disabled={loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {savingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Saving...</span>
+                          </>
+                        ) : (
+                          'Save'
+                        )}
                       </button>
-                      <button onClick={deleteSavedSquad} disabled={!selectedSavedId} className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none">
-                        Delete
+                      <button 
+                        onClick={deleteSavedSquad} 
+                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {deletingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Deleting...</span>
+                          </>
+                        ) : (
+                          'Delete'
+                        )}
                       </button>
                     </div>
                   </div>
