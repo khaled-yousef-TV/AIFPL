@@ -265,7 +265,11 @@ function App() {
 
   // Check if we're within 30 minutes of deadline and auto-save
   useEffect(() => {
-    if (!gameweek?.next?.deadline) return
+    if (!gameweek?.next?.deadline || !gameweek?.next?.id) return
+    
+    const gwId = gameweek.next.id
+    // Skip if already saved for this gameweek
+    if (selectedTeams[gwId]) return
 
     const deadline = new Date(gameweek.next.deadline).getTime()
     const now = Date.now()
@@ -274,9 +278,7 @@ function App() {
 
     // If we're already past 30 min before deadline, save immediately
     if (timeUntilSave <= 0) {
-      if (!selectedTeams[gameweek.next.id]) {
-        saveCurrentSelectedTeam()
-      }
+      saveCurrentSelectedTeam()
       return
     }
 
