@@ -604,7 +604,7 @@ function App() {
                     <span className="text-yellow-400 text-lg font-bold">©</span>
                     <span className="font-semibold text-lg">{currentSquad.captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{currentSquad.captain.predicted.toFixed(1)} × 2 = {(currentSquad.captain.predicted * 2).toFixed(1)}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{(currentSquad.captain.predicted ?? 0).toFixed(1)} × 2 = {((currentSquad.captain.predicted ?? 0) * 2).toFixed(1)}</span></span>
                 </div>
                 <div className="flex-1 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                   <div className="flex items-center gap-2 mb-1">
