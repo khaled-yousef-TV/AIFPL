@@ -408,10 +408,22 @@ async def _build_squad_with_predictor(
             team_win_prob = 0.5
             
             if odds_data:
-                # Get probabilities based on position
+                # Phase 2: Enhanced odds with player stats
                 if player.element_type in [3, 4]:  # MID/FWD
+                    # Calculate player stats for better goalscorer estimation
+                    games_played = max(1, player.minutes / 90.0) if player.minutes > 0 else 1
+                    goals_per_game = player.goals_scored / games_played
+                    xg_per_game = float(player.expected_goals) / games_played
+                    
+                    player_stats = {
+                        "goals_per_game": goals_per_game,
+                        "xg_per_game": xg_per_game,
+                        "position": player.element_type,
+                        "is_premium": player.price >= 9.0
+                    }
+                    
                     anytime_goalscorer_prob = betting_odds_client.get_player_goalscorer_odds(
-                        player.web_name, odds_data
+                        player.web_name, odds_data, player_stats
                     )
                 elif player.element_type in [1, 2]:  # GK/DEF
                     clean_sheet_prob = betting_odds_client.get_clean_sheet_probability(
@@ -976,6 +988,26 @@ async def get_transfer_suggestions(request: TransferRequest):
         for team_id, diffs in long_term_fixtures.items():
             avg_fixture_difficulty[team_id] = sum(diffs) / len(diffs) if diffs else 3.0
 
+        # Phase 2: Fetch betting odds for transfer suggestions
+        fixture_odds_cache = {}
+        if betting_odds_client.enabled:
+            try:
+                logger.info(f"Fetching betting odds for transfer suggestions...")
+                all_odds_data = betting_odds_client._fetch_all_odds()
+                
+                if all_odds_data:
+                    # Match each FPL fixture to betting odds
+                    for f in fixtures:
+                        home_team = team_names.get(f.team_h, "???")
+                        away_team = team_names.get(f.team_a, "???")
+                        odds = betting_odds_client.get_fixture_odds(home_team, away_team, all_odds_data)
+                        if odds:
+                            fixture_odds_cache[f.team_h] = {**odds, "is_home": True}
+                            fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
+            except Exception as e:
+                logger.warning(f"Error fetching odds for transfer suggestions: {e}")
+                fixture_odds_cache = {}
+
         # Team trend/reversal signals (for "trend reversal" style thinking)
         try:
             all_fixtures = fpl_client.get_fixtures(gameweek=None)
@@ -1180,6 +1212,42 @@ async def get_transfer_suggestions(request: TransferRequest):
                 # Bounce-back bonus
                 if reversal >= 1.2:
                     buy_score += 0.6
+                
+                # Phase 2: Add betting odds bonus to transfer suggestions
+                odds_data = fixture_odds_cache.get(player.team, {})
+                if odds_data and betting_odds_client.enabled:
+                    odds_weight = betting_odds_client.weight
+                    is_home = fix.get("is_home", True)
+                    
+                    if player.element_type in [3, 4]:  # MID/FWD
+                        # Goalscorer probability
+                        games_played = max(1, player.minutes / 90.0) if player.minutes > 0 else 1
+                        goals_per_game = player.goals_scored / games_played
+                        xg_per_game = float(player.expected_goals) / games_played
+                        
+                        player_stats = {
+                            "goals_per_game": goals_per_game,
+                            "xg_per_game": xg_per_game,
+                            "position": player.element_type,
+                            "is_premium": player.price >= 9.0
+                        }
+                        
+                        goalscorer_prob = betting_odds_client.get_player_goalscorer_odds(
+                            player.web_name, odds_data, player_stats
+                        )
+                        if goalscorer_prob > 0:
+                            buy_score += goalscorer_prob * 2.5 * odds_weight
+                    
+                    elif player.element_type in [1, 2]:  # GK/DEF
+                        # Clean sheet probability
+                        cs_prob = betting_odds_client.get_clean_sheet_probability(is_home, odds_data)
+                        if cs_prob > 0:
+                            buy_score += cs_prob * 2.0 * odds_weight
+                    
+                    # Team win bonus
+                    team_win_prob = odds_data.get("home_win_prob" if is_home else "away_win_prob", 0.5)
+                    win_bonus = (team_win_prob - 0.5) * 0.4 * odds_weight
+                    buy_score += win_bonus
                 
                 replacements.append({
                     "id": player.id,

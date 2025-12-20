@@ -265,6 +265,7 @@ class BettingOddsClient:
     def _parse_odds_response(self, fixture_data: Dict) -> Dict:
         """
         Parse odds response and extract relevant markets.
+        Aggregates odds across multiple bookmakers for better accuracy.
         
         Returns:
             Dictionary with:
@@ -273,6 +274,7 @@ class BettingOddsClient:
             - draw_prob: Probability of draw
             - btts_prob: Probability of both teams to score
             - over_2_5_prob: Probability of over 2.5 goals
+            - under_2_5_prob: Probability of under 2.5 goals
         """
         parsed = {
             "home_win_prob": 0.5,
@@ -280,6 +282,7 @@ class BettingOddsClient:
             "draw_prob": 0.2,
             "btts_prob": 0.5,
             "over_2_5_prob": 0.5,
+            "under_2_5_prob": 0.5,
         }
         
         # Parse bookmaker odds
@@ -287,81 +290,170 @@ class BettingOddsClient:
         if not bookmakers:
             return parsed
         
-        # Aggregate odds across bookmakers (use first available for now)
-        bookmaker = bookmakers[0] if bookmakers else {}
-        markets = bookmaker.get("markets", [])
+        # Aggregate odds across ALL bookmakers (Phase 2 enhancement)
+        home_win_probs = []
+        away_win_probs = []
+        draw_probs = []
+        btts_probs = []
+        over_2_5_probs = []
+        under_2_5_probs = []
         
-        for market in markets:
-            market_key = market.get("key")
-            
-            if market_key == "h2h":  # Head-to-head (match winner)
-                outcomes = market.get("outcomes", [])
-                for outcome in outcomes:
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("price", 0)
-                    if odds > 0:
-                        prob = 1.0 / odds
-                        if "home" in name or name == fixture_data.get("home_team", "").lower():
-                            parsed["home_win_prob"] = prob
-                        elif "away" in name or name == fixture_data.get("away_team", "").lower():
-                            parsed["away_win_prob"] = prob
-                        elif "draw" in name:
-                            parsed["draw_prob"] = prob
-            
-            elif market_key == "totals":  # Over/Under totals
-                outcomes = market.get("outcomes", [])
-                for outcome in outcomes:
-                    name = outcome.get("name", "").lower()
-                    odds = outcome.get("price", 0)
-                    if odds > 0 and "over" in name and "2.5" in name:
-                        parsed["over_2_5_prob"] = 1.0 / odds
+        home_team_name = fixture_data.get("home_team", "").lower()
+        away_team_name = fixture_data.get("away_team", "").lower()
         
-        # Estimate BTTS from totals (if not available directly)
-        # High over_2_5 probability suggests BTTS likely
-        if parsed["over_2_5_prob"] > 0.5:
-            parsed["btts_prob"] = min(0.8, parsed["over_2_5_prob"] * 1.2)
+        for bookmaker in bookmakers:
+            markets = bookmaker.get("markets", [])
+            
+            for market in markets:
+                market_key = market.get("key")
+                
+                if market_key == "h2h":  # Head-to-head (match winner)
+                    outcomes = market.get("outcomes", [])
+                    for outcome in outcomes:
+                        name = outcome.get("name", "").lower()
+                        odds = outcome.get("price", 0)
+                        if odds > 0:
+                            prob = 1.0 / odds
+                            if "home" in name or name == home_team_name:
+                                home_win_probs.append(prob)
+                            elif "away" in name or name == away_team_name:
+                                away_win_probs.append(prob)
+                            elif "draw" in name:
+                                draw_probs.append(prob)
+                
+                elif market_key == "totals":  # Over/Under totals
+                    outcomes = market.get("outcomes", [])
+                    for outcome in outcomes:
+                        name = outcome.get("name", "").lower()
+                        odds = outcome.get("price", 0)
+                        if odds > 0:
+                            if "over" in name and "2.5" in name:
+                                over_2_5_probs.append(1.0 / odds)
+                            elif "under" in name and "2.5" in name:
+                                under_2_5_probs.append(1.0 / odds)
+                
+                # Check for BTTS market (if available directly)
+                elif market_key == "btts":  # Both teams to score
+                    outcomes = market.get("outcomes", [])
+                    for outcome in outcomes:
+                        name = outcome.get("name", "").lower()
+                        odds = outcome.get("price", 0)
+                        if odds > 0 and ("yes" in name or "true" in name):
+                            btts_probs.append(1.0 / odds)
+        
+        # Average probabilities across bookmakers (or use median for robustness)
+        if home_win_probs:
+            parsed["home_win_prob"] = sum(home_win_probs) / len(home_win_probs)
+        if away_win_probs:
+            parsed["away_win_prob"] = sum(away_win_probs) / len(away_win_probs)
+        if draw_probs:
+            parsed["draw_prob"] = sum(draw_probs) / len(draw_probs)
+        if over_2_5_probs:
+            parsed["over_2_5_prob"] = sum(over_2_5_probs) / len(over_2_5_probs)
+        if under_2_5_probs:
+            parsed["under_2_5_prob"] = sum(under_2_5_probs) / len(under_2_5_probs)
+        
+        # BTTS: Use direct market if available, otherwise estimate from totals
+        if btts_probs:
+            # Direct BTTS odds available
+            parsed["btts_prob"] = sum(btts_probs) / len(btts_probs)
+        else:
+            # Estimate BTTS from over/under totals (Phase 2: improved estimation)
+            if parsed["over_2_5_prob"] > 0.5:
+                # High-scoring game more likely to have BTTS
+                parsed["btts_prob"] = min(0.75, parsed["over_2_5_prob"] * 1.15)
+            elif parsed["under_2_5_prob"] > 0.6:
+                # Low-scoring game less likely to have BTTS
+                parsed["btts_prob"] = max(0.25, (1 - parsed["under_2_5_prob"]) * 0.8)
         
         return parsed
     
-    def get_player_goalscorer_odds(self, player_name: str, fixture_odds: Dict) -> float:
+    def get_player_goalscorer_odds(
+        self, 
+        player_name: str, 
+        fixture_odds: Dict,
+        player_stats: Optional[Dict] = None
+    ) -> float:
         """
-        Get anytime goalscorer odds for a player.
+        Get anytime goalscorer odds for a player (Phase 2: Enhanced estimation).
         
         Note: The Odds API doesn't directly provide player-specific goalscorer odds
-        in the free tier. This is a placeholder that estimates based on team odds.
-        
-        For MVP, we'll use team win probability as a proxy for attacking potential.
+        in the free tier. This function estimates based on:
+        - Team attacking odds (win probability, over/under goals)
+        - Player historical performance (goals per game, xG)
+        - Player position and premium status
         
         Args:
             player_name: Player name
             fixture_odds: Fixture odds dictionary from get_fixture_odds()
-            
+            player_stats: Optional dict with player stats:
+                - goals_per_game: Goals per game average
+                - xg_per_game: Expected goals per game
+                - position: FPL position ID (3=MID, 4=FWD)
+                - is_premium: Whether player is premium (price > 9.0)
+                
         Returns:
             Estimated probability (0-1) of player scoring
         """
         if not fixture_odds:
             return 0.0
         
-        # For MVP, use team win probability as a rough proxy
-        # Premium attackers on favored teams are more likely to score
-        # This is a simplified approach - in Phase 2 we can integrate a separate
-        # API that provides player-specific goalscorer odds
-        team_win_prob = fixture_odds.get("home_win_prob", 0.5)
+        # Phase 2: Use multiple signals for better estimation
+        team_win_prob = fixture_odds.get("home_win_prob", 0.5) or fixture_odds.get("away_win_prob", 0.5)
+        over_2_5_prob = fixture_odds.get("over_2_5_prob", 0.5)
         
-        # Rough estimate: top attackers on favored teams have higher scoring probability
-        # We'll refine this in Phase 2 with actual player-specific odds
-        estimated_prob = team_win_prob * 0.4  # Base multiplier
+        # Base probability from team attacking potential
+        # High-scoring favored teams = more goals for attackers
+        attacking_potential = (team_win_prob * 0.6 + over_2_5_prob * 0.4)
+        base_prob = attacking_potential * 0.35  # Base multiplier
         
-        # Adjust based on player name (premium players)
-        premium_players = ["haaland", "salah", "kane", "son", "de bruyne", "saka", "martinelli"]
-        if any(prem in player_name.lower() for prem in premium_players):
-            estimated_prob *= 1.5
+        # Phase 2: Adjust based on player stats if available
+        if player_stats:
+            goals_per_game = player_stats.get("goals_per_game", 0.0)
+            xg_per_game = player_stats.get("xg_per_game", 0.0)
+            position = player_stats.get("position", 4)  # Default to FWD
+            is_premium = player_stats.get("is_premium", False)
+            
+            # Players with higher goal rates get boost
+            if goals_per_game > 0.5:  # > 0.5 goals per game = elite scorer
+                base_prob *= (1.0 + goals_per_game * 0.4)
+            elif goals_per_game > 0.3:  # 0.3-0.5 = good scorer
+                base_prob *= (1.0 + goals_per_game * 0.25)
+            
+            # xG is a good predictor (better than actual goals for consistency)
+            if xg_per_game > 0.4:  # High xG = getting chances
+                base_prob *= (1.0 + xg_per_game * 0.3)
+            
+            # Premium players tend to be on set pieces, penalties, etc.
+            if is_premium:
+                base_prob *= 1.2
+            
+            # FWDs generally score more than MIDs
+            if position == 4:  # FWD
+                base_prob *= 1.15
+            elif position == 3:  # MID
+                base_prob *= 0.85
+        else:
+            # Fallback: Adjust based on player name (premium players)
+            premium_players = [
+                "haaland", "salah", "kane", "son", "de bruyne", "saka", "martinelli",
+                "watkins", "isak", "toney", "jesus", "nunez", "darwin", "gakpo",
+                "palmer", "foden", "maddison", "fernandes", "bruno"
+            ]
+            if any(prem in player_name.lower() for prem in premium_players):
+                base_prob *= 1.4
         
-        return min(0.6, estimated_prob)  # Cap at 60%
+        # Bound the probability between 0.05 (5%) and 0.65 (65%)
+        return max(0.05, min(0.65, base_prob))
     
     def get_clean_sheet_probability(self, is_home: bool, fixture_odds: Dict) -> float:
         """
-        Estimate clean sheet probability for a team.
+        Estimate clean sheet probability for a team (Phase 2: Enhanced).
+        
+        Uses multiple signals:
+        - BTTS probability (inverse relationship)
+        - Under 2.5 goals probability (low-scoring games)
+        - Team win probability (winning teams more likely to keep clean sheets)
         
         Args:
             is_home: Whether the team is playing at home
@@ -373,19 +465,27 @@ class BettingOddsClient:
         if not fixture_odds:
             return 0.3  # Default estimate
         
-        # BTTS probability is inverse of clean sheet probability (roughly)
+        # Phase 2: Use BTTS directly if available (more accurate)
         btts_prob = fixture_odds.get("btts_prob", 0.5)
-        cs_prob = (1.0 - btts_prob) * 0.8  # Rough conversion
+        # If BTTS is unlikely, clean sheet is more likely
+        cs_from_btts = (1.0 - btts_prob) * 0.75
         
-        # Adjust for home advantage
-        if is_home:
-            cs_prob *= 1.1
+        # Use under 2.5 goals as additional signal
+        under_2_5_prob = fixture_odds.get("under_2_5_prob", 0.5)
+        cs_from_totals = under_2_5_prob * 0.6  # Low-scoring games favor clean sheets
         
-        # Use team win probability as additional signal
+        # Team win probability: winning teams often keep clean sheets
         team_win_prob = fixture_odds.get("home_win_prob" if is_home else "away_win_prob", 0.5)
-        cs_prob = (cs_prob + (team_win_prob * 0.3)) / 1.3
+        cs_from_win = team_win_prob * 0.45
         
-        return max(0.1, min(0.7, cs_prob))  # Bound between 10% and 70%
+        # Phase 2: Weighted average of all signals
+        cs_prob = (cs_from_btts * 0.4 + cs_from_totals * 0.35 + cs_from_win * 0.25)
+        
+        # Adjust for home advantage (teams tend to be better defensively at home)
+        if is_home:
+            cs_prob *= 1.08
+        
+        return max(0.08, min(0.75, cs_prob))  # Bound between 8% and 75%
     
     def normalize_player_name(self, name: str) -> str:
         """Normalize player name for matching."""
