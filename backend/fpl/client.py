@@ -87,6 +87,15 @@ class FPLClient:
             response = session.get(url, timeout=30)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 503:
+                logger.warning(f"FPL API temporarily unavailable (503): {url}. This may be rate limiting or maintenance.")
+                # Return empty result instead of crashing for 503s
+                if "fixtures" in endpoint:
+                    return []
+                return {}
+            logger.error(f"API request failed: {e}")
+            raise
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
             raise

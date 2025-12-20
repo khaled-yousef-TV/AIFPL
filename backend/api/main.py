@@ -345,18 +345,30 @@ async def _build_squad_with_predictor(
     odds_fetched_count = 0
     if betting_odds_client.enabled:
         try:
-            logger.info("Fetching betting odds for fixtures...")
-            for f in fixtures:
-                home_team = team_names.get(f.team_h, "???")
-                away_team = team_names.get(f.team_a, "???")
-                odds = betting_odds_client.get_fixture_odds(home_team, away_team)
-                if odds:
-                    fixture_odds_cache[f.team_h] = {**odds, "is_home": True}
-                    fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
-                    odds_fetched_count += 1
-            logger.info(f"Fetched betting odds for {odds_fetched_count} fixtures")
+            logger.info(f"Fetching betting odds for {len(fixtures)} fixtures...")
+            # Fetch all odds once (more efficient)
+            all_odds_data = betting_odds_client._fetch_all_odds()
+            
+            if all_odds_data:
+                logger.info(f"Retrieved {len(all_odds_data)} fixtures from betting API")
+                # Match each FPL fixture to betting odds
+                for f in fixtures:
+                    home_team = team_names.get(f.team_h, "???")
+                    away_team = team_names.get(f.team_a, "???")
+                    odds = betting_odds_client.get_fixture_odds(home_team, away_team, all_odds_data)
+                    if odds:
+                        fixture_odds_cache[f.team_h] = {**odds, "is_home": True}
+                        fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
+                        odds_fetched_count += 1
+                    else:
+                        logger.debug(f"No betting odds found for {home_team} vs {away_team}")
+                logger.info(f"Matched betting odds for {odds_fetched_count}/{len(fixtures)} fixtures")
+            else:
+                logger.warning("Could not fetch odds from betting API")
         except Exception as e:
             logger.warning(f"Error fetching betting odds: {e}. Continuing without odds.")
+            import traceback
+            logger.debug(traceback.format_exc())
             fixture_odds_cache = {}
     else:
         logger.info("Betting odds disabled (not enabled or no API key)")

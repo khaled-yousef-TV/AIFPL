@@ -67,13 +67,45 @@ class BettingOddsClient:
         """Store odds in cache."""
         self._odds_cache[key] = (data, datetime.now())
     
-    def get_fixture_odds(self, home_team: str, away_team: str) -> Optional[Dict]:
+    def _fetch_all_odds(self) -> Optional[List[Dict]]:
+        """
+        Fetch all available odds from The Odds API (cached).
+        This is more efficient than fetching per-fixture.
+        """
+        cache_key = "_all_odds"
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            url = f"{self.BASE_URL}/sports/{self.SPORT}/odds"
+            params = {
+                "apiKey": self.api_key,
+                "regions": self.REGIONS,
+                "markets": self.MARKETS,
+                "oddsFormat": "decimal"
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Cache the full response
+            self._store_in_cache(cache_key, data)
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error fetching odds from The Odds API: {e}")
+            return None
+    
+    def get_fixture_odds(self, home_team: str, away_team: str, all_odds_data: Optional[List[Dict]] = None) -> Optional[Dict]:
         """
         Get odds for a fixture.
         
         Args:
             home_team: Home team name (FPL team name)
             away_team: Away team name (FPL team name)
+            all_odds_data: Pre-fetched odds data (optional, to avoid redundant API calls)
             
         Returns:
             Dictionary with odds data or None if unavailable
@@ -88,32 +120,28 @@ class BettingOddsClient:
         
         try:
             # Map FPL team names to betting API team names
-            # The Odds API uses different team name formats
             home_betting = self._map_team_name(home_team)
             away_betting = self._map_team_name(away_team)
             
-            url = f"{self.BASE_URL}/sports/{self.SPORT}/odds"
-            params = {
-                "apiKey": self.api_key,
-                "regions": self.REGIONS,
-                "markets": self.MARKETS,
-                "oddsFormat": "decimal"
-            }
+            # Use provided data or fetch if not provided
+            if all_odds_data is None:
+                all_odds_data = self._fetch_all_odds()
             
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            if not all_odds_data:
+                return None
             
             # Find matching fixture
-            fixture_odds = self._find_fixture_odds(data, home_betting, away_betting)
+            fixture_odds = self._find_fixture_odds(all_odds_data, home_betting, away_betting)
             
             if fixture_odds:
                 self._store_in_cache(cache_key, fixture_odds)
+            else:
+                logger.debug(f"No odds found for {home_team} vs {away_team} (mapped: {home_betting} vs {away_betting})")
             
             return fixture_odds
             
         except Exception as e:
-            logger.error(f"Error fetching odds for {home_team} vs {away_team}: {e}")
+            logger.error(f"Error processing odds for {home_team} vs {away_team}: {e}")
             return None
     
     def _map_team_name(self, fpl_team_name: str) -> str:
