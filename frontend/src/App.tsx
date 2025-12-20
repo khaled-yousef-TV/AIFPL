@@ -859,7 +859,8 @@ function App() {
                     <input
                       value={saveName}
                       onChange={(e) => setSaveName(e.target.value)}
-                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                      disabled={!!selectedSavedId}
+                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[#080811]"
                       placeholder="My Squad"
                     />
                   </div>
