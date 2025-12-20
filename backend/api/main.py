@@ -292,8 +292,10 @@ async def _build_squad_with_predictor(
     
     # Fetch betting odds for fixtures (cache fixture odds by team)
     fixture_odds_cache = {}
+    odds_fetched_count = 0
     if betting_odds_client.enabled:
         try:
+            logger.info("Fetching betting odds for fixtures...")
             for f in fixtures:
                 home_team = team_names.get(f.team_h, "???")
                 away_team = team_names.get(f.team_a, "???")
@@ -301,9 +303,13 @@ async def _build_squad_with_predictor(
                 if odds:
                     fixture_odds_cache[f.team_h] = {**odds, "is_home": True}
                     fixture_odds_cache[f.team_a] = {**odds, "is_home": False}
+                    odds_fetched_count += 1
+            logger.info(f"Fetched betting odds for {odds_fetched_count} fixtures")
         except Exception as e:
             logger.warning(f"Error fetching betting odds: {e}. Continuing without odds.")
             fixture_odds_cache = {}
+    else:
+        logger.info("Betting odds disabled (not enabled or no API key)")
 
     player_predictions = []
     for player in players:
@@ -598,6 +604,10 @@ def _build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
             team_win_prob = p.get("team_win_prob", 0.5)
             win_bonus = (team_win_prob - 0.5) * 0.3 * odds_weight  # Small bonus for favored teams
             odds_bonus += win_bonus
+            
+            # Log if odds bonus is significant (for debugging)
+            if odds_bonus > 0.5:
+                logger.debug(f"Player {p.get('name')} got odds bonus: {odds_bonus:.2f}")
 
         return score + captain_uplift + value_factor * value_weight + odds_bonus
     
