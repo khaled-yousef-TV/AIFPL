@@ -10,20 +10,31 @@ Built for **manual decision support** (no login required): it uses public FPL da
 
 ## ✨ Features
 
-- **🧠 Multi-method predictions**: Heuristic / Form-focused / Fixture-focused + **Combined average**
+### Prediction Methods
+- **🧠 Multi-method predictions**: 
+  - **Statistics-based**: Heuristic / Form-focused / Fixture-focused + **Combined average**
+  - **🆕 LSTM Neural Network**: Temporal sequence model (maintains hidden state for form/fatigue) - *Coming Soon*
 - **👥 Suggested Squad**: full 15-man squad + best XI + formation
 - **🧢 Captain & Vice**: picked from the suggested XI
-- **🔁 My Transfers**: enter your squad and get transfer ideas with reasons
-  - **FPL rules enforced** (e.g. **max 3 players per club**)
-  - **Hold / Save transfer** suggestion when the best move is marginal
-  - **“Why this player over teammates?”** comparisons (same club + position)
-  - Supports **more suggestions** via `suggestions_limit` (UI uses your Free Transfers as the default)
+
+### Transfer Management
+- **🔁 Transfers Tab**: 
+  - **Quick Transfers** (1-3 free transfers): AI-powered transfer suggestions with reasons
+  - **🆕 Wildcard** (4+ free transfers): Coordinated multi-transfer optimization considering future fixtures (next 5 gameweeks)
+  - **FPL rules enforced** (e.g. **max 3 players per club**, formation constraints)
+  - **"Why this player over teammates?"** comparisons (same club + position)
+  - **Grouped suggestions**: Multiple options for same player grouped in pills
+  - **Premium player protection**: High-value players only kept if performing well (form-based)
+- **🆕 Free Hit of the Week**: View saved suggested squads (auto-saved 30 mins before each deadline)
+- **💷 Selling price editing**: use your **selling price** (can differ from current price)
+- **🔎 Player search**: search by player name or team (e.g. `Spurs`, `TOT`) + cheap bench fodder lists
+
+### Advanced Features
 - **🛫 European rotation risk**: UCL/UEL/UECL congestion affects scores + displayed badges
 - **📈 Trend reversal signal**: "bounce-back spots" for strong teams underperforming recently
 - **💰 Betting odds integration**: Incorporate bookmaker odds (goalscorer, clean sheets) to enhance predictions
-- **💾 Saved squads**: save/load/edit squads server-side (syncs across devices)
-- **💷 Selling price editing**: use your **selling price** (can differ from current price)
-- **🔎 Player search**: search by player name or team (e.g. `Spurs`, `TOT`) + cheap bench fodder lists
+- **💾 Saved squads**: save/load/edit squads server-side (syncs across devices, PostgreSQL on Render)
+- **💾 Draft squad**: auto-save uses localStorage (local-only, temporary work-in-progress)
 
 ## 🏗️ Architecture
 
@@ -34,12 +45,31 @@ Built for **manual decision support** (no login required): it uses public FPL da
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                │
                                ▼
-                        ┌──────────────────┐
-                        │   ML Predictor   │
-                        │   + Decision     │
-                        │   Engine         │
-                        └──────────────────┘
+                    ┌──────────────────────┐
+                    │   ML Predictors      │
+                    │   ├─ XGBoost         │
+                    │   ├─ Heuristic       │
+                    │   ├─ Form/Fixture    │
+                    │   └─ LSTM (planned) │
+                    │                      │
+                    │   Decision Engines   │
+                    │   ├─ Transfers       │
+                    │   ├─ Wildcard        │
+                    │   └─ Squad Builder   │
+                    └──────────────────────┘
 ```
+
+### ML Architecture Separation
+
+**Statistics-based Predictors** (`backend/ml/`):
+- `features.py`: Feature extraction for XGBoost/heuristic (point-in-time)
+- `predictor.py`: XGBoost, Heuristic, Form, Fixture predictors
+
+**LSTM Predictor** (`backend/ml/lstm/`) - *Planned*:
+- **Completely independent module** (zero dependencies on existing ML code)
+- Own feature extraction, data loader, model, and predictor
+- Temporal sequence model with hidden state (form/fatigue memory)
+- See `LSTM_ARCHITECTURE_SEPARATION.md` for details
 
 ## 🚀 Quick Start (Local)
 
@@ -105,40 +135,70 @@ To enable betting odds integration for enhanced predictions:
 AIFPL/
 ├── backend/
 │   ├── api/                 # FastAPI endpoints
-│   │   └── main.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   └── response_models.py
 │   ├── fpl/                 # FPL API client
 │   │   ├── client.py
 │   │   ├── auth.py
 │   │   └── models.py
 │   ├── ml/                  # ML predictions
-│   │   ├── features.py
-│   │   └── predictor.py
+│   │   ├── features.py      # Statistics-based feature extraction
+│   │   ├── predictor.py     # XGBoost, Heuristic, Form, Fixture
+│   │   └── lstm/            # LSTM neural network (planned, independent)
+│   │       ├── features.py  # LSTM-specific feature extraction
+│   │       ├── data_loader.py
+│   │       ├── model.py
+│   │       ├── predictor.py
+│   │       └── trainer.py
 │   ├── engine/              # Decision logic
 │   │   ├── captain.py
 │   │   ├── lineup.py
 │   │   ├── transfers.py
-│   │   └── differentials.py
+│   │   ├── differentials.py
+│   │   └── mini_rebuild.py  # Wildcard engine
+│   ├── data/                # External data sources
+│   │   ├── betting_odds.py
+│   │   ├── european_teams.py
+│   │   └── trends.py
 │   ├── scheduler/           # Automation
 │   │   └── jobs.py
-│   └── database/            # Data storage
-│       ├── models.py
-│       └── crud.py
+│   ├── database/            # Data storage
+│   │   ├── models.py
+│   │   └── crud.py
+│   └── constants.py         # Shared constants
 ├── frontend/
 │   └── src/
-│       ├── App.tsx
-│       └── api/client.ts
+│       ├── App.tsx          # Main dashboard
+│       └── ...
 ├── requirements.txt
+├── LSTM_IMPLEMENTATION_PHASES.md      # LSTM implementation roadmap
+├── LSTM_ARCHITECTURE_SEPARATION.md    # LSTM separation strategy
 └── README.md
 ```
 
 ## 🔌 API Endpoints
+
+### Core Endpoints
 - `GET /api/gameweek` – current/next gameweek info
-- `GET /api/suggested-squad?method=combined|heuristic|form|fixture`
-- `GET /api/top-picks`
-- `GET /api/differentials`
-- `POST /api/transfer-suggestions` – transfer ideas (supports `suggestions_limit`)
+- `GET /api/suggested-squad?method=combined|heuristic|form|fixture|lstm` – suggested squad
+  - `combined`: Average of heuristic/form/fixture (default)
+  - `heuristic`: Balanced approach
+  - `form`: Recent form weighted
+  - `fixture`: Fixture difficulty focused
+  - `lstm`: LSTM neural network (planned)
+- `GET /api/top-picks` – top player picks by position
+- `GET /api/differentials` – low ownership, high potential players
+
+### Transfer & Squad Management
+- `POST /api/transfer-suggestions` – transfer ideas (1-3 transfers, supports `suggestions_limit`)
+- `POST /api/wildcard` – coordinated multi-transfer plan (4+ transfers, considers future fixtures)
+- `POST /api/saved-squads` – save/load/edit squads (server-side)
 - `GET /api/players/search?q=&position=&limit=` – search by player or team; includes EU badges
+
+### Utility
 - `GET /api/team-trends` – debug trend reversal scores
+- `GET /api/health` – health check
 
 ## 🚢 Deployment (Option A: GitHub Pages + separate backend)
 
@@ -178,30 +238,63 @@ Notes:
 
 ### Points Prediction
 
-Uses a hybrid approach:
+**Statistics-based Methods** (Current):
 1. **Form-based** - Recent performance weighted
-2. **Fixture difficulty** - Opponent strength
+2. **Fixture difficulty** - Opponent strength (current + next 5 GWs)
 3. **ICT Index** - FPL's influence/creativity/threat metrics
-4. **Expected stats** - xG, xA, xGI
+4. **Expected stats** - xG, xA, xGI, xGC
+5. **Betting odds** - Goalscorer/clean sheet probabilities (optional)
+
+**LSTM Neural Network** (Planned):
+- **Temporal sequences**: 5-gameweek look-back window
+- **Hidden state**: Maintains form/fatigue memory across gameweeks
+- **Sequence prediction**: Predicts based on player's recent trajectory
+- **See**: `LSTM_IMPLEMENTATION_PHASES.md` for implementation plan
 
 ### Decision Engine
 
 - **Captain**: Highest predicted points (with differential option)
 - **Lineup**: Formation optimization (3-5-2, 4-4-2, etc.)
-- **Transfers**: Points gain vs cost analysis
+- **Quick Transfers** (1-3): Points gain vs cost analysis, grouped suggestions
+- **Wildcard** (4+): Coordinated multi-transfer optimization
+  - Considers future fixtures (next 5 gameweeks)
+  - Protects premium players only if performing well (form-based)
+  - Enforces formation constraints strictly
 - **Differentials**: Low ownership + high prediction
 
-## 🔒 Security
+## 🔒 Security & Data Storage
 
 - Uses **public FPL data** (no login) and runs locally.
-- **Saved squads** are stored server-side in SQLite database (persist across devices).
-- **Draft squad** auto-save uses localStorage (local-only, temporary work-in-progress).
+- **Saved squads**: Stored server-side in PostgreSQL (on Render) or SQLite (local dev)
+  - Syncs across devices
+  - Persists across deployments (PostgreSQL on Render)
+- **Draft squad**: Auto-save uses localStorage (local-only, temporary work-in-progress)
+- **Environment variables**: API keys stored in `.env` (excluded from git)
 
-## 🛣️ Next Ideas
+## 🛣️ Development Roadmap
 
-- [ ] Better long-term planning (price changes, fixture runs, minutes prediction)
-- [ ] Chip strategy (Wildcard, Bench Boost, Triple Captain)
-- [ ] Hosted deployment + user accounts (optional)
+### ✅ Completed
+- [x] Multi-method predictions (Heuristic, Form, Fixture, Combined)
+- [x] Transfer suggestions with grouping and reasons
+- [x] Wildcard engine (coordinated multi-transfer optimization)
+- [x] Free Hit of the Week (saved squad management)
+- [x] Betting odds integration
+- [x] European rotation risk assessment
+- [x] Server-side squad persistence (PostgreSQL)
+
+### 🚧 In Progress
+- [ ] LSTM neural network implementation (see `LSTM_IMPLEMENTATION_PHASES.md`)
+  - Phase 1: Data processing & sequence generation
+  - Phase 2: LSTM model architecture
+  - Phase 3: Training pipeline
+  - Phase 4: API integration
+
+### 📋 Planned
+- [ ] Integer programming optimizer (PuLP/HiGHS) for global optimization
+- [ ] Multi-gameweek predictions (3-5 GWs ahead)
+- [ ] Chip strategy (Bench Boost, Triple Captain)
+- [ ] Price change prediction
+- [ ] Minutes prediction model
 
 ## 🤝 Contributing
 
@@ -209,6 +302,26 @@ Uses a hybrid approach:
 2. Create a feature branch
 3. Make changes
 4. Submit a PR
+
+## 📚 Documentation
+
+- **`LSTM_IMPLEMENTATION_PHASES.md`**: Complete LSTM implementation roadmap with phases
+- **`LSTM_ARCHITECTURE_SEPARATION.md`**: Architecture separation strategy (zero dependencies)
+- **`LSTM_IMPLEMENTATION_REVIEW.md`**: Detailed review of existing vs. needed code
+
+## 🔧 Development Notes
+
+### Model Architecture Separation
+- **Statistics-based** (`backend/ml/`): XGBoost, Heuristic, Form, Fixture - point-in-time predictions
+- **LSTM** (`backend/ml/lstm/`): Completely independent module with own feature extraction, data processing, and model
+- **Zero coupling**: LSTM can be removed without affecting existing code
+- **See**: `LSTM_ARCHITECTURE_SEPARATION.md` for complete separation strategy
+
+### Key Design Decisions
+- **Wildcard logic**: Considers future fixtures (next 5 GWs) over current fixture
+- **Premium player protection**: Only protects if form ≥ 4.0 (must perform to be kept)
+- **Transfer grouping**: Groups multiple options for same player to reduce clutter
+- **Server-side persistence**: PostgreSQL on Render for saved squads
 
 ## 📄 License
 
