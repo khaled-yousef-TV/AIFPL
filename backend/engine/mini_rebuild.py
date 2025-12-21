@@ -10,20 +10,22 @@ from typing import List, Dict, Tuple, Optional, Set
 from itertools import combinations
 from dataclasses import dataclass
 
-# Import constants - use absolute import
+# Import constants - handle both local dev and Render deployment
 try:
+    # Try absolute import first (for local dev from repo root)
     from backend.constants import (
         PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
         MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
     )
 except ImportError:
-    # Fallback for when running from different directory structure
+    # Fallback for Render (running from backend/ directory)
     try:
         from constants import (
             PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
             MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
         )
     except ImportError:
+        # Last resort: add backend directory to path
         import sys
         import os
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

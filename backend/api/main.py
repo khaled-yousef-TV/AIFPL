@@ -1851,7 +1851,11 @@ async def get_mini_rebuild(request: TransferRequest):
             })
         
         # Generate mini rebuild plan
-        from backend.engine.mini_rebuild import MiniRebuildEngine
+        # Handle imports for both local dev (from repo root) and Render (from backend/)
+        try:
+            from backend.engine.mini_rebuild import MiniRebuildEngine
+        except ImportError:
+            from engine.mini_rebuild import MiniRebuildEngine
         
         engine = MiniRebuildEngine()
         plan = engine.generate_plan(
