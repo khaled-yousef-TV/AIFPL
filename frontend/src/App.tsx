@@ -727,7 +727,7 @@ function App() {
     <div className="min-h-screen bg-[#0f0f1a] text-white flex">
       {/* Left Sidebar Navigation - Desktop Only */}
       <aside className="hidden md:flex flex-col w-64 bg-[#1a1a2e] border-r border-[#2a2a4a] sticky top-0 h-screen overflow-y-auto">
-        <div className="p-4 border-b border-[#2a2a4a]">
+        <div className="p-6 border-b border-[#2a2a4a]">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
               <FPLLogo className="w-6 h-6" />
@@ -828,11 +828,16 @@ function App() {
         {/* Desktop Header */}
         <header className="hidden md:block bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="font-bold text-lg">FPL Squad Suggester</h1>
-              <p className="text-xs text-gray-400">
-                {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
+                <FPLLogo className="w-6 h-6" />
+              </div>
+              <div>
+                <h1 className="font-bold text-lg">FPL Squad Suggester</h1>
+                <p className="text-xs text-gray-400">
+                  {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+                </p>
+              </div>
             </div>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
               <button 
