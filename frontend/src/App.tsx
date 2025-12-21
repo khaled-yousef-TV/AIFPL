@@ -820,23 +820,23 @@ function App() {
               <div className="flex-1 min-w-0">
                 <h1 className="font-bold text-sm">FPL Squad Suggester</h1>
                 {gameweek?.next && countdown ? (
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-[10px] text-gray-300 font-semibold">GW{gameweek.next.id}</span>
-                    <span className="text-[10px] text-gray-500">•</span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[10px] text-gray-300 font-bold">GW{gameweek.next.id}</span>
+                    <span className="text-[10px] text-gray-600 mx-0.5">•</span>
                     {countdown.days > 0 && (
                       <>
-                        <span className="text-[10px] font-bold text-[#00ff87]">{countdown.days}d</span>
-                        <span className="text-[10px] text-gray-500">:</span>
+                        <span className="text-[10px] font-bold text-[#00ff87] drop-shadow-[0_0_4px_rgba(0,255,135,0.5)]">{countdown.days}d</span>
+                        <span className="text-[10px] text-gray-600">:</span>
                       </>
                     )}
-                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.hours).padStart(2, '0')}</span>
-                    <span className="text-[10px] text-gray-500">:</span>
-                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.minutes).padStart(2, '0')}</span>
-                    <span className="text-[10px] text-gray-500">:</span>
-                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.seconds).padStart(2, '0')}</span>
+                    <span className="text-[10px] font-bold text-[#00ff87] drop-shadow-[0_0_4px_rgba(0,255,135,0.5)]">{String(countdown.hours).padStart(2, '0')}</span>
+                    <span className="text-[10px] text-gray-600">:</span>
+                    <span className="text-[10px] font-bold text-[#00ff87] drop-shadow-[0_0_4px_rgba(0,255,135,0.5)]">{String(countdown.minutes).padStart(2, '0')}</span>
+                    <span className="text-[10px] text-gray-600">:</span>
+                    <span className="text-[10px] font-bold text-[#00ff87] drop-shadow-[0_0_4px_rgba(0,255,135,0.6)] animate-pulse">{String(countdown.seconds).padStart(2, '0')}</span>
                   </div>
                 ) : (
-                  <p className="text-[10px] text-gray-400">
+                  <p className="text-[10px] text-gray-400 animate-pulse">
                     {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
                   </p>
                 )}
@@ -885,43 +885,51 @@ function App() {
             <div className="flex items-center gap-4">
               {gameweek?.next && (
                 <>
-                  <div className="text-gray-300 font-semibold">
+                  <div className="text-gray-300 font-bold text-lg tracking-wide">
                     GW{gameweek.next.id}
                   </div>
                   {countdown && (
-                    <div className="flex items-center gap-3">
+                    <>
+                      <div className="h-6 w-px bg-gradient-to-b from-transparent via-[#00ff87]/30 to-transparent"></div>
+                      <div className="flex items-center gap-2">
                       {countdown.days > 0 && (
                         <div className="flex items-center gap-1.5">
-                          <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
-                            {countdown.days}
+                          <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                            <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
+                            <span className="relative z-10 drop-shadow-sm">{countdown.days}</span>
                           </div>
-                          <span className="text-gray-400 text-xs font-medium">d</span>
+                          <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">d</span>
                         </div>
                       )}
                       <div className="flex items-center gap-1.5">
-                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
-                          {String(countdown.hours).padStart(2, '0')}
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                          <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
+                          <span className="relative z-10 drop-shadow-sm">{String(countdown.hours).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-medium">h</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">h</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
-                          {String(countdown.minutes).padStart(2, '0')}
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                          <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
+                          <span className="relative z-10 drop-shadow-sm">{String(countdown.minutes).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-medium">m</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">m</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
-                          {String(countdown.seconds).padStart(2, '0')}
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/40 border border-[#00ff87]/30 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/60">
+                          <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/30 to-transparent rounded-lg animate-ping opacity-20"></div>
+                          <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
+                          <span className="relative z-10 drop-shadow-sm">{String(countdown.seconds).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-medium">s</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">s</span>
                       </div>
                     </div>
+                    </>
                   )}
-                  {!countdown && <div className="text-gray-400 text-sm">Loading...</div>}
+                  {!countdown && <div className="text-gray-400 text-sm animate-pulse">Loading...</div>}
                 </>
               )}
-              {!gameweek?.next && <div className="text-gray-400 text-sm">Loading...</div>}
+              {!gameweek?.next && <div className="text-gray-400 text-sm animate-pulse">Loading...</div>}
             </div>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
               <button 
