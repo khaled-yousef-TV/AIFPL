@@ -13,8 +13,21 @@ from .models import (
     Settings, GameWeekLog, Decision, Prediction,
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot, init_db
 )
-# Import SavedSquad separately to ensure it's available
-from .models import SavedSquad
+# Import SavedSquad - must be imported after other models to avoid circular imports
+try:
+    from .models import SavedSquad
+except ImportError:
+    # Fallback: try absolute import
+    import sys
+    import os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    from database.models import SavedSquad
+
+# Verify SavedSquad is available
+if 'SavedSquad' not in globals():
+    raise ImportError("Failed to import SavedSquad from database.models")
 
 logger = logging.getLogger(__name__)
 
