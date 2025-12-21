@@ -8,9 +8,10 @@
 ## Code Changes
 - When modifying any file, immediately:
   1. Check `git status` to see what changed
-  2. `git add <files>`
-  3. `git commit -m "descriptive message"`
-  4. `git push origin main`
+  2. **VERIFY BUILDS** (see Build Verification section below)
+  3. `git add <files>`
+  4. `git commit -m "descriptive message"`
+  5. `git push origin main`
 
 ## File Modifications
 - If you read a file and see it has content that differs from git, check:
@@ -30,6 +31,19 @@
   1. Test locally if possible
   2. Commit and push immediately
   3. GitHub Actions will auto-deploy frontend
+
+## Build Verification (REQUIRED BEFORE COMMIT)
+- **ALWAYS verify both builds before committing and pushing:**
+  1. **Frontend Build:**
+     - Run: `cd frontend && npm run build`
+     - Must complete without errors
+     - Fix any build errors before committing
+  2. **Backend Build:**
+     - Run: `python3 -c "import sys; sys.path.insert(0, '.'); from backend.api.main import app"`
+     - Must import successfully without errors
+     - Fix any import/syntax errors before committing
+  3. **Only after both builds pass:**
+     - Proceed with `git add`, `git commit`, and `git push`
 
 ## Backend Deployment
 - After pushing backend changes:
