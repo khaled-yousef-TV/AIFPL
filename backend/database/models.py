@@ -231,8 +231,26 @@ def init_db(db_url: Optional[str] = None):
         Tuple of (engine, SessionLocal)
     """
     import os
+    import logging
+    logger_db = logging.getLogger(__name__)
+    
     if db_url is None:
         db_url = os.getenv("DATABASE_URL", "sqlite:///fpl_agent.db")
+    
+    # Log database initialization
+    if db_url.startswith("sqlite"):
+        logger_db.warning("⚠️  Initializing SQLite database - NOT PERSISTENT on Render!")
+        logger_db.warning("⚠️  Set DATABASE_URL to PostgreSQL connection string for persistence")
+    elif db_url.startswith("postgresql") or db_url.startswith("postgres"):
+        logger_db.info("✓ Initializing PostgreSQL database - persistent storage")
+    else:
+        logger_db.info(f"Initializing database: {db_url.split('://')[0] if '://' in db_url else 'unknown'}")
+    
+    # Handle PostgreSQL URL format (Render provides postgres://, SQLAlchemy needs postgresql://)
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+        logger_db.info("Converted postgres:// to postgresql:// for SQLAlchemy compatibility")
+    
     engine = create_engine(db_url, echo=False)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)

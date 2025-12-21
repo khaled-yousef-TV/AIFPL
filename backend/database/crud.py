@@ -35,13 +35,25 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     """Manager for database operations."""
     
-    def __init__(self, db_url: str = "sqlite:///fpl_agent.db"):
+    def __init__(self, db_url: Optional[str] = None):
         """
         Initialize database manager.
         
         Args:
-            db_url: Database connection URL
+            db_url: Database connection URL (defaults to DATABASE_URL env var or sqlite:///fpl_agent.db)
         """
+        import os
+        if db_url is None:
+            db_url = os.getenv("DATABASE_URL", "sqlite:///fpl_agent.db")
+        
+        # Log database type for debugging
+        if db_url.startswith("sqlite"):
+            logger.warning("⚠️  Using SQLite database - data will be lost on deployment! Use PostgreSQL for persistence.")
+        elif db_url.startswith("postgresql") or db_url.startswith("postgres"):
+            logger.info("✓ Using PostgreSQL database - data will persist across deployments")
+        else:
+            logger.info(f"Using database: {db_url.split('://')[0] if '://' in db_url else 'unknown'}")
+        
         self.engine, self.SessionLocal = init_db(db_url)
     
     def get_session(self) -> Session:
