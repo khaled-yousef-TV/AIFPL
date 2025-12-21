@@ -1596,6 +1596,10 @@ function App() {
                         </div>
                       )
                     })}
+                  </div>
+                )}
+              </div>
+            )}
             
         {/* Mini Rebuild Tab */}
         {activeTab === 'mini_rebuild' && (
@@ -1885,65 +1889,65 @@ function App() {
                   </div>
                 )}
               </>
-            )}
-          </div>
-        )}
-        
-            {/* Squad Analysis */}
-            {squadAnalysis.length > 0 && (
-              <div className="card">
-                <div className="card-header">
-                  <Target className="w-5 h-5 text-yellow-400" />
-                  Squad Analysis (sorted by priority to transfer out)
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
-                        <th className="pb-2">Player</th>
-                        <th className="pb-2">Fixture</th>
-                        <th className="pb-2 text-right">Pred</th>
-                        <th className="pb-2 text-right">Form</th>
-                        <th className="pb-2 text-right">5GW FDR</th>
-                        <th className="pb-2 text-right">Keep Score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {squadAnalysis.map((player: any) => (
-                        <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
-                          player.keep_score < 3 ? 'bg-red-500/10' : ''
-                        }`}>
-                          <td className="py-2">
-                            <span className="font-medium">{player.name}</span>
-                            <span className="text-gray-500 text-xs ml-1">({player.team})</span>
-                          </td>
-                          <td className="py-2">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${
-                              player.fixture_difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
-                              player.fixture_difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
-                              'bg-red-500/20 text-red-400'
+                    })}
+                  </div>
+                )}
+                
+                {/* Squad Analysis */}
+                {squadAnalysis.length > 0 && (
+                  <div className="card">
+                    <div className="card-header">
+                      <Target className="w-5 h-5 text-yellow-400" />
+                      Squad Analysis (sorted by priority to transfer out)
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
+                            <th className="pb-2">Player</th>
+                            <th className="pb-2">Fixture</th>
+                            <th className="pb-2 text-right">Pred</th>
+                            <th className="pb-2 text-right">Form</th>
+                            <th className="pb-2 text-right">5GW FDR</th>
+                            <th className="pb-2 text-right">Keep Score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {squadAnalysis.map((player: any) => (
+                            <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
+                              player.keep_score < 3 ? 'bg-red-500/10' : ''
                             }`}>
-                              {player.fixture} ({player.fixture_difficulty})
-                            </span>
-                          </td>
-                          <td className="py-2 text-right font-mono">{player.predicted?.toFixed(1) ?? '0.0'}</td>
-                          <td className="py-2 text-right font-mono">{player.form}</td>
-                          <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
-                          <td className={`py-2 text-right font-mono font-bold ${
-                            player.keep_score < 3 ? 'text-red-400' : 
-                            player.keep_score < 5 ? 'text-yellow-400' : 'text-green-400'
-                          }`}>
-                            {player.keep_score}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                              <td className="py-2">
+                                <span className="font-medium">{player.name}</span>
+                                <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                              </td>
+                              <td className="py-2">
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                  player.fixture_difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                                  player.fixture_difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {player.fixture} ({player.fixture_difficulty})
+                                </span>
+                              </td>
+                              <td className="py-2 text-right font-mono">{player.predicted?.toFixed(1) ?? '0.0'}</td>
+                              <td className="py-2 text-right font-mono">{player.form}</td>
+                              <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
+                              <td className={`py-2 text-right font-mono font-bold ${
+                                player.keep_score < 3 ? 'text-red-400' : 
+                                player.keep_score < 5 ? 'text-yellow-400' : 'text-green-400'
+                              }`}>
+                                {player.keep_score}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
         {/* Selected Teams Tab */}
         {activeTab === 'selected_teams' && (() => {
