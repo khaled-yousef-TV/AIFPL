@@ -1895,14 +1895,31 @@ async def get_mini_rebuild(request: TransferRequest):
 async def search_players(q: str = "", position: Optional[str] = None, limit: int = 50):
     """Search players by name or team for squad input."""
     try:
-        players = fpl_client.get_players()
-        teams = fpl_client.get_teams()
+        # Get players with error handling
+        try:
+            players = fpl_client.get_players()
+        except Exception as e:
+            logger.error(f"Failed to get players from FPL API: {e}")
+            raise HTTPException(status_code=503, detail=f"FPL API unavailable: {str(e)}")
+        
+        # Get teams with error handling
+        try:
+            teams = fpl_client.get_teams()
+        except Exception as e:
+            logger.error(f"Failed to get teams from FPL API: {e}")
+            raise HTTPException(status_code=503, detail=f"FPL API unavailable: {str(e)}")
+        
         team_names = {t.id: t.short_name for t in teams}
 
         # Rotation/EU badges are based on the upcoming gameweek context.
-        next_gw = fpl_client.get_next_gameweek()
-        fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
-        gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+        try:
+            next_gw = fpl_client.get_next_gameweek()
+            fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
+            gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
+        except Exception as e:
+            logger.warning(f"Failed to get gameweek/fixtures, using defaults: {e}")
+            fixtures = []
+            gw_deadline = datetime.now()
 
         fixture_info: Dict[int, Dict[str, Any]] = {}
         for f in fixtures:
@@ -1960,28 +1977,44 @@ async def search_players(q: str = "", position: Optional[str] = None, limit: int
 
         results = []
         for p in filtered:
-            team_short = team_names.get(p.team, "???")
-            fix = fixture_info.get(p.team, {})
-            difficulty = fix.get("difficulty", 3)
-            rotation = assess_rotation_risk(team_short, gw_deadline, difficulty)
-            results.append({
-                "id": p.id,
-                "name": p.web_name,
-                "full_name": p.full_name,
-                "team": team_short,
-                "position": p.position,
-                "price": p.price,
-                "minutes": p.minutes,
-                "status": p.status,
-                "rotation_risk": rotation.risk_level,
-                "european_comp": rotation.competition,
-            })
+            try:
+                team_short = team_names.get(p.team, "???")
+                fix = fixture_info.get(p.team, {})
+                difficulty = fix.get("difficulty", 3)
+                try:
+                    rotation = assess_rotation_risk(team_short, gw_deadline, difficulty)
+                    rotation_risk = rotation.risk_level
+                    european_comp = rotation.competition
+                except Exception as rot_error:
+                    logger.warning(f"Rotation risk assessment failed for {team_short}: {rot_error}")
+                    rotation_risk = "low"
+                    european_comp = None
+                
+                results.append({
+                    "id": p.id,
+                    "name": p.web_name,
+                    "full_name": p.full_name,
+                    "team": team_short,
+                    "position": p.position,
+                    "price": p.price,
+                    "minutes": p.minutes,
+                    "status": p.status,
+                    "rotation_risk": rotation_risk,
+                    "european_comp": european_comp,
+                })
+            except Exception as player_error:
+                logger.warning(f"Error processing player {p.id}: {player_error}")
+                continue  # Skip this player and continue with others
 
         return {"players": results}
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 503 from FPL API)
+        raise
     except Exception as e:
-        logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        logger.error(f"Search error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
 @app.get("/api/selected-teams")
