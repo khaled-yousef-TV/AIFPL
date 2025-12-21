@@ -1063,14 +1063,17 @@ function App() {
           </div>
         )}
 
-        {/* Quick Transfers Tab */}
+        {/* Transfers Tab (Quick Transfers 1-3, Mini Rebuild 4+) */}
         {activeTab === 'transfers' && (
-          <div className="space-y-6">
+          <div className={`space-y-6 transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-gradient-to-br from-purple-900/5 to-indigo-900/5 rounded-lg p-1' : ''}`}>
             {/* Instructions */}
-            <div className="card">
-              <div className="card-header">
-                <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+            <div className={`card transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-[#0f0f1a]/80 border-purple-500/20' : ''}`}>
+              <div className={`card-header transition-colors duration-300 ${freeTransfers >= 4 ? 'border-purple-500/30' : ''}`}>
+                <ArrowRightLeft className={`w-5 h-5 transition-colors duration-300 ${freeTransfers >= 4 ? 'text-purple-400' : 'text-[#00ff87]'}`} />
                 Transfers
+                {freeTransfers >= 4 && (
+                  <span className="ml-2 text-xs text-purple-400 font-medium">Mini Rebuild Mode</span>
+                )}
               </div>
               <p className="text-gray-400 text-sm mb-4">
                 {freeTransfers <= 3 
@@ -1432,7 +1435,11 @@ function App() {
                     }
                   }}
                   disabled={mySquad.length < 11 || transferLoading || miniRebuildLoading}
-                  className="btn btn-primary sm:ml-auto w-full sm:w-auto text-sm sm:text-base"
+                  className={`btn sm:ml-auto w-full sm:w-auto text-sm sm:text-base transition-colors duration-300 ${
+                    freeTransfers >= 4 
+                      ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500' 
+                      : 'btn-primary'
+                  }`}
                 >
                   {(transferLoading || miniRebuildLoading) ? (
                     <>
