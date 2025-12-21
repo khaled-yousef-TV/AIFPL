@@ -1899,13 +1899,13 @@ function App() {
                   </div>
                 )}
               </>
-                    })}
-                  </div>
-                )}
-                
-                {/* Squad Analysis */}
-                {squadAnalysis.length > 0 && (
-                  <div className="card">
+            )}
+          </div>
+        )}
+            
+        {/* Squad Analysis - Only shown in Quick Transfers tab */}
+        {activeTab === 'transfers' && squadAnalysis.length > 0 && (
+          <div className="card">
                     <div className="card-header">
                       <Target className="w-5 h-5 text-yellow-400" />
                       Squad Analysis (sorted by priority to transfer out)
@@ -1955,9 +1955,7 @@ function App() {
                       </table>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+        )}
 
         {/* Selected Teams Tab */}
         {activeTab === 'selected_teams' && (() => {
