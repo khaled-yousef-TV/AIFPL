@@ -1702,6 +1702,42 @@ function App() {
                   )}
                 </div>
                 
+                {/* Individual Transfer Breakdown - moved above comparison */}
+                {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
+                  <div className="card">
+                    <div className="card-header">
+                      <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+                      Transfer Breakdown
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (
+                        <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <span className="text-xs font-semibold text-[#00ff87]">#{i + 1}</span>
+                            <span className="text-[10px] text-red-400">OUT:</span>
+                            <span className="text-xs font-medium truncate">{transfer.out?.name}</span>
+                            <ArrowRightLeft className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                            <span className="text-[10px] text-green-400">IN:</span>
+                            <span className="text-xs font-medium truncate">{transfer.in?.name}</span>
+                          </div>
+                          {transfer.reason && (
+                            <div className="text-[10px] text-gray-400 leading-tight">{transfer.reason}</div>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5 text-[10px]">
+                            <span className={`${transfer.points_gain > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                              {transfer.points_gain > 0 ? '+' : ''}{transfer.points_gain} pts
+                            </span>
+                            <span className="text-gray-500">•</span>
+                            <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-gray-400'}>
+                              {transfer.cost > 0 ? '+' : ''}£{transfer.cost}m
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
                 {/* Before/After Squad Comparison */}
                 <div className="card">
                   <div className="card-header">
@@ -1712,15 +1748,15 @@ function App() {
                     {/* Before Squad */}
                     <div>
                       <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
-                      <div className="space-y-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {mySquad.map((player: SquadPlayer) => (
-                          <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <span className="font-medium text-sm">{player.name}</span>
-                                <span className="text-xs text-gray-500 ml-2">{player.team}</span>
+                          <div key={player.id} className="p-1.5 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
+                            <div className="flex flex-col">
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="font-medium text-xs truncate">{player.name}</span>
+                                <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
                               </div>
-                              <span className="text-xs text-gray-400">£{player.price}m</span>
+                              <span className="text-[10px] text-gray-500">{player.team}</span>
                             </div>
                           </div>
                         ))}
@@ -1736,15 +1772,15 @@ function App() {
                     <div>
                       <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
                       {miniRebuildPlan.resulting_squad?.squad ? (
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                           {miniRebuildPlan.resulting_squad.squad.map((player: any) => (
-                            <div key={player.id} className="p-2 bg-green-500/5 rounded border border-green-500/20">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <span className="font-medium text-sm">{player.name}</span>
-                                  <span className="text-xs text-gray-500 ml-2">{player.team}</span>
+                            <div key={player.id} className="p-1.5 bg-green-500/5 rounded border border-green-500/20">
+                              <div className="flex flex-col">
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <span className="font-medium text-xs truncate">{player.name}</span>
+                                  <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
                                 </div>
-                                <span className="text-xs text-gray-400">£{player.price}m</span>
+                                <span className="text-[10px] text-gray-500">{player.team}</span>
                               </div>
                             </div>
                           ))}
@@ -1755,33 +1791,6 @@ function App() {
                     </div>
                   </div>
                 </div>
-                
-                {/* Individual Transfer Breakdown */}
-                {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
-                  <div className="card">
-                    <div className="card-header">
-                      <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                      Transfer Breakdown
-                    </div>
-                    <div className="space-y-3">
-                      {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (
-                        <div key={i} className="p-3 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-sm font-semibold text-[#00ff87]">#{i + 1}</span>
-                            <span className="text-xs text-red-400">OUT:</span>
-                            <span className="text-sm font-medium">{transfer.out?.name}</span>
-                            <ArrowRightLeft className="w-4 h-4 text-gray-500" />
-                            <span className="text-xs text-green-400">IN:</span>
-                            <span className="text-sm font-medium">{transfer.in?.name}</span>
-                          </div>
-                          {transfer.reason && (
-                            <div className="text-xs text-gray-400">{transfer.reason}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
