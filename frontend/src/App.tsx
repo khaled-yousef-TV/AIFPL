@@ -233,7 +233,13 @@ function App() {
   const loadSavedSquads = async () => {
     setLoadingSavedSquads(true)
     try {
-      const res = await fetch(`${API_BASE}/api/saved-squads`).then(r => r.json())
+      const response = await fetch(`${API_BASE}/api/saved-squads`)
+      if (!response.ok) {
+        console.error(`Failed to load saved squads: HTTP ${response.status}`, await response.text().catch(() => ''))
+        setSavedSquads([])
+        return
+      }
+      const res = await response.json()
       if (res.squads && Array.isArray(res.squads)) {
         // Map API response to frontend format
         const mapped = res.squads.map((s: any) => {
@@ -250,9 +256,14 @@ function App() {
           }
         })
         setSavedSquads(mapped)
+        console.log(`Loaded ${mapped.length} saved squad(s)`)
+      } else {
+        console.warn('Unexpected response format from saved-squads endpoint:', res)
+        setSavedSquads([])
       }
     } catch (err) {
       console.error('Failed to load saved squads:', err)
+      setSavedSquads([])
     } finally {
       setLoadingSavedSquads(false)
     }
@@ -653,8 +664,7 @@ function App() {
   }
 
   const navigationTabs = [
-    { id: 'transfers', icon: ArrowRightLeft, label: 'Quick Transfers', shortLabel: 'Quick', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3 transfers)' },
-    { id: 'mini_rebuild', icon: Zap, label: 'Mini Rebuild', shortLabel: 'Rebuild', color: 'text-purple-400', description: 'Coordinated multi-transfer optimization (4+ transfers)' },
+    { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'selected_teams', icon: Trophy, label: 'Team of the Week', shortLabel: 'Team of Week', color: 'text-yellow-400', description: 'View your saved team of the week selections' },
     { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined', color: 'text-[#00ff87]', description: 'Optimal squad using combined prediction method' },
     { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic', color: 'text-purple-400', description: 'Squad based on heuristic predictions' },
@@ -781,10 +791,6 @@ function App() {
           <nav className="md:hidden bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-4 overflow-x-auto scrollbar-hide">
             <div className="flex gap-1 min-w-max py-2">
               {navigationTabs.map(tab => {
-                // Hide Mini Rebuild if free transfers < 4
-                if (tab.id === 'mini_rebuild' && freeTransfers < 4) {
-                  return null
-                }
                 return (
                   <button
                     key={tab.id}
@@ -838,10 +844,6 @@ function App() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {navigationTabs.map(tab => {
-                // Hide Mini Rebuild if free transfers < 4
-                if (tab.id === 'mini_rebuild' && freeTransfers < 4) {
-                  return null
-                }
                 return (
                   <button
                     key={tab.id}
@@ -1068,10 +1070,13 @@ function App() {
             <div className="card">
               <div className="card-header">
                 <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                Transfer Suggestions
+                Transfers
               </div>
               <p className="text-gray-400 text-sm mb-4">
-                Add your current squad below and get AI-powered transfer suggestions considering both short-term (next GW) and long-term (next 5 GWs) fixtures.
+                {freeTransfers <= 3 
+                  ? 'Add your current squad below and get AI-powered transfer suggestions (1-3 transfers) considering both short-term (next GW) and long-term (next 5 GWs) fixtures.'
+                  : 'Get a coordinated multi-transfer plan (4+ transfers) optimized for total points gain. All transfers work together as a cohesive unit, enforcing formation constraints.'
+                }
               </p>
               
               {/* Saved squads */}
@@ -1370,30 +1375,72 @@ function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="3"
+                  <select
                     value={freeTransfers}
                     onChange={(e) => {
                       const val = parseInt(e.target.value) || 1
-                      setFreeTransfers(Math.min(3, Math.max(1, val)))
+                      setFreeTransfers(val)
+                      // Clear previous results when switching
+                      setTransferSuggestions([])
+                      setMiniRebuildPlan(null)
                     }}
-                    className="w-20 sm:w-16 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
-                  />
+                    className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
+                  >
+                    {Array.from({ length: 15 }, (_, i) => i + 1).map(num => (
+                      <option key={num} value={num}>{num}</option>
+                    ))}
+                  </select>
                 </div>
                 <button
-                  onClick={getTransferSuggestions}
-                  disabled={mySquad.length < 11 || transferLoading}
+                  onClick={async () => {
+                    if (mySquad.length < 11) {
+                      setError('Please add at least 11 players to your squad')
+                      return
+                    }
+                    setError(null)
+                    
+                    if (freeTransfers <= 3) {
+                      // Quick Transfers
+                      await getTransferSuggestions()
+                    } else {
+                      // Mini Rebuild
+                      setMiniRebuildLoading(true)
+                      setTransferSuggestions([])
+                      try {
+                        const res = await fetch(`${API_BASE}/api/mini-rebuild`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            squad: mySquad,
+                            bank: bank,
+                            free_transfers: freeTransfers,
+                          }),
+                        })
+                        if (!res.ok) {
+                          const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }))
+                          throw new Error(errorData.detail || `HTTP ${res.status}`)
+                        }
+                        const data = await res.json()
+                        setMiniRebuildPlan(data)
+                      } catch (err) {
+                        console.error('Mini rebuild error:', err)
+                        setError(err instanceof Error ? err.message : 'Failed to generate mini rebuild plan')
+                        setMiniRebuildPlan(null)
+                      } finally {
+                        setMiniRebuildLoading(false)
+                      }
+                    }
+                  }}
+                  disabled={mySquad.length < 11 || transferLoading || miniRebuildLoading}
                   className="btn btn-primary sm:ml-auto w-full sm:w-auto text-sm sm:text-base"
                 >
-                  {transferLoading ? (
+                  {(transferLoading || miniRebuildLoading) ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />
                       Loading...
                     </>
                   ) : (
-                    'Get Suggestions'
+                    freeTransfers <= 3 ? 'Get Suggestions' : 'Generate Mini Rebuild'
                   )}
                 </button>
               </div>
@@ -1608,303 +1655,133 @@ function App() {
                   </div>
                 </div>
             )}
-          </div>
-        )}
             
-        {/* Mini Rebuild Tab */}
-        {activeTab === 'mini_rebuild' && (
-          <div className="space-y-6">
-            {freeTransfers < 4 ? (
-              <div className="card">
-                <div className="text-center py-8">
-                  <Zap className="w-12 h-12 mx-auto mb-4 text-gray-500" />
-                  <h3 className="text-lg font-semibold mb-2">Mini Rebuild Requires 4+ Free Transfers</h3>
-                  <p className="text-gray-400 text-sm">
-                    You currently have {freeTransfers} free transfer{freeTransfers !== 1 ? 's' : ''}. 
-                    Use <strong>Quick Transfers</strong> for 1-3 transfers, or wait until you have 4+ free transfers for a coordinated rebuild.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Instructions */}
+            {/* Mini Rebuild Results - shown when freeTransfers >= 4 */}
+            {freeTransfers >= 4 && miniRebuildPlan && (
+              <div className="space-y-6">
+                {/* Summary Card */}
                 <div className="card">
                   <div className="card-header">
-                    <Zap className="w-5 h-5 text-purple-400" />
-                    Mini Rebuild
+                    <TrendingUp className="w-5 h-5 text-[#00ff87]" />
+                    Rebuild Summary
                   </div>
-                  <p className="text-gray-400 text-sm mb-4">
-                    Get a coordinated multi-transfer plan optimized for total points gain. All transfers work together as a cohesive unit.
-                  </p>
-                  
-                  {/* Saved squads */}
-                  <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                    <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                        <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <span className="text-xs text-gray-400 whitespace-nowrap">Saved squads</span>
-                          <select
-                            value={selectedSavedName}
-                            onChange={(e) => setSelectedSavedName(e.target.value)}
-                            disabled={loadingSavedSquads}
-                            className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">— Select —</option>
-                            {savedSquads.map(s => (
-                              <option key={s.id} value={s.name}>
-                                {s.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <button 
-                          onClick={loadSavedSquad} 
-                          disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
-                          className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                        >
-                          {loadingSquad ? (
-                            <>
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                              <span className="hidden sm:inline">Loading...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Search className="w-3 h-3" />
-                              <span>Load Squad</span>
-                            </>
-                          )}
-                        </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-gray-400 text-sm mb-1">Total Points Gain</div>
+                      <div className="text-2xl font-bold text-[#00ff87]">
+                        +{miniRebuildPlan.total_points_gain?.toFixed(1) || '0.0'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-sm mb-1">Total Cost</div>
+                      <div className={`text-2xl font-bold ${miniRebuildPlan.total_cost < 0 ? 'text-green-400' : miniRebuildPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
+                        {miniRebuildPlan.total_cost > 0 ? '+' : ''}£{miniRebuildPlan.total_cost?.toFixed(1) || '0.0'}m
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-sm mb-1">Transfers</div>
+                      <div className="text-2xl font-bold text-gray-300">
+                        {miniRebuildPlan.transfers_out?.length || 0}
                       </div>
                     </div>
                   </div>
-                  
-                  {/* Bank & Free Transfers */}
-                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-400 whitespace-nowrap">Bank (£m)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={bankInput}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          if (val === '' || val === '.' || /^-?\d*\.?\d*$/.test(val)) {
-                            setBankInput(val)
-                            const numVal = parseFloat(val)
-                            if (!isNaN(numVal) && isFinite(numVal)) {
-                              setBank(numVal)
-                            } else if (val === '' || val === '.' || val === '-') {
-                              setBank(0)
-                            }
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const val = e.target.value
-                          const numVal = parseFloat(val)
-                          if (isNaN(numVal) || !isFinite(numVal) || numVal < 0) {
-                            setBankInput('0')
-                            setBank(0)
-                          } else {
-                            const formatted = numVal.toString()
-                            setBankInput(formatted)
-                            setBank(numVal)
-                          }
-                        }}
-                        className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
-                      />
+                  {miniRebuildPlan.combined_rationale && (
+                    <div className="mt-4 p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
+                      <div className="text-sm font-semibold text-gray-300 mb-2">Why This Combination Works</div>
+                      <div className="text-xs text-gray-400 leading-relaxed">
+                        {miniRebuildPlan.combined_rationale}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
-                      <input
-                        type="number"
-                        min="4"
-                        max="15"
-                        value={freeTransfers}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 4
-                          setFreeTransfers(Math.min(15, Math.max(4, val)))
-                        }}
-                        className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
-                      />
-                    </div>
-                    <button
-                      onClick={async () => {
-                        if (mySquad.length === 0) {
-                          setError('Please add your current squad first')
-                          return
-                        }
-                        setMiniRebuildLoading(true)
-                        setError(null)
-                        try {
-                          const res = await fetch(`${API_BASE}/api/mini-rebuild`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              squad: mySquad,
-                              bank: bank,
-                              free_transfers: freeTransfers,
-                            }),
-                          })
-                          if (!res.ok) {
-                            const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }))
-                            throw new Error(errorData.detail || `HTTP ${res.status}`)
-                          }
-                          const data = await res.json()
-                          setMiniRebuildPlan(data)
-                        } catch (err) {
-                          console.error('Mini rebuild error:', err)
-                          setError(err instanceof Error ? err.message : 'Failed to generate mini rebuild plan')
-                          setMiniRebuildPlan(null)
-                        } finally {
-                          setMiniRebuildLoading(false)
-                        }
-                      }}
-                      disabled={miniRebuildLoading || mySquad.length === 0}
-                      className="btn btn-primary flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {miniRebuildLoading ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Generating Plan...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="w-4 h-4" />
-                          <span>Generate Mini Rebuild</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  )}
                 </div>
                 
-                {/* Mini Rebuild Results */}
-                {miniRebuildPlan && (
-                  <div className="space-y-6">
-                    {/* Summary Card */}
-                    <div className="card">
-                      <div className="card-header">
-                        <TrendingUp className="w-5 h-5 text-[#00ff87]" />
-                        Rebuild Summary
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                          <div className="text-gray-400 text-sm mb-1">Total Points Gain</div>
-                          <div className="text-2xl font-bold text-[#00ff87]">
-                            +{miniRebuildPlan.total_points_gain?.toFixed(1) || '0.0'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 text-sm mb-1">Total Cost</div>
-                          <div className={`text-2xl font-bold ${miniRebuildPlan.total_cost < 0 ? 'text-green-400' : miniRebuildPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
-                            {miniRebuildPlan.total_cost > 0 ? '+' : ''}£{miniRebuildPlan.total_cost?.toFixed(1) || '0.0'}m
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400 text-sm mb-1">Transfers</div>
-                          <div className="text-2xl font-bold text-gray-300">
-                            {miniRebuildPlan.transfers_out?.length || 0}
-                          </div>
-                        </div>
-                      </div>
-                      {miniRebuildPlan.combined_rationale && (
-                        <div className="mt-4 p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
-                          <div className="text-sm font-semibold text-gray-300 mb-2">Why This Combination Works</div>
-                          <div className="text-xs text-gray-400 leading-relaxed">
-                            {miniRebuildPlan.combined_rationale}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Before/After Squad Comparison */}
-                    <div className="card">
-                      <div className="card-header">
-                        <Users className="w-5 h-5 text-[#00ff87]" />
-                        Squad Comparison
-                      </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Before Squad */}
-                        <div>
-                          <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
-                          <div className="space-y-2">
-                            {mySquad.map((player: SquadPlayer) => (
-                              <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <span className="font-medium text-sm">{player.name}</span>
-                                    <span className="text-xs text-gray-500 ml-2">{player.team}</span>
-                                  </div>
-                                  <span className="text-xs text-gray-400">£{player.price}m</span>
-                                </div>
+                {/* Before/After Squad Comparison */}
+                <div className="card">
+                  <div className="card-header">
+                    <Users className="w-5 h-5 text-[#00ff87]" />
+                    Squad Comparison
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Before Squad */}
+                    <div>
+                      <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
+                      <div className="space-y-2">
+                        {mySquad.map((player: SquadPlayer) => (
+                          <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="font-medium text-sm">{player.name}</span>
+                                <span className="text-xs text-gray-500 ml-2">{player.team}</span>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                        
-                        {/* Arrows */}
-                        <div className="hidden lg:flex items-center justify-center">
-                          <ArrowRightLeft className="w-8 h-8 text-[#00ff87] rotate-90 lg:rotate-0" />
-                        </div>
-                        
-                        {/* After Squad */}
-                        <div>
-                          <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
-                          {miniRebuildPlan.resulting_squad?.squad ? (
-                            <div className="space-y-2">
-                              {miniRebuildPlan.resulting_squad.squad.map((player: any) => (
-                                <div key={player.id} className="p-2 bg-green-500/5 rounded border border-green-500/20">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <span className="font-medium text-sm">{player.name}</span>
-                                      <span className="text-xs text-gray-500 ml-2">{player.team}</span>
-                                    </div>
-                                    <span className="text-xs text-gray-400">£{player.price}m</span>
-                                  </div>
-                                </div>
-                              ))}
+                              <span className="text-xs text-gray-400">£{player.price}m</span>
                             </div>
-                          ) : (
-                            <div className="text-gray-500 text-sm">Loading...</div>
-                          )}
-                        </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                     
-                    {/* Individual Transfer Breakdown */}
-                    {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
-                      <div className="card">
-                        <div className="card-header">
-                          <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                          Transfer Breakdown
-                        </div>
-                        <div className="space-y-3">
-                          {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (
-                            <div key={i} className="p-3 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm font-semibold text-[#00ff87]">#{i + 1}</span>
-                                <span className="text-xs text-red-400">OUT:</span>
-                                <span className="text-sm font-medium">{transfer.out?.name}</span>
-                                <ArrowRightLeft className="w-4 h-4 text-gray-500" />
-                                <span className="text-xs text-green-400">IN:</span>
-                                <span className="text-sm font-medium">{transfer.in?.name}</span>
+                    {/* Arrows */}
+                    <div className="hidden lg:flex items-center justify-center">
+                      <ArrowRightLeft className="w-8 h-8 text-[#00ff87] rotate-90 lg:rotate-0" />
+                    </div>
+                    
+                    {/* After Squad */}
+                    <div>
+                      <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
+                      {miniRebuildPlan.resulting_squad?.squad ? (
+                        <div className="space-y-2">
+                          {miniRebuildPlan.resulting_squad.squad.map((player: any) => (
+                            <div key={player.id} className="p-2 bg-green-500/5 rounded border border-green-500/20">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <span className="font-medium text-sm">{player.name}</span>
+                                  <span className="text-xs text-gray-500 ml-2">{player.team}</span>
+                                </div>
+                                <span className="text-xs text-gray-400">£{player.price}m</span>
                               </div>
-                              {transfer.reason && (
-                                <div className="text-xs text-gray-400">{transfer.reason}</div>
-                              )}
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="text-gray-500 text-sm">Loading...</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Individual Transfer Breakdown */}
+                {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
+                  <div className="card">
+                    <div className="card-header">
+                      <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+                      Transfer Breakdown
+                    </div>
+                    <div className="space-y-3">
+                      {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (
+                        <div key={i} className="p-3 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-sm font-semibold text-[#00ff87]">#{i + 1}</span>
+                            <span className="text-xs text-red-400">OUT:</span>
+                            <span className="text-sm font-medium">{transfer.out?.name}</span>
+                            <ArrowRightLeft className="w-4 h-4 text-gray-500" />
+                            <span className="text-xs text-green-400">IN:</span>
+                            <span className="text-sm font-medium">{transfer.in?.name}</span>
+                          </div>
+                          {transfer.reason && (
+                            <div className="text-xs text-gray-400">{transfer.reason}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
             
-        {/* Squad Analysis - Only shown in Quick Transfers tab */}
-        {activeTab === 'transfers' && squadAnalysis.length > 0 && (
+        {/* Squad Analysis - Only shown in Quick Transfers (1-3 transfers) */}
+        {activeTab === 'transfers' && freeTransfers <= 3 && squadAnalysis.length > 0 && (
           <div className="card">
                     <div className="card-header">
                       <Target className="w-5 h-5 text-yellow-400" />
