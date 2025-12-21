@@ -1716,6 +1716,7 @@ function App() {
                           return
                         }
                         setMiniRebuildLoading(true)
+                        setError(null)
                         try {
                           const res = await fetch(`${API_BASE}/api/mini-rebuild`, {
                             method: 'POST',
@@ -1726,11 +1727,16 @@ function App() {
                               free_transfers: freeTransfers,
                             }),
                           })
+                          if (!res.ok) {
+                            const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }))
+                            throw new Error(errorData.detail || `HTTP ${res.status}`)
+                          }
                           const data = await res.json()
                           setMiniRebuildPlan(data)
                         } catch (err) {
                           console.error('Mini rebuild error:', err)
-                          setError('Failed to generate mini rebuild plan')
+                          setError(err instanceof Error ? err.message : 'Failed to generate mini rebuild plan')
+                          setMiniRebuildPlan(null)
                         } finally {
                           setMiniRebuildLoading(false)
                         }
