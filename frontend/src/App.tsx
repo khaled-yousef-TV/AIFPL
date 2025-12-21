@@ -161,6 +161,10 @@ function App() {
   const [searchResults, setSearchResults] = useState<Player[]>([])
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
+  
+  // Mini Rebuild state
+  const [miniRebuildLoading, setMiniRebuildLoading] = useState(false)
+  const [miniRebuildPlan, setMiniRebuildPlan] = useState<any>(null)
 
   // Saved squads (persist between weeks) - now server-side
   const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
