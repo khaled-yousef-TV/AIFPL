@@ -1851,7 +1851,7 @@ async def get_mini_rebuild(request: TransferRequest):
             })
         
         # Generate mini rebuild plan
-        from ..engine.mini_rebuild import MiniRebuildEngine
+        from backend.engine.mini_rebuild import MiniRebuildEngine
         
         engine = MiniRebuildEngine()
         plan = engine.generate_plan(

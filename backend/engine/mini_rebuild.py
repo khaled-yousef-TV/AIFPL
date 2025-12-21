@@ -10,23 +10,29 @@ from typing import List, Dict, Tuple, Optional, Set
 from itertools import combinations
 from dataclasses import dataclass
 
-# Import constants - handle both relative and absolute imports
+# Import constants - use absolute import
 try:
-    from constants import (
+    from backend.constants import (
         PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
         MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
     )
 except ImportError:
     # Fallback for when running from different directory structure
-    import sys
-    import os
-    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
-    from constants import (
-        PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
-        MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
-    )
+    try:
+        from constants import (
+            PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
+            MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
+        )
+    except ImportError:
+        import sys
+        import os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        from constants import (
+            PlayerPosition, MAX_GK, MAX_DEF, MAX_MID, MAX_FWD,
+            MAX_PLAYERS_PER_TEAM, SQUAD_SIZE
+        )
 
 logger = logging.getLogger(__name__)
 
