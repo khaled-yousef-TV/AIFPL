@@ -1780,28 +1780,35 @@ function App() {
                     <Users className="w-5 h-5 text-[#00ff87]" />
                     Squad Comparison
                   </div>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* Before Squad */}
                     <div>
                       <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {mySquad.map((player: SquadPlayer) => (
-                          <div key={player.id} className="p-1.5 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
-                            <div className="flex flex-col">
-                              <div className="flex items-center justify-between mb-0.5">
-                                <span className="font-medium text-xs truncate">{player.name}</span>
-                                <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                        {mySquad.map((player: SquadPlayer) => {
+                          const isTransferOut = miniRebuildPlan.transfers_out?.some((t: any) => t.id === player.id)
+                          return (
+                            <div 
+                              key={player.id} 
+                              className={`p-1.5 rounded border ${
+                                isTransferOut 
+                                  ? 'bg-red-500/10 border-red-500/30' 
+                                  : 'bg-[#0f0f1a] border-[#2a2a4a]'
+                              }`}
+                            >
+                              <div className="flex flex-col">
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <span className={`font-medium text-xs truncate ${isTransferOut ? 'text-red-400' : ''}`}>
+                                    {player.name}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                                </div>
+                                <span className="text-[10px] text-gray-500">{player.team}</span>
                               </div>
-                              <span className="text-[10px] text-gray-500">{player.team}</span>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
-                    </div>
-                    
-                    {/* Arrows */}
-                    <div className="hidden lg:flex items-center justify-center">
-                      <ArrowRightLeft className="w-8 h-8 text-[#00ff87] rotate-90 lg:rotate-0" />
                     </div>
                     
                     {/* After Squad */}
@@ -1809,17 +1816,30 @@ function App() {
                       <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
                       {miniRebuildPlan.resulting_squad?.squad ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {miniRebuildPlan.resulting_squad.squad.map((player: any) => (
-                            <div key={player.id} className="p-1.5 bg-green-500/5 rounded border border-green-500/20">
-                              <div className="flex flex-col">
-                                <div className="flex items-center justify-between mb-0.5">
-                                  <span className="font-medium text-xs truncate">{player.name}</span>
-                                  <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                          {miniRebuildPlan.resulting_squad.squad.map((player: any) => {
+                            const isTransferIn = miniRebuildPlan.transfers_in?.some((t: any) => t.id === player.id)
+                            const wasInOriginal = mySquad.some((p: SquadPlayer) => p.id === player.id)
+                            return (
+                              <div 
+                                key={player.id} 
+                                className={`p-1.5 rounded border ${
+                                  isTransferIn 
+                                    ? 'bg-green-500/10 border-green-500/30' 
+                                    : 'bg-[#0f0f1a] border-[#2a2a4a]'
+                                }`}
+                              >
+                                <div className="flex flex-col">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <span className={`font-medium text-xs truncate ${isTransferIn ? 'text-green-400' : ''}`}>
+                                      {player.name}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                                  </div>
+                                  <span className="text-[10px] text-gray-500">{player.team}</span>
                                 </div>
-                                <span className="text-[10px] text-gray-500">{player.team}</span>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       ) : (
                         <div className="text-gray-500 text-sm">Loading...</div>
