@@ -1670,24 +1670,36 @@ function App() {
                     <TrendingUp className="w-5 h-5 text-[#00ff87]" />
                     Rebuild Summary
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div>
-                      <div className="text-gray-400 text-sm mb-1">Total Points Gain</div>
-                      <div className="text-2xl font-bold text-[#00ff87]">
+                      <div className="text-gray-400 text-sm mb-1">Before Total</div>
+                      <div className="text-xl font-bold text-gray-300">
+                        {miniRebuildPlan.before_total_points?.toFixed(1) || '0.0'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-sm mb-1">After Total</div>
+                      <div className="text-xl font-bold text-[#00ff87]">
+                        {miniRebuildPlan.after_total_points?.toFixed(1) || '0.0'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 text-sm mb-1">Points Gain</div>
+                      <div className="text-xl font-bold text-[#00ff87]">
                         +{miniRebuildPlan.total_points_gain?.toFixed(1) || '0.0'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-400 text-sm mb-1">Total Cost</div>
-                      <div className={`text-2xl font-bold ${miniRebuildPlan.total_cost < 0 ? 'text-green-400' : miniRebuildPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
+                      <div className="text-gray-400 text-sm mb-1">Net Cost</div>
+                      <div className={`text-xl font-bold ${miniRebuildPlan.total_cost < 0 ? 'text-green-400' : miniRebuildPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
                         {miniRebuildPlan.total_cost > 0 ? '+' : ''}£{miniRebuildPlan.total_cost?.toFixed(1) || '0.0'}m
                       </div>
                     </div>
-                    <div>
-                      <div className="text-gray-400 text-sm mb-1">Transfers</div>
-                      <div className="text-2xl font-bold text-gray-300">
-                        {miniRebuildPlan.transfers_out?.length || 0}
-                      </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                    <div className="text-xs text-gray-400">
+                      Transfers: {miniRebuildPlan.transfers_out?.length || 0} • 
+                      Kept: {miniRebuildPlan.kept_players?.length || (mySquad.length - (miniRebuildPlan.transfers_out?.length || 0))}
                     </div>
                   </div>
                   {miniRebuildPlan.combined_rationale && (
@@ -1700,12 +1712,38 @@ function App() {
                   )}
                 </div>
                 
+                {/* Kept Players Section */}
+                {miniRebuildPlan.kept_players && miniRebuildPlan.kept_players.length > 0 && (
+                  <div className="card">
+                    <div className="card-header">
+                      <Star className="w-5 h-5 text-yellow-400" />
+                      Kept Players ({miniRebuildPlan.kept_players.length})
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                      {miniRebuildPlan.kept_players.map((player: any) => (
+                        <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
+                          <div className="flex flex-col">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="font-medium text-xs truncate">{player.name}</span>
+                              <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-gray-500">{player.team}</span>
+                              <span className="text-[10px] text-[#00ff87] font-mono">{player.predicted?.toFixed(1) || '0.0'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
                 {/* Individual Transfer Breakdown - moved above comparison */}
                 {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
                   <div className="card">
                     <div className="card-header">
                       <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                      Transfer Breakdown
+                      Transfer Breakdown ({miniRebuildPlan.individual_breakdowns.length})
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (

@@ -49,6 +49,14 @@ class MiniRebuildPlan:
     resulting_squad: Dict
     combined_rationale: str
     individual_breakdowns: List[Dict]
+    before_total_points: float = 0.0
+    after_total_points: float = 0.0
+    kept_players: List[Dict] = None
+    
+    def __post_init__(self):
+        """Initialize kept_players as empty list if None."""
+        if self.kept_players is None:
+            self.kept_players = []
 
 
 class MiniRebuildEngine:
@@ -221,21 +229,44 @@ class MiniRebuildEngine:
             logger.warning(f"Not enough valid replacements found: {len(replacements)} < {free_transfers}")
             return None
         
-        # Calculate total points gain and cost
-        total_points_gain = sum(
+        # Build resulting squad first
+        resulting_squad = self._build_resulting_squad(
+            current_squad, selected_outs, replacements
+        )
+        
+        # Calculate total predicted points for BEFORE squad (all current players)
+        before_total_points = sum(
+            player.get("predicted", 0) for player in current_squad
+        )
+        
+        # Calculate total predicted points for AFTER squad (resulting squad)
+        after_total_points = sum(
+            player.get("predicted", 0) for player in resulting_squad.get("squad", [])
+        )
+        
+        # Calculate total points gain (more accurate: total after - total before)
+        total_points_gain = after_total_points - before_total_points
+        
+        # Also calculate per-transfer gain for individual breakdowns
+        transfer_points_gain = sum(
             replacements[i].get("predicted", 0) - selected_outs[i].get("predicted", 0)
             for i in range(len(replacements))
         )
+        
+        # Log if there's a discrepancy (shouldn't happen, but good for debugging)
+        if abs(total_points_gain - transfer_points_gain) > 0.01:
+            logger.warning(f"Points gain discrepancy: total={total_points_gain:.2f}, transfer_sum={transfer_points_gain:.2f}")
         
         total_cost = sum(
             replacements[i].get("price", 0) - selected_outs[i].get("price", 0)
             for i in range(len(replacements))
         )
         
-        # Build resulting squad
-        resulting_squad = self._build_resulting_squad(
-            current_squad, selected_outs, replacements
-        )
+        # Identify kept players (players not being transferred out)
+        kept_players = [
+            player for player in current_squad
+            if player.get("id") not in {p.get("id") for p in selected_outs}
+        ]
         
         # Generate combined rationale
         combined_rationale = self._generate_combined_rationale(
@@ -275,7 +306,10 @@ class MiniRebuildEngine:
             total_cost=round(total_cost, 1),
             resulting_squad=resulting_squad,
             combined_rationale=combined_rationale,
-            individual_breakdowns=individual_breakdowns
+            individual_breakdowns=individual_breakdowns,
+            before_total_points=round(before_total_points, 2),
+            after_total_points=round(after_total_points, 2),
+            kept_players=kept_players
         )
     
     def _group_by_position(self, squad: List[Dict]) -> Dict[int, List[Dict]]:
