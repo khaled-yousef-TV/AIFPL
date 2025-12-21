@@ -142,7 +142,7 @@ function App() {
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
-  const [activeTab, setActiveTab] = useState('transfers')
+  const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [savingSquad, setSavingSquad] = useState(false)
@@ -601,6 +601,17 @@ function App() {
     })
   }
 
+  const navigationTabs = [
+    { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions for your squad' },
+    { id: 'selected_teams', icon: Trophy, label: 'Team of the Week', shortLabel: 'Team of Week', color: 'text-yellow-400', description: 'View your saved team of the week selections' },
+    { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined', color: 'text-[#00ff87]', description: 'Optimal squad using combined prediction method' },
+    { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic', color: 'text-purple-400', description: 'Squad based on heuristic predictions' },
+    { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form', color: 'text-green-400', description: 'Squad focused on recent form' },
+    { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture', shortLabel: 'Fixture', color: 'text-orange-400', description: 'Squad optimized for fixture difficulty' },
+    { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
+    { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
+  ]
+
   const isSquadTab = activeTab.startsWith('squad_')
   const currentSquad: SuggestedSquad | null =
     activeTab === 'squad_combined' ? squad :
@@ -634,69 +645,165 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0f0f1a] text-white">
-      {/* Header */}
-      <header className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-4 sm:px-6 py-3 sm:py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg border border-[#00ff87]/20">
-              <FPLLogo className="w-8 h-8 sm:w-10 sm:h-10" />
+    <div className="min-h-screen bg-[#0f0f1a] text-white flex">
+      {/* Left Sidebar Navigation - Desktop Only */}
+      <aside className="hidden md:flex flex-col w-64 bg-[#1a1a2e] border-r border-[#2a2a4a] sticky top-0 h-screen overflow-y-auto">
+        <div className="p-4 border-b border-[#2a2a4a]">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
+              <FPLLogo className="w-6 h-6" />
             </div>
-            <div className="min-w-0">
-              <h1 className="font-bold text-sm sm:text-lg truncate">FPL Squad Suggester</h1>
-              <p className="text-[10px] sm:text-xs text-gray-400 truncate">
-                {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+            <div>
+              <h1 className="font-bold text-sm">FPL Squad Suggester</h1>
+              <p className="text-[10px] text-gray-400">
+                {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
               </p>
             </div>
           </div>
-          
-          <button 
-            onClick={refresh} 
-            disabled={refreshing}
-            className="btn btn-secondary flex items-center gap-1 sm:gap-2 text-xs sm:text-base px-2 sm:px-4 py-1.5 sm:py-2 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+        </div>
+        <nav className="flex-1 p-2">
+          <button
+            onClick={() => setActiveTab('home')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg mb-2 transition-colors ${
+              activeTab === 'home'
+                ? 'bg-[#00ff87]/10 text-[#00ff87] border border-[#00ff87]/30'
+                : 'text-gray-400 hover:text-white hover:bg-[#1a1a2e]/50'
+            }`}
           >
-            <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+            <div className="w-5 h-5 flex items-center justify-center">
+              <div className={`w-4 h-4 rounded ${activeTab === 'home' ? 'bg-[#00ff87]' : 'bg-gray-500'}`}></div>
+            </div>
+            <span className="text-sm font-medium">Home</span>
           </button>
-        </div>
-      </header>
+          {navigationTabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-[#00ff87]/10 text-[#00ff87] border border-[#00ff87]/30'
+                  : 'text-gray-400 hover:text-white hover:bg-[#1a1a2e]/50'
+              }`}
+            >
+              <tab.icon className={`w-5 h-5 flex-shrink-0 ${activeTab === tab.id ? tab.color : ''}`} />
+              <span className="text-sm font-medium">{tab.label}</span>
+            </button>
+          ))}
+        </nav>
+      </aside>
 
-      {/* Navigation */}
-      <nav className="bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto overflow-x-auto scrollbar-hide">
-          <div className="flex gap-1 min-w-max">
-            {[
-              { id: 'transfers', icon: ArrowRightLeft, label: 'My Transfers', shortLabel: 'Transfers' },
-              { id: 'selected_teams', icon: Trophy, label: 'Selected Teams', shortLabel: 'Selected' },
-              { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined' },
-              { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic' },
-              { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form' },
-              { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture', shortLabel: 'Fixture' },
-              { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks' },
-              { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-3 border-b-2 transition-colors whitespace-nowrap ${
-                  activeTab === tab.id 
-                    ? 'border-[#00ff87] text-white' 
-                    : 'border-transparent text-gray-400 hover:text-white'
-                }`}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile Header */}
+        <header className="md:hidden bg-[#1a1a2e] border-b border-[#2a2a4a] px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              onClick={() => setActiveTab('home')}
+              className="flex items-center gap-2"
+            >
+              <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
+                <FPLLogo className="w-6 h-6" />
+              </div>
+              <div>
+                <h1 className="font-bold text-sm">FPL Squad Suggester</h1>
+                <p className="text-[10px] text-gray-400">
+                  {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
+                </p>
+              </div>
+            </button>
+            {activeTab !== 'selected_teams' && activeTab !== 'home' && (
+              <button 
+                onClick={refresh} 
+                disabled={refreshing}
+                className="btn btn-secondary flex items-center gap-1 text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <tab.icon className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                <span className="text-xs sm:text-sm">
-                  <span className="sm:hidden">{tab.shortLabel}</span>
-                  <span className="hidden sm:inline">{tab.label}</span>
-                </span>
+                <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
               </button>
-            ))}
+            )}
           </div>
-        </div>
-      </nav>
+        </header>
 
-      {/* Content */}
-      <main className="max-w-6xl mx-auto p-4 sm:p-6">
+        {/* Mobile Navigation */}
+        {activeTab !== 'home' && (
+          <nav className="md:hidden bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-4 overflow-x-auto scrollbar-hide">
+            <div className="flex gap-1 min-w-max py-2">
+              {navigationTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1 px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
+                    activeTab === tab.id 
+                      ? 'border-[#00ff87] text-white' 
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <tab.icon className="w-4 h-4 flex-shrink-0" />
+                  <span className="text-xs">{tab.shortLabel}</span>
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
+
+        {/* Desktop Header */}
+        <header className="hidden md:block bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="font-bold text-lg">FPL Squad Suggester</h1>
+              <p className="text-xs text-gray-400">
+                {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+              </p>
+            </div>
+            {activeTab !== 'selected_teams' && activeTab !== 'home' && (
+              <button 
+                onClick={refresh} 
+                disabled={refreshing}
+                className="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        
+        {/* Home Page */}
+        {activeTab === 'home' && (
+          <div className="max-w-6xl mx-auto">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold mb-2">Welcome to FPL Squad Suggester</h2>
+              <p className="text-gray-400">Choose a section to get started</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {navigationTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className="group relative p-6 bg-[#1a1a2e] rounded-lg border border-[#2a2a4a] hover:border-[#00ff87]/50 transition-all hover:shadow-lg hover:shadow-[#00ff87]/10 text-left"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className={`p-3 rounded-lg bg-[#0f0f1a] ${tab.color} group-hover:scale-110 transition-transform`}>
+                      <tab.icon className="w-6 h-6" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg mb-1 group-hover:text-[#00ff87] transition-colors">
+                        {tab.label}
+                      </h3>
+                      <p className="text-sm text-gray-400">
+                        {tab.description}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-500 group-hover:text-[#00ff87] group-hover:translate-x-1 transition-all" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         
         {/* Squad Tabs */}
         {isSquadTab && !currentSquad && (
@@ -1397,7 +1504,7 @@ function App() {
               <div className="card">
                 <div className="card-header">
                   <Trophy className="w-5 h-5 text-[#00ff87]" />
-                  Selected Teams
+                  Team of the Week
                 </div>
                 <p className="text-gray-400 text-sm mb-4">
                   View your saved suggested squads. Squads are automatically saved 30 minutes before each gameweek deadline.
