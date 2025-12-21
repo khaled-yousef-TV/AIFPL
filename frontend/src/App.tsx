@@ -1597,9 +1597,9 @@ function App() {
                       )
                     })}
                   </div>
-                )}
-              </div>
-            )}
+                )})()}
+          </div>
+        )}
             
         {/* Mini Rebuild Tab */}
         {activeTab === 'mini_rebuild' && (
