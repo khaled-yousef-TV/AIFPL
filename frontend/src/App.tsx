@@ -737,20 +737,26 @@ function App() {
         {activeTab !== 'home' && (
           <nav className="md:hidden bg-[#1a1a2e]/50 border-b border-[#2a2a4a] px-4 overflow-x-auto scrollbar-hide">
             <div className="flex gap-1 min-w-max py-2">
-              {navigationTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1 px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
-                    activeTab === tab.id 
-                      ? 'border-[#00ff87] text-white' 
-                      : 'border-transparent text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4 flex-shrink-0" />
-                  <span className="text-xs">{tab.shortLabel}</span>
-                </button>
-              ))}
+              {navigationTabs.map(tab => {
+                // Hide Mini Rebuild if free transfers < 4
+                if (tab.id === 'mini_rebuild' && freeTransfers < 4) {
+                  return null
+                }
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-1 px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
+                      activeTab === tab.id 
+                        ? 'border-[#00ff87] text-white' 
+                        : 'border-transparent text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <tab.icon className="w-4 h-4 flex-shrink-0" />
+                    <span className="text-xs">{tab.shortLabel}</span>
+                  </button>
+                )
+              })}
             </div>
           </nav>
         )}
