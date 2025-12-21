@@ -397,7 +397,7 @@ async def shutdown_event():
 
 # ==================== Health Check ====================
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 async def health_check():
     """
     Health check endpoint.
@@ -422,7 +422,7 @@ async def get_betting_odds_status():
 
 # ==================== Gameweek Info ====================
 
-@app.get("/api/gameweek")
+@app.get("/api/gameweek", response_model=GameWeekResponse)
 async def get_gameweek():
     """Get current and next gameweek info."""
     try:
@@ -1971,7 +1971,7 @@ class SaveSquadRequest(BaseModel):
         }
 
 
-@app.get("/api/saved-squads")
+@app.get("/api/saved-squads", response_model=SavedSquadsResponse)
 async def get_saved_squads():
     """
     Get all user-saved squads (with custom names).
@@ -2101,7 +2101,7 @@ async def delete_saved_squad(name: str):
 
 # ==================== Wake-up Endpoint for Render Free Tier ====================
 
-@app.post("/api/wake-up")
+@app.post("/api/wake-up", response_model=HealthResponse)
 async def wake_up():
     """
     Endpoint to wake up the server and check for missed saves.
