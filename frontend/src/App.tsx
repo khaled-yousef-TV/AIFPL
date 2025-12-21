@@ -1738,14 +1738,15 @@ function App() {
             </div>
           </div>
         )}
-      </main>
+        </main>
 
-      {/* Footer */}
-      <footer className="border-t border-[#2a2a4a] py-6 mt-12">
-        <div className="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
-          FPL Squad Suggester • AI-powered predictions • Not affiliated with Premier League
-        </div>
-      </footer>
+        {/* Footer */}
+        <footer className="border-t border-[#2a2a4a] py-6 mt-12">
+          <div className="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
+            FPL Squad Suggester • AI-powered predictions • Not affiliated with Premier League
+          </div>
+        </footer>
+      </div>
     </div>
   )
 }
