@@ -94,7 +94,7 @@ interface SquadPlayer {
   id: number
   name: string
   position: string
-  // IMPORTANT: For "My Transfers" this should be the user's SELLING price.
+  // IMPORTANT: For "Quick Transfers" this should be the user's SELLING price.
   // Search results provide current price, which may differ from selling price.
   price: number
   team?: string
@@ -400,7 +400,7 @@ function App() {
   }
 
   const loadInitial = async () => {
-    // Only load lightweight header data on boot (keeps My Transfers instant).
+    // Only load lightweight header data on boot (keeps Quick Transfers instant).
     setLoading(true)
     setError(null)
     try {
