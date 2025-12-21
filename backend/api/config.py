@@ -6,7 +6,7 @@ Validates required environment variables and provides configuration helpers.
 
 import os
 import logging
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
