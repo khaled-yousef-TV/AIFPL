@@ -225,11 +225,14 @@ def init_db(db_url: Optional[str] = None):
     Initialize the database.
     
     Args:
-        db_url: Database connection URL
+        db_url: Database connection URL (defaults to DATABASE_URL env var or sqlite:///fpl_agent.db)
         
     Returns:
         Tuple of (engine, SessionLocal)
     """
+    import os
+    if db_url is None:
+        db_url = os.getenv("DATABASE_URL", "sqlite:///fpl_agent.db")
     engine = create_engine(db_url, echo=False)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)

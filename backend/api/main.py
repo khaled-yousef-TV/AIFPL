@@ -97,7 +97,7 @@ _cache: Dict[str, Dict[Any, Any]] = {
 }
 
 
-def _cache_get(namespace: str, key: Any):
+def _cache_get(namespace: str, key: Any) -> Optional[Any]:
     with _cache_lock:
         item = _cache.get(namespace, {}).get(key)
         if not item:
