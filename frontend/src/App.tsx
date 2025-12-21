@@ -161,10 +161,13 @@ function App() {
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
 
-  // Saved squads (persist between weeks)
+  // Saved squads (persist between weeks) - now server-side
   const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
-  const [selectedSavedId, setSelectedSavedId] = useState<string>('')
+  const [selectedSavedName, setSelectedSavedName] = useState<string>('')
   const [saveName, setSaveName] = useState<string>('My Squad')
+  const [loadingSavedSquads, setLoadingSavedSquads] = useState(false)
+  
+  // Removed: selectedSavedId (old localStorage-based code)
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
   type SelectedTeam = {
@@ -176,23 +179,45 @@ function App() {
   const [loadingSelectedTeams, setLoadingSelectedTeams] = useState(false)
   const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
 
-  const SAVED_KEY = 'fpl_saved_squads_v1'
-  const DRAFT_KEY = 'fpl_squad_draft_v1'
+  const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
 
   useEffect(() => {
     loadInitial()
   }, [])
 
-  // Load saved squads + last draft squad + selected teams on mount
-  useEffect(() => {
+  // Load saved squads from API on mount
+  const loadSavedSquads = async () => {
+    setLoadingSavedSquads(true)
     try {
-      const rawSaved = localStorage.getItem(SAVED_KEY)
-      if (rawSaved) {
-        const parsed = JSON.parse(rawSaved)
-        if (Array.isArray(parsed)) setSavedSquads(parsed)
+      const res = await fetch(`${API_BASE}/api/saved-squads`).then(r => r.json())
+      if (res.squads && Array.isArray(res.squads)) {
+        // Map API response to frontend format
+        const mapped = res.squads.map((s: any) => {
+          // API squad_data contains { squad, bank, freeTransfers }
+          const squadData = s.squad || {}
+          return {
+            id: s.name, // Use name as id for API compatibility
+            name: s.name,
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : new Date(s.saved_at).getTime(),
+            squad: squadData.squad || [],
+            bank: squadData.bank || 0,
+            freeTransfers: squadData.freeTransfers || 1,
+          }
+        })
+        setSavedSquads(mapped)
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to load saved squads:', err)
+    } finally {
+      setLoadingSavedSquads(false)
+    }
+  }
 
+  // Load saved squads and draft on mount
+  useEffect(() => {
+    loadSavedSquads()
+
+    // Load draft squad from localStorage (still local, not synced)
     try {
       const rawDraft = localStorage.getItem(DRAFT_KEY)
       if (rawDraft) {
@@ -204,7 +229,6 @@ function App() {
         }
       }
     } catch {}
-
   }, [])
 
   // Load selected teams from API
@@ -245,25 +269,25 @@ function App() {
     } catch {}
   }, [mySquad, bank, freeTransfers])
 
-  const persistSavedSquads = (next: SavedSquad[]) => {
-    setSavedSquads(next)
-    try {
-      localStorage.setItem(SAVED_KEY, JSON.stringify(next))
-    } catch {}
-  }
-
   const loadSavedSquad = async () => {
-    const s = savedSquads.find(x => x.id === selectedSavedId)
-    if (!s) return
+    if (!selectedSavedName) return
     
     setLoadingSquad(true)
     try {
-      // Small delay to show loading indicator
-      await new Promise(resolve => setTimeout(resolve, 200))
-      setMySquad(s.squad || [])
-      setBank(s.bank ?? 0)
-      setFreeTransfers(s.freeTransfers ?? 1)
-      setSaveName(s.name || 'My Squad')
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`)
+      if (!res.ok) {
+        throw new Error('Failed to load saved squad')
+      }
+      const data = await res.json()
+      const squadData = data.squad || {}
+      
+      setMySquad(squadData.squad || [])
+      setBank(squadData.bank ?? 0)
+      setFreeTransfers(squadData.freeTransfers ?? 1)
+      setSaveName(data.name || 'My Squad')
+    } catch (err) {
+      console.error('Failed to load saved squad:', err)
+      alert('Failed to load saved squad. Please try again.')
     } finally {
       setLoadingSquad(false)
     }
@@ -271,43 +295,99 @@ function App() {
 
   const saveOrUpdateSquad = async (mode: 'update' | 'new') => {
     const name = (saveName || 'My Squad').trim()
-    const now = Date.now()
+    if (!name) {
+      alert('Please enter a squad name')
+      return
+    }
     
-    if (mode === 'update' && selectedSavedId) {
+    // Prepare squad data to save
+    const squadData = {
+      squad: mySquad,
+      bank: bank,
+      freeTransfers: freeTransfers
+    }
+
+    if (mode === 'update' && selectedSavedName) {
+      if (selectedSavedName !== name) {
+        alert('Cannot change squad name. Please create a new squad with a different name.')
+        return
+      }
+      
       setUpdatingSquad(true)
       try {
-        await new Promise(resolve => setTimeout(resolve, 200))
-        const next = savedSquads.map(s =>
-          s.id === selectedSavedId ? { ...s, name, updatedAt: now, squad: mySquad, bank, freeTransfers } : s
-        )
-        persistSavedSquads(next)
+        const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, squad: squadData })
+        })
+        
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({ detail: 'Failed to update squad' }))
+          throw new Error(error.detail || 'Failed to update squad')
+        }
+        
+        // Reload saved squads to get updated data
+        await loadSavedSquads()
+      } catch (err: any) {
+        console.error('Failed to update squad:', err)
+        alert(err.message || 'Failed to update squad. Please try again.')
       } finally {
         setUpdatingSquad(false)
       }
       return
     }
 
+    // Create new squad
     setSavingSquad(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 200))
-      const id = `sq_${now}_${Math.random().toString(16).slice(2)}`
-      const next = [{ id, name, updatedAt: now, squad: mySquad, bank, freeTransfers }, ...savedSquads]
-      persistSavedSquads(next)
-      setSelectedSavedId(id)
+      const res = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, squad: squadData })
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to save squad' }))
+        throw new Error(error.detail || 'Failed to save squad')
+      }
+      
+      // Reload saved squads and select the newly created one
+      await loadSavedSquads()
+      setSelectedSavedName(name)
+      setSaveName(name)
+    } catch (err: any) {
+      console.error('Failed to save squad:', err)
+      alert(err.message || 'Failed to save squad. Please try again.')
     } finally {
       setSavingSquad(false)
     }
   }
 
   const deleteSavedSquad = async () => {
-    if (!selectedSavedId) return
+    if (!selectedSavedName) return
+    
+    if (!confirm(`Are you sure you want to delete "${selectedSavedName}"?`)) {
+      return
+    }
     
     setDeletingSquad(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 200))
-      const next = savedSquads.filter(s => s.id !== selectedSavedId)
-      persistSavedSquads(next)
-      setSelectedSavedId('')
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`, {
+        method: 'DELETE'
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to delete squad' }))
+        throw new Error(error.detail || 'Failed to delete squad')
+      }
+      
+      // Reload saved squads and clear selection
+      await loadSavedSquads()
+      setSelectedSavedName('')
+      setSaveName('My Squad')
+    } catch (err: any) {
+      console.error('Failed to delete squad:', err)
+      alert(err.message || 'Failed to delete squad. Please try again.')
     } finally {
       setDeletingSquad(false)
     }
@@ -830,13 +910,14 @@ function App() {
                     <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <span className="text-xs text-gray-400 whitespace-nowrap">Saved squads</span>
                       <select
-                        value={selectedSavedId}
-                        onChange={(e) => setSelectedSavedId(e.target.value)}
-                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none"
+                        value={selectedSavedName}
+                        onChange={(e) => setSelectedSavedName(e.target.value)}
+                        disabled={loadingSavedSquads}
+                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <option value="">— Select —</option>
                         {savedSquads.map(s => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.name}>
                             {s.name}
                           </option>
                         ))}
@@ -845,7 +926,7 @@ function App() {
                     <div className="flex flex-wrap gap-2">
                       <button 
                         onClick={loadSavedSquad} 
-                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
                         className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         {loadingSquad ? (
@@ -859,7 +940,7 @@ function App() {
                       </button>
                       <button 
                         onClick={() => saveOrUpdateSquad('update')} 
-                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
                         className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         {updatingSquad ? (
@@ -887,7 +968,7 @@ function App() {
                       </button>
                       <button 
                         onClick={deleteSavedSquad} 
-                        disabled={!selectedSavedId || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
                         className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         {deletingSquad ? (
@@ -907,14 +988,14 @@ function App() {
                     <input
                       value={saveName}
                       onChange={(e) => setSaveName(e.target.value)}
-                      disabled={!!selectedSavedId}
+                      disabled={!!selectedSavedName}
                       className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[#080811]"
                       placeholder="My Squad"
                     />
                   </div>
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
-                  Your current squad is also auto-saved locally, so you won't need to re-enter it next week.
+                  Your current squad is auto-saved locally and saved squads are synced across devices.
                 </div>
               </div>
 
