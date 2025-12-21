@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
-  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home
+  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain
 } from 'lucide-react'
 
 // FPL-themed logo component
@@ -139,6 +139,8 @@ function App() {
   const [squadHeuristic, setSquadHeuristic] = useState<SuggestedSquad | null>(null)
   const [squadForm, setSquadForm] = useState<SuggestedSquad | null>(null)
   const [squadFixture, setSquadFixture] = useState<SuggestedSquad | null>(null)
+  const [squadLSTM, setSquadLSTM] = useState<SuggestedSquad | null>(null)
+  const [statisticsMethod, setStatisticsMethod] = useState<'combined' | 'heuristic' | 'form' | 'fixture'>('combined')
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
@@ -509,13 +511,19 @@ function App() {
 
   useEffect(() => {
     // Lazy-load heavy tabs only when the user opens them
-    if (activeTab === 'squad_combined') ensureSquadLoaded('combined')
-    if (activeTab === 'squad_heuristic') ensureSquadLoaded('heuristic')
-    if (activeTab === 'squad_form') ensureSquadLoaded('form')
-    if (activeTab === 'squad_fixture') ensureSquadLoaded('fixture')
+    if (activeTab === 'best_team_stats') ensureSquadLoaded(statisticsMethod)
+    if (activeTab === 'squad_lstm') {
+      if (!squadLSTM) {
+        setSquadLSTM(null)
+        fetch(`${API_BASE}/api/suggested-squad?method=lstm`)
+          .then(r => r.json())
+          .then(res => setSquadLSTM(res))
+          .catch(err => console.error('LSTM squad load error:', err))
+      }
+    }
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-  }, [activeTab])
+  }, [activeTab, statisticsMethod])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -529,22 +537,29 @@ function App() {
 
     // Refresh only the currently active heavy tab to keep UX snappy.
     try {
-      if (activeTab === 'squad_combined') {
-        setSquad(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
-        setSquad(res)
-      } else if (activeTab === 'squad_heuristic') {
-        setSquadHeuristic(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
-        setSquadHeuristic(res)
-      } else if (activeTab === 'squad_form') {
-        setSquadForm(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
-        setSquadForm(res)
-      } else if (activeTab === 'squad_fixture') {
-        setSquadFixture(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
-        setSquadFixture(res)
+      if (activeTab === 'best_team_stats') {
+        // Load based on selected statistics method
+        if (statisticsMethod === 'combined') {
+          setSquad(null)
+          const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
+          setSquad(res)
+        } else if (statisticsMethod === 'heuristic') {
+          setSquadHeuristic(null)
+          const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
+          setSquadHeuristic(res)
+        } else if (statisticsMethod === 'form') {
+          setSquadForm(null)
+          const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
+          setSquadForm(res)
+        } else if (statisticsMethod === 'fixture') {
+          setSquadFixture(null)
+          const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
+          setSquadFixture(res)
+        }
+      } else if (activeTab === 'squad_lstm') {
+        setSquadLSTM(null)
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=lstm`).then(r => r.json())
+        setSquadLSTM(res)
       } else if (activeTab === 'picks') {
         setTopPicks({})
         const res = await fetch(`${API_BASE}/api/top-picks`).then(r => r.json())
@@ -666,20 +681,22 @@ function App() {
   const navigationTabs = [
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
-    { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined', color: 'text-[#00ff87]', description: 'Optimal squad using combined prediction method' },
-    { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic', color: 'text-purple-400', description: 'Squad based on heuristic predictions' },
-    { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form', color: 'text-green-400', description: 'Squad focused on recent form' },
-    { id: 'squad_fixture', icon: Target, label: 'Squad • Fixture', shortLabel: 'Fixture', color: 'text-orange-400', description: 'Squad optimized for fixture difficulty' },
+    { id: 'best_team_stats', icon: Users, label: 'Best Team - Statistics Way', shortLabel: 'Stats', color: 'text-[#00ff87]', description: 'Optimal squad using statistical methods (Combined/Heuristic/Form/Fixture)' },
+    { id: 'squad_lstm', icon: Brain, label: 'Squad LSTM', shortLabel: 'LSTM', color: 'text-cyan-400', description: 'Squad using LSTM neural network predictions' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
     { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
   ]
 
-  const isSquadTab = activeTab.startsWith('squad_')
+  const isSquadTab = activeTab === 'best_team_stats' || activeTab === 'squad_lstm'
   const currentSquad: SuggestedSquad | null =
-    activeTab === 'squad_combined' ? squad :
-    activeTab === 'squad_heuristic' ? squadHeuristic :
-    activeTab === 'squad_form' ? squadForm :
-    activeTab === 'squad_fixture' ? squadFixture :
+    activeTab === 'best_team_stats' ? (
+      statisticsMethod === 'combined' ? squad :
+      statisticsMethod === 'heuristic' ? squadHeuristic :
+      statisticsMethod === 'form' ? squadForm :
+      statisticsMethod === 'fixture' ? squadFixture :
+      null
+    ) :
+    activeTab === 'squad_lstm' ? squadLSTM :
     null
 
   if (loading) {
@@ -876,11 +893,72 @@ function App() {
 
         {isSquadTab && currentSquad && (
           <div className="space-y-6">
+            {/* Method Sub-tabs (only for best_team_stats) */}
+            {activeTab === 'best_team_stats' && (
+              <div className="card">
+                <div className="text-gray-400 text-sm mb-3">Statistics Method</div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      setStatisticsMethod('combined')
+                      setSquad(null)
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      statisticsMethod === 'combined'
+                        ? 'bg-[#00ff87] text-black'
+                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
+                    }`}
+                  >
+                    Combined
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStatisticsMethod('heuristic')
+                      setSquadHeuristic(null)
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      statisticsMethod === 'heuristic'
+                        ? 'bg-purple-500 text-white'
+                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
+                    }`}
+                  >
+                    Heuristic
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStatisticsMethod('form')
+                      setSquadForm(null)
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      statisticsMethod === 'form'
+                        ? 'bg-green-500 text-white'
+                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
+                    }`}
+                  >
+                    Form
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStatisticsMethod('fixture')
+                      setSquadFixture(null)
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      statisticsMethod === 'fixture'
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
+                    }`}
+                  >
+                    Fixture
+                  </button>
+                </div>
+              </div>
+            )}
+            
             {/* Summary Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Method</div>
-                <div className="text-lg font-bold text-[#00ff87]">{(currentSquad as any).method || 'Combined'}</div>
+                <div className="text-lg font-bold text-[#00ff87]">{(currentSquad as any).method || (activeTab === 'squad_lstm' ? 'LSTM' : statisticsMethod.charAt(0).toUpperCase() + statisticsMethod.slice(1))}</div>
               </div>
               <div className="card">
                 <div className="text-gray-400 text-sm mb-1">Formation</div>
