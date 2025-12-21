@@ -70,7 +70,18 @@ from data.european_teams import assess_rotation_risk, get_european_competition
 from data.trends import compute_team_trends
 from data.betting_odds import BettingOddsClient
 from database.crud import DatabaseManager
-from constants import PlayerStatus, PlayerPosition
+
+# Import constants - handle both relative and absolute imports
+try:
+    from constants import PlayerStatus, PlayerPosition
+except ImportError:
+    # Fallback for when running from different directory structure
+    import sys
+    import os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    from constants import PlayerStatus, PlayerPosition
 
 # Initialize components (no auth needed for public data)
 fpl_client = FPLClient(auth=None)
