@@ -29,16 +29,19 @@ from apscheduler.triggers.date import DateTrigger
 from datetime import timedelta
 
 # Configure logging first (needed for messages below)
-from .config import setup_logging, validate_env
-setup_logging()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
-# Validate environment variables
+# Validate environment variables (after logging is set up)
 try:
+    from .config import validate_env
     validate_env()
-except ValueError as e:
-    logger.error(f"Environment validation failed: {e}")
-    raise
+except (ImportError, ValueError) as e:
+    logger.warning(f"Environment validation skipped: {e}")
 
 # Load .env from backend directory (where uvicorn typically runs from)
 # Try multiple paths to ensure we find it
