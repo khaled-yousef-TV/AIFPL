@@ -1,0 +1,39 @@
+# Cursor AI Rules for AIFPL Project
+
+## Git Workflow
+- **ALWAYS commit and push changes immediately** - This is a hobby project, no production concerns
+- **Never leave uncommitted changes** - If you modify a file, commit and push it
+- **Keep local and remote in sync** - After any file modification, verify with `git status` and commit/push
+
+## Code Changes
+- When modifying any file, immediately:
+  1. Check `git status` to see what changed
+  2. `git add <files>`
+  3. `git commit -m "descriptive message"`
+  4. `git push origin main`
+
+## File Modifications
+- If you read a file and see it has content that differs from git, check:
+  1. `git diff HEAD <file>` to see uncommitted changes
+  2. `git show HEAD:<file>` to see committed version
+  3. If local has changes, commit them immediately
+
+## Database/Backend Changes
+- When adding new API endpoints, ensure:
+  1. Backend route is in `backend/api/main.py`
+  2. Database methods are in `backend/database/crud.py`
+  3. Models are in `backend/database/models.py`
+  4. ALL changes are committed and pushed
+
+## Frontend Changes
+- When modifying frontend:
+  1. Test locally if possible
+  2. Commit and push immediately
+  3. GitHub Actions will auto-deploy frontend
+
+## Backend Deployment
+- After pushing backend changes:
+  1. Render will auto-deploy (if configured)
+  2. Or manually trigger deploy on Render dashboard
+  3. Always verify deployment completed successfully
+
