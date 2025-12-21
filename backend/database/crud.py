@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
-    TransferHistory, PerformanceLog, SelectedTeam, init_db
+    TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot, init_db
 )
+# Import SavedSquad separately to ensure it's available
+from .models import SavedSquad
 
 logger = logging.getLogger(__name__)
 
@@ -430,8 +432,51 @@ class DatabaseManager:
                 }
                 for team in teams
             ]
-
-
+    
+    # ==================== Daily Snapshots ====================
+    
+    def save_daily_snapshot(self, gameweek: int, squad_data: Dict[str, Any]) -> bool:
+        """
+        Save or update a daily snapshot for a gameweek.
+        This creates a new snapshot entry (doesn't update existing).
+        
+        Args:
+            gameweek: Gameweek number
+            squad_data: Full SuggestedSquad dictionary (JSON-serializable)
+            
+        Returns:
+            True if saved, False if error
+        """
+        try:
+            with self.get_session() as session:
+                # Create new snapshot (we keep history, but only use latest)
+                snapshot = DailySnapshot(
+                    gameweek=gameweek,
+                    squad_data=squad_data,
+                    saved_at=datetime.utcnow()
+                )
+                session.add(snapshot)
+                session.commit()
+                logger.info(f"Saved daily snapshot for Gameweek {gameweek}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save daily snapshot for GW{gameweek}: {e}")
+            return False
+    
+    def get_latest_daily_snapshot(self, gameweek: int) -> Optional[Dict[str, Any]]:
+        """Get the latest daily snapshot for a gameweek."""
+        with self.get_session() as session:
+            snapshot = session.query(DailySnapshot).filter(
+                DailySnapshot.gameweek == gameweek
+            ).order_by(DailySnapshot.saved_at.desc()).first()
+            
+            if snapshot:
+                return {
+                    "gameweek": snapshot.gameweek,
+                    "squad": snapshot.squad_data,
+                    "saved_at": snapshot.saved_at.isoformat() if snapshot.saved_at else None
+                }
+            return None
     
     # ==================== Saved Squads (User-saved with custom names) ====================
     
@@ -527,4 +572,25 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to delete saved squad '{name}': {e}")
             return False
+    
+    def delete_saved_squad_by_id(self, squad_id: int) -> bool:
+        """Delete a saved squad by ID."""
+        try:
+            with self.get_session() as session:
+                squad = session.query(SavedSquad).filter(
+                    SavedSquad.id == squad_id
+                ).first()
+                
+                if squad:
+                    session.delete(squad)
+                    session.commit()
+                    logger.info(f"Deleted saved squad ID: {squad_id}")
+                    return True
+                else:
+                    logger.warning(f"Saved squad ID {squad_id} not found for deletion")
+                    return False
+        except Exception as e:
+            logger.error(f"Failed to delete saved squad ID {squad_id}: {e}")
+            return False
+
 
