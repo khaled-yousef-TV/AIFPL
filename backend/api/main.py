@@ -2001,7 +2001,9 @@ async def save_squad(request: SaveSquadRequest):
         if len(name) < 1:
             raise HTTPException(status_code=400, detail="Squad name too short")
         # Prevent XSS attempts (SQL injection is handled by SQLAlchemy)
-        if any(char in name for char in ['<', '>', '&', '"', "'"]):
+        # Allow apostrophes and quotes in names (common in squad names)
+        # Only block HTML/script tags
+        if any(char in name for char in ['<', '>', '&']):
             raise HTTPException(status_code=400, detail="Squad name contains invalid characters")
         
         if not request.squad:
