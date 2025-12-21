@@ -905,7 +905,7 @@ function App() {
                     }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                       statisticsMethod === 'combined'
-                        ? 'bg-[#00ff87] text-black'
+                        ? 'bg-purple-500 text-white'
                         : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
                     }`}
                   >
@@ -931,7 +931,7 @@ function App() {
                     }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                       statisticsMethod === 'form'
-                        ? 'bg-green-500 text-white'
+                        ? 'bg-purple-500 text-white'
                         : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
                     }`}
                   >
@@ -944,7 +944,7 @@ function App() {
                     }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                       statisticsMethod === 'fixture'
-                        ? 'bg-orange-500 text-white'
+                        ? 'bg-purple-500 text-white'
                         : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
                     }`}
                   >

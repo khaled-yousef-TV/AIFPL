@@ -722,12 +722,16 @@ async def _build_squad_with_predictor(
             if not reasons:
                 reasons.append(f"vs {opponent} ({'H' if is_home else 'A'})")
             
+            # Map position_id to position string
+            position_map = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+            position_str = position_map.get(player.element_type, "MID")
+            
             player_predictions.append({
                 "id": player.id,
                 "name": player.web_name,
                 "team": team_name,
                 "team_id": player.team,
-                "position": player.position,
+                "position": position_str,
                 "position_id": player.element_type,
                 "price": player.price,
                 "predicted": pred,
