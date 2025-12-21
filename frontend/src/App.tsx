@@ -881,61 +881,61 @@ function App() {
 
         {/* Desktop Header */}
         <header className="hidden md:block bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between h-10">
+            <div className="flex items-center gap-4 h-full">
               {gameweek?.next && (
                 <>
-                  <div className="text-gray-300 font-bold text-lg tracking-wide">
+                  <div className="text-gray-300 font-bold text-lg tracking-wide flex items-center h-full">
                     GW{gameweek.next.id}
                   </div>
                   {countdown && (
                     <>
-                      <div className="h-6 w-px bg-gradient-to-b from-transparent via-[#00ff87]/30 to-transparent"></div>
-                      <div className="flex items-center gap-2">
+                      <div className="h-6 w-px bg-gradient-to-b from-transparent via-[#00ff87]/30 to-transparent flex items-center"></div>
+                      <div className="flex items-center gap-2 h-full">
                       {countdown.days > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                        <div className="flex items-center gap-1.5 h-full">
+                          <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50 flex items-center justify-center">
                             <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
                             <span className="relative z-10 drop-shadow-sm">{countdown.days}</span>
                           </div>
-                          <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">d</span>
+                          <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider flex items-center">d</span>
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                      <div className="flex items-center gap-1.5 h-full">
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50 flex items-center justify-center">
                           <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
                           <span className="relative z-10 drop-shadow-sm">{String(countdown.hours).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">h</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider flex items-center">h</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50">
+                      <div className="flex items-center gap-1.5 h-full">
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/30 border border-[#00ff87]/20 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/50 flex items-center justify-center">
                           <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
                           <span className="relative z-10 drop-shadow-sm">{String(countdown.minutes).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">m</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider flex items-center">m</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/40 border border-[#00ff87]/30 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/60">
+                      <div className="flex items-center gap-1.5 h-full">
+                        <div className="relative bg-gradient-to-br from-[#38003c] via-[#6a0080] to-[#00ff87] text-white px-3 py-1.5 rounded-lg font-bold text-sm min-w-[3.5rem] text-center shadow-lg shadow-[#00ff87]/40 border border-[#00ff87]/30 transition-all duration-300 hover:scale-105 hover:shadow-[#00ff87]/60 flex items-center justify-center">
                           <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/30 to-transparent rounded-lg animate-ping opacity-20"></div>
                           <div className="absolute inset-0 bg-gradient-to-br from-[#00ff87]/20 to-transparent rounded-lg animate-pulse"></div>
                           <span className="relative z-10 drop-shadow-sm">{String(countdown.seconds).padStart(2, '0')}</span>
                         </div>
-                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">s</span>
+                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider flex items-center">s</span>
                       </div>
                     </div>
                     </>
                   )}
-                  {!countdown && <div className="text-gray-400 text-sm animate-pulse">Loading...</div>}
+                  {!countdown && <div className="text-gray-400 text-sm animate-pulse flex items-center h-full">Loading...</div>}
                 </>
               )}
-              {!gameweek?.next && <div className="text-gray-400 text-sm animate-pulse">Loading...</div>}
+              {!gameweek?.next && <div className="text-gray-400 text-sm animate-pulse flex items-center h-full">Loading...</div>}
             </div>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
               <button 
                 onClick={refresh} 
                 disabled={refreshing}
-                className="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn btn-secondary flex items-center gap-2 text-sm px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed h-full"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                 <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>

@@ -45,6 +45,20 @@
   3. **Only after both builds pass:**
      - Proceed with `git add`, `git commit`, and `git push`
 
+## UI Alignment Rules (CRITICAL)
+- **Countdown Timer Alignment:**
+  - After ANY UI changes to headers, sidebars, or layout:
+    1. **MUST verify countdown timer alignment** between sidebar header and desktop header
+    2. Both headers use `px-6 py-4` padding
+    3. Both headers have inner content with `h-10` (40px height)
+    4. Countdown timer elements must use `flex items-center h-full` for proper vertical centering
+    5. All countdown boxes must have `flex items-center justify-center` for internal alignment
+    6. Separator line must use `flex items-center` for vertical centering
+  - **If alignment is off:**
+    - Check that all flex containers have `items-center` and `h-full` where needed
+    - Ensure countdown timer container matches sidebar header height (`h-10`)
+    - Verify padding consistency (`px-6 py-4` on both headers)
+
 ## Backend Deployment
 - After pushing backend changes:
   1. Render will auto-deploy (if configured)
