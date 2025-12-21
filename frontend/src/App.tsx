@@ -147,6 +147,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
   const [savingSquad, setSavingSquad] = useState(false)
   const [loadingSquad, setLoadingSquad] = useState(false)
   const [updatingSquad, setUpdatingSquad] = useState(false)
@@ -230,6 +231,41 @@ function App() {
   useEffect(() => {
     loadInitial()
   }, [])
+
+  // Countdown timer for gameweek deadline
+  useEffect(() => {
+    if (!gameweek?.next?.deadline) {
+      setCountdown(null)
+      return
+    }
+
+    const updateCountdown = () => {
+      if (!gameweek?.next?.deadline) return
+      const deadline = new Date(gameweek.next.deadline).getTime()
+      const now = new Date().getTime()
+      const diff = deadline - now
+
+      if (diff <= 0) {
+        setCountdown({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+        return
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+
+      setCountdown({ days, hours, minutes, seconds })
+    }
+
+    // Update immediately
+    updateCountdown()
+
+    // Update every second
+    const interval = setInterval(updateCountdown, 1000)
+
+    return () => clearInterval(interval)
+  }, [gameweek?.next?.deadline])
 
   // Load saved squads from API on mount
   const loadSavedSquads = async () => {
@@ -781,11 +817,29 @@ function App() {
               <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
                 <FPLLogo className="w-6 h-6" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <h1 className="font-bold text-sm">FPL Squad Suggester</h1>
-                <p className="text-[10px] text-gray-400">
-                  {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
-                </p>
+                {gameweek?.next && countdown ? (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] text-gray-300 font-semibold">GW{gameweek.next.id}</span>
+                    <span className="text-[10px] text-gray-500">•</span>
+                    {countdown.days > 0 && (
+                      <>
+                        <span className="text-[10px] font-bold text-[#00ff87]">{countdown.days}d</span>
+                        <span className="text-[10px] text-gray-500">:</span>
+                      </>
+                    )}
+                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.hours).padStart(2, '0')}</span>
+                    <span className="text-[10px] text-gray-500">:</span>
+                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.minutes).padStart(2, '0')}</span>
+                    <span className="text-[10px] text-gray-500">:</span>
+                    <span className="text-[10px] font-bold text-[#00ff87]">{String(countdown.seconds).padStart(2, '0')}</span>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-400">
+                    {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
+                  </p>
+                )}
               </div>
             </button>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
@@ -828,8 +882,46 @@ function App() {
         {/* Desktop Header */}
         <header className="hidden md:block bg-[#1a1a2e] border-b border-[#2a2a4a] px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="text-gray-400 text-sm">
-              {gameweek?.next ? `GW${gameweek.next.id} • ${formatDeadline(gameweek.next.deadline)}` : 'Loading...'}
+            <div className="flex items-center gap-4">
+              {gameweek?.next && (
+                <>
+                  <div className="text-gray-300 font-semibold">
+                    GW{gameweek.next.id}
+                  </div>
+                  {countdown && (
+                    <div className="flex items-center gap-3">
+                      {countdown.days > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
+                            {countdown.days}
+                          </div>
+                          <span className="text-gray-400 text-xs font-medium">d</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
+                          {String(countdown.hours).padStart(2, '0')}
+                        </div>
+                        <span className="text-gray-400 text-xs font-medium">h</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
+                          {String(countdown.minutes).padStart(2, '0')}
+                        </div>
+                        <span className="text-gray-400 text-xs font-medium">m</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="bg-gradient-to-br from-[#38003c] to-[#00ff87] text-white px-2.5 py-1 rounded-md font-bold text-sm min-w-[3rem] text-center">
+                          {String(countdown.seconds).padStart(2, '0')}
+                        </div>
+                        <span className="text-gray-400 text-xs font-medium">s</span>
+                      </div>
+                    </div>
+                  )}
+                  {!countdown && <div className="text-gray-400 text-sm">Loading...</div>}
+                </>
+              )}
+              {!gameweek?.next && <div className="text-gray-400 text-sm">Loading...</div>}
             </div>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
               <button 
