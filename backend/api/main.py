@@ -17,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from pathlib import Path
-import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from datetime import timedelta
@@ -71,6 +70,7 @@ from data.european_teams import assess_rotation_risk, get_european_competition
 from data.trends import compute_team_trends
 from data.betting_odds import BettingOddsClient
 from database.crud import DatabaseManager
+from constants import PlayerStatus, PlayerPosition
 
 # Initialize components (no auth needed for public data)
 fpl_client = FPLClient(auth=None)
@@ -109,7 +109,7 @@ def _cache_get(namespace: str, key: Any):
         return data
 
 
-def _cache_set(namespace: str, key: Any, data: Any):
+def _cache_set(namespace: str, key: Any, data: Any) -> None:
     with _cache_lock:
         _cache.setdefault(namespace, {})[key] = (time(), data)
 
@@ -121,17 +121,18 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS
+# CORS - configurable via environment variable
+allowed_origins_str = os.getenv(
+    "CORS_ORIGINS",
+    "https://fplai.nl,https://www.fplai.nl,http://localhost:3000,http://127.0.0.1:3000"
+)
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     # Render backend will be called by GitHub Pages frontend at https://fplai.nl
     # Keep dev localhost allowed too.
-    allow_origins=[
-        "https://fplai.nl",
-        "https://www.fplai.nl",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -253,7 +254,8 @@ def schedule_next_save():
         # Remove existing job if any
         try:
             scheduler.remove_job("save_selected_team")
-        except:
+        except (KeyError, ValueError):
+            # Job doesn't exist, which is fine
             pass
         
         # Schedule the job (sync function)
@@ -619,8 +621,8 @@ async def _build_squad_with_predictor(
         if player.minutes < 1:
             continue
         # Skip unavailable players (injured/suspended/not available) but allow doubtful
-        # Status: a=available, d=doubtful, i=injured, s=suspended, u=unavailable, n=not available
-        if player.status in ["i", "s", "u", "n"]:
+        if player.status in [PlayerStatus.INJURED, PlayerStatus.SUSPENDED, 
+                             PlayerStatus.UNAVAILABLE, PlayerStatus.NOT_AVAILABLE]:
             continue
         
         try:
@@ -645,7 +647,7 @@ async def _build_squad_with_predictor(
             
             if odds_data:
                 # Phase 2: Enhanced odds with player stats
-                if player.element_type in [3, 4]:  # MID/FWD
+                if player.element_type in [PlayerPosition.MID, PlayerPosition.FWD]:
                     # Calculate player stats for better goalscorer estimation
                     games_played = max(1, player.minutes / 90.0) if player.minutes > 0 else 1
                     goals_per_game = player.goals_scored / games_played
@@ -661,7 +663,7 @@ async def _build_squad_with_predictor(
                     anytime_goalscorer_prob = betting_odds_client.get_player_goalscorer_odds(
                         player.web_name, odds_data, player_stats
                     )
-                elif player.element_type in [1, 2]:  # GK/DEF
+                elif player.element_type in [PlayerPosition.GK, PlayerPosition.DEF]:
                     clean_sheet_prob = betting_odds_client.get_clean_sheet_probability(
                         is_home, odds_data
                     )
@@ -717,7 +719,8 @@ async def _build_squad_with_predictor(
                 "team_win_prob": team_win_prob,
                 "reason": " • ".join(reasons[:2]),
             })
-        except:
+        except (ValueError, KeyError, AttributeError, TypeError) as e:
+            logger.debug(f"Skipping player {player.id} due to error: {e}")
             continue
     
     squad = _build_optimal_squad(player_predictions, budget)
@@ -1216,7 +1219,8 @@ async def get_transfer_suggestions(request: TransferRequest):
                         long_term_fixtures[f.team_a] = []
                     long_term_fixtures[f.team_h].append(f.team_h_difficulty)
                     long_term_fixtures[f.team_a].append(f.team_a_difficulty)
-            except:
+            except (AttributeError, KeyError, TypeError) as e:
+                logger.debug(f"Error processing fixture: {e}")
                 pass
         
         # Calculate average fixture difficulty for next 5 GWs
@@ -1301,7 +1305,8 @@ async def get_transfer_suggestions(request: TransferRequest):
             try:
                 features = feature_eng.extract_features(player.id, include_history=False)
                 pred = predictor_heuristic.predict_player(features)
-            except:
+            except (ValueError, KeyError, AttributeError) as e:
+                logger.debug(f"Error predicting for player {player.id}, using form: {e}")
                 pred = float(player.form) if player.form else 2.0
             
             # Calculate "keep score" - lower = more likely to transfer out
@@ -1413,7 +1418,8 @@ async def get_transfer_suggestions(request: TransferRequest):
                 try:
                     features = feature_eng.extract_features(player.id, include_history=False)
                     pred = predictor_heuristic.predict_player(features)
-                except:
+                except (ValueError, KeyError, AttributeError) as e:
+                    logger.debug(f"Error predicting for player {player.id}, using form: {e}")
                     pred = float(player.form) if player.form else 2.0
                 
                 # Calculate "buy score" - higher = better transfer in
@@ -1938,7 +1944,6 @@ class SaveSquadRequest(BaseModel):
 
 @app.get("/api/saved-squads")
 async def get_saved_squads():
-    """Get all user-saved squads (with custom names)."""
     """
     Get all user-saved squads (with custom names).
     Returns list of all saved squads sorted by most recently updated first.
@@ -1975,20 +1980,30 @@ async def save_squad(request: SaveSquadRequest):
     If a squad with the same name exists, it will be updated.
     """
     try:
-        if not request.name or not request.name.strip():
+        name = request.name.strip() if request.name else ""
+        
+        # Validate squad name
+        if not name:
             raise HTTPException(status_code=400, detail="Squad name is required")
+        if len(name) > 200:  # Match database column limit
+            raise HTTPException(status_code=400, detail="Squad name too long (max 200 characters)")
+        if len(name) < 1:
+            raise HTTPException(status_code=400, detail="Squad name too short")
+        # Prevent XSS attempts (SQL injection is handled by SQLAlchemy)
+        if any(char in name for char in ['<', '>', '&', '"', "'"]):
+            raise HTTPException(status_code=400, detail="Squad name contains invalid characters")
         
         if not request.squad:
             raise HTTPException(status_code=400, detail="Squad data is required")
         
-        success = db_manager.save_saved_squad(request.name.strip(), request.squad)
+        success = db_manager.save_saved_squad(name, request.squad)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save squad")
         
         return {
             "success": True,
-            "name": request.name.strip(),
-            "message": f"Squad '{request.name.strip()}' saved successfully"
+            "name": name,
+            "message": f"Squad '{name}' saved successfully"
         }
     except HTTPException:
         raise

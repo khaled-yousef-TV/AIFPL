@@ -9,6 +9,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -365,7 +367,7 @@ def main():
     scheduler = FPLAgentScheduler(auto_execute=False)
     scheduler.start()
     
-    print("FPL Agent Scheduler running. Press Ctrl+C to stop.")
+    logger.info("FPL Agent Scheduler running. Press Ctrl+C to stop.")
     
     try:
         import time
@@ -373,7 +375,7 @@ def main():
             time.sleep(60)
     except KeyboardInterrupt:
         scheduler.stop()
-        print("Scheduler stopped.")
+        logger.info("Scheduler stopped.")
 
 
 if __name__ == "__main__":

@@ -169,7 +169,7 @@ class PerformanceLog(Base):
 
 
 class SelectedTeam(Base):
-    """Store suggested squad ('team of the week') for each gameweek."""
+    """Store final suggested squad ('team of the week') saved 30 minutes before deadline."""
     __tablename__ = "selected_teams"
     
     id = Column(Integer, primary_key=True)
@@ -185,7 +185,42 @@ class SelectedTeam(Base):
         return f"<SelectedTeam(gameweek={self.gameweek}, saved_at={self.saved_at})>"
 
 
-def init_db(db_url: str = "sqlite:///fpl_agent.db"):
+class DailySnapshot(Base):
+    """Store daily snapshot of current combined suggestion for active gameweek."""
+    __tablename__ = "daily_snapshots"
+    
+    id = Column(Integer, primary_key=True)
+    gameweek = Column(Integer, nullable=False, index=True)
+    
+    # Squad data (stored as JSON)
+    squad_data = Column(JSON, nullable=False)  # Full SuggestedSquad dict
+    
+    # Timestamps
+    saved_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<DailySnapshot(gameweek={self.gameweek}, saved_at={self.saved_at})>"
+
+
+class SavedSquad(Base):
+    """Store user-saved squads with custom names (from My Transfers tab)."""
+    __tablename__ = "saved_squads"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False, index=True)  # Custom name provided by user
+    
+    # Squad data (stored as JSON)
+    squad_data = Column(JSON, nullable=False)  # Full squad dict (formation, starting_xi, bench, etc.)
+    
+    # Timestamps
+    saved_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    def __repr__(self):
+        return f"<SavedSquad(id={self.id}, name='{self.name}', saved_at={self.saved_at})>"
+
+
+def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.
     

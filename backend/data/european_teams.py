@@ -390,15 +390,15 @@ def print_european_teams(season: Optional[str] = None):
     if season is None:
         season = get_current_season()
     
-    print(f"\n=== European Teams for {season} ===")
+    logger.info(f"\n=== European Teams for {season} ===")
     season_data = EUROPEAN_TEAMS_BY_SEASON.get(season, {})
     
     for comp in ["UCL", "UEL", "UECL"]:
         teams = season_data.get(comp, [])
-        print(f"{comp}: {', '.join(teams) if teams else 'None'}")
+        logger.info(f"{comp}: {', '.join(teams) if teams else 'None'}")
 
 
 if __name__ == "__main__":
     # Quick test
     print_european_teams()
-    print(f"\nCurrent season detected: {get_current_season()}")
+    logger.info(f"\nCurrent season detected: {get_current_season()}")
