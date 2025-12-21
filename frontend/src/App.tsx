@@ -1419,132 +1419,163 @@ function App() {
                     ))}
                     
                     {/* Grouped Transfer Suggestions */}
-                    {sortedGroups.map((group, groupIndex) => (
-                      <div key={`group-${group.outPlayer.id || group.outPlayer.name}`} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-lg font-bold text-[#00ff87]">#{groupIndex + 1}</span>
-                          <span className="text-xs text-gray-400">
-                            {group.suggestions.length} option{group.suggestions.length > 1 ? 's' : ''}
-                          </span>
-                        </div>
-                        
-                        {/* Transfer Out Player (shown once per group) */}
-                        <div className="mb-4 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
-                          <div className="text-xs text-red-400 mb-2 font-semibold">Transfer Out</div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-base">{group.outPlayer.name}</span>
-                            {group.outPlayer.european_comp && (
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                group.outPlayer.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                group.outPlayer.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                'bg-blue-500/20 text-blue-400'
-                              }`}>
-                                {group.outPlayer.european_comp}
-                              </span>
-                            )}
-                            {group.outPlayer.status && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
-                                {group.outPlayer.status === 'i' ? 'Injured' : 
-                                 group.outPlayer.status === 'd' ? 'Doubtful' :
-                                 group.outPlayer.status === 's' ? 'Suspended' : 'Unavailable'}
+                    {sortedGroups.map((group, groupIndex) => {
+                      const groupKey = `group-${group.outPlayer.id || group.outPlayer.name}`
+                      const isExpanded = expandedGroups.has(groupKey)
+                      const firstOption = group.suggestions[0]
+                      const otherOptions = group.suggestions.slice(1)
+                      
+                      const renderOption = (suggestion: TransferSuggestion, optionIndex: number) => (
+                        <div key={`option-${optionIndex}`} className="p-3 bg-green-500/5 rounded-lg border border-green-500/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-green-400">#{optionIndex + 1}</span>
+                              <span className="text-sm font-medium text-gray-200">Transfer In</span>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              suggestion.points_gain > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                            }`}>
+                              {suggestion.points_gain > 0 ? '+' : ''}{suggestion.points_gain} pts
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <span className="font-medium text-sm">{suggestion.in.name}</span>
+                            {suggestion.in.european_comp && (
+                              <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">
+                                {suggestion.in.european_comp}
                               </span>
                             )}
                           </div>
-                          <div className="text-sm text-gray-400 mt-1">{group.outPlayer.team} • £{group.outPlayer.price}m</div>
+                          <div className="text-xs text-gray-400">{suggestion.in.team} • £{suggestion.in.price}m</div>
                           <div className="text-xs text-gray-500 mt-1">
-                            vs {group.outPlayer.fixture} (FDR {group.outPlayer.fixture_difficulty}) • Form: {group.outPlayer.form}
+                            vs {suggestion.in.fixture} (FDR {suggestion.in.fixture_difficulty}) • Form: {suggestion.in.form}
                           </div>
-                        </div>
-                        
-                        {/* Transfer In Options (ranked) */}
-                        <div className="space-y-3">
-                          {group.suggestions.map((suggestion, optionIndex) => (
-                            <div key={`option-${optionIndex}`} className="p-3 bg-green-500/5 rounded-lg border border-green-500/20">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-green-400">#{optionIndex + 1}</span>
-                                  <span className="text-sm font-medium text-gray-200">Transfer In</span>
-                                </div>
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  suggestion.points_gain > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                                }`}>
-                                  {suggestion.points_gain > 0 ? '+' : ''}{suggestion.points_gain} pts
-                                </span>
-                              </div>
-                              
-                              <div className="flex items-center gap-2 flex-wrap mb-2">
-                                <span className="font-medium text-sm">{suggestion.in.name}</span>
-                                {suggestion.in.european_comp && (
-                                  <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">
-                                    {suggestion.in.european_comp}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-400">{suggestion.in.team} • £{suggestion.in.price}m</div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                vs {suggestion.in.fixture} (FDR {suggestion.in.fixture_difficulty}) • Form: {suggestion.in.form}
-                              </div>
-                              
-                              {/* Form Upgrade */}
-                              {suggestion.out.form && suggestion.in.form && parseFloat(suggestion.in.form) > parseFloat(suggestion.out.form) && (
-                                <div className="mt-2 flex items-center gap-1 text-xs">
-                                  <span className="text-yellow-400">💡</span>
-                                  <span className="text-[#00ff87] font-medium">
-                                    Form upgrade: {suggestion.out.form} → {suggestion.in.form}
-                                  </span>
+                          
+                          {/* Form Upgrade */}
+                          {suggestion.out.form && suggestion.in.form && parseFloat(suggestion.in.form) > parseFloat(suggestion.out.form) && (
+                            <div className="mt-2 flex items-center gap-1 text-xs">
+                              <span className="text-yellow-400">💡</span>
+                              <span className="text-[#00ff87] font-medium">
+                                Form upgrade: {suggestion.out.form} → {suggestion.in.form}
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Additional reasons */}
+                          {suggestion.all_reasons.length > 0 && (
+                            <div className="mt-2 text-xs text-gray-400">
+                              {suggestion.all_reasons[0] && (
+                                <div className="mb-1">
+                                  {suggestion.all_reasons[0].includes('Also:') ? suggestion.all_reasons[0] : `Also: ${suggestion.all_reasons[0]}`}
                                 </div>
                               )}
-                              
-                              {/* Additional reasons */}
-                              {suggestion.all_reasons.length > 0 && (
-                                <div className="mt-2 text-xs text-gray-400">
-                                  {suggestion.all_reasons[0] && (
-                                    <div className="mb-1">
-                                      {suggestion.all_reasons[0].includes('Also:') ? suggestion.all_reasons[0] : `Also: ${suggestion.all_reasons[0]}`}
+                              {suggestion.all_reasons.slice(1).map((reason: string, idx: number) => (
+                                <div key={idx} className="text-gray-500">• {reason}</div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Why square - prettied up */}
+                          {suggestion.teammate_comparison?.why && (
+                            <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                              <div className="p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
+                                <div className="flex items-start gap-2 mb-2">
+                                  <span className="text-[#00ff87] text-sm">💡</span>
+                                  <div className="flex-1">
+                                    <div className="text-xs font-semibold text-gray-300 mb-1">
+                                      Why {suggestion.in.name} over other {suggestion.teammate_comparison.team} {suggestion.teammate_comparison.position} options?
                                     </div>
-                                  )}
-                                  {suggestion.all_reasons.slice(1).map((reason: string, idx: number) => (
-                                    <div key={idx} className="text-gray-500">• {reason}</div>
-                                  ))}
-                                </div>
-                              )}
-                              
-                              {/* Why square - prettied up */}
-                              {suggestion.teammate_comparison?.why && (
-                                <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
-                                  <div className="p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
-                                    <div className="flex items-start gap-2 mb-2">
-                                      <span className="text-[#00ff87] text-sm">💡</span>
-                                      <div className="flex-1">
-                                        <div className="text-xs font-semibold text-gray-300 mb-1">
-                                          Why {suggestion.in.name} over other {suggestion.teammate_comparison.team} {suggestion.teammate_comparison.position} options?
-                                        </div>
-                                        <div className="text-xs text-gray-400 leading-relaxed">
-                                          {suggestion.teammate_comparison.why}
-                                        </div>
-                                      </div>
+                                    <div className="text-xs text-gray-400 leading-relaxed">
+                                      {suggestion.teammate_comparison.why}
                                     </div>
                                   </div>
                                 </div>
-                              )}
-                              
-                              {/* Cost and FDR */}
-                              <div className="flex gap-4 mt-2 text-xs text-gray-400 pt-2 border-t border-[#2a2a4a]/50">
-                                <span>Cost: <span className={suggestion.cost > 0 ? 'text-red-400' : 'text-green-400'}>{suggestion.cost > 0 ? '+' : ''}£{suggestion.cost}m</span></span>
-                                <span>5GW Avg FDR: <span className="text-gray-300">{suggestion.out.avg_fixture_5gw}</span> → <span className="text-[#00ff87]">{suggestion.in.avg_fixture_5gw}</span></span>
                               </div>
                             </div>
-                          )
-                          })()}
+                          )}
                           
-                          {/* Other options - hidden behind dropdown */}
-                          {isExpanded && otherOptions.map((suggestion, optionIndex) => {
-                            const actualIndex = optionIndex + 1
-                            return (
-                  </div>
-                </div>
-              )
-            })()}
+                          {/* Cost and FDR */}
+                          <div className="flex gap-4 mt-2 text-xs text-gray-400 pt-2 border-t border-[#2a2a4a]/50">
+                            <span>Cost: <span className={suggestion.cost > 0 ? 'text-red-400' : 'text-green-400'}>{suggestion.cost > 0 ? '+' : ''}£{suggestion.cost}m</span></span>
+                            <span>5GW Avg FDR: <span className="text-gray-300">{suggestion.out.avg_fixture_5gw}</span> → <span className="text-[#00ff87]">{suggestion.in.avg_fixture_5gw}</span></span>
+                          </div>
+                        </div>
+                      )
+                      
+                      return (
+                        <div key={groupKey} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-lg font-bold text-[#00ff87]">#{groupIndex + 1}</span>
+                            {otherOptions.length > 0 && (
+                              <button
+                                onClick={() => {
+                                  const newExpanded = new Set(expandedGroups)
+                                  if (isExpanded) {
+                                    newExpanded.delete(groupKey)
+                                  } else {
+                                    newExpanded.add(groupKey)
+                                  }
+                                  setExpandedGroups(newExpanded)
+                                }}
+                                className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#00ff87] transition-colors"
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronUp className="w-3 h-3" />
+                                    <span>Hide {otherOptions.length} more</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-3 h-3" />
+                                    <span>Show {otherOptions.length} more option{otherOptions.length > 1 ? 's' : ''}</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          
+                          {/* Transfer Out Player (shown once per group) */}
+                          <div className="mb-4 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                            <div className="text-xs text-red-400 mb-2 font-semibold">Transfer Out</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-base">{group.outPlayer.name}</span>
+                              {group.outPlayer.european_comp && (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  group.outPlayer.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                  group.outPlayer.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                  'bg-blue-500/20 text-blue-400'
+                                }`}>
+                                  {group.outPlayer.european_comp}
+                                </span>
+                              )}
+                              {group.outPlayer.status && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
+                                  {group.outPlayer.status === 'i' ? 'Injured' : 
+                                   group.outPlayer.status === 'd' ? 'Doubtful' :
+                                   group.outPlayer.status === 's' ? 'Suspended' : 'Unavailable'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-400 mt-1">{group.outPlayer.team} • £{group.outPlayer.price}m</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              vs {group.outPlayer.fixture} (FDR {group.outPlayer.fixture_difficulty}) • Form: {group.outPlayer.form}
+                            </div>
+                          </div>
+                          
+                          {/* Transfer In Options (ranked) */}
+                          <div className="space-y-3">
+                            {/* First option - always visible */}
+                            {firstOption && renderOption(firstOption, 0)}
+                            
+                            {/* Other options - hidden behind dropdown */}
+                            {isExpanded && otherOptions.map((suggestion, optionIndex) => 
+                              renderOption(suggestion, optionIndex + 1)
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
             
             {/* Squad Analysis */}
             {squadAnalysis.length > 0 && (
