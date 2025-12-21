@@ -19,3 +19,6 @@ requests>=2.31.0
 # Date parsing (optional, for better date handling)
 python-dateutil>=2.8.0
 
+# Machine learning dependencies
+numpy>=1.24.0
+
