@@ -665,7 +665,7 @@ function App() {
 
   const navigationTabs = [
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
-    { id: 'selected_teams', icon: Trophy, label: 'Team of the Week', shortLabel: 'Team of Week', color: 'text-yellow-400', description: 'View your saved team of the week selections' },
+    { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
     { id: 'squad_combined', icon: Users, label: 'Squad • Combined', shortLabel: 'Combined', color: 'text-[#00ff87]', description: 'Optimal squad using combined prediction method' },
     { id: 'squad_heuristic', icon: Zap, label: 'Squad • Heuristic', shortLabel: 'Heuristic', color: 'text-purple-400', description: 'Squad based on heuristic predictions' },
     { id: 'squad_form', icon: TrendingUp, label: 'Squad • Form', shortLabel: 'Form', color: 'text-green-400', description: 'Squad focused on recent form' },
@@ -1906,7 +1906,7 @@ function App() {
                   </div>
         )}
 
-        {/* Selected Teams Tab */}
+        {/* Free Hit of the Week Tab */}
         {activeTab === 'selected_teams' && (() => {
           const sortedTeams = Object.values(selectedTeams).sort((a, b) => b.gameweek - a.gameweek)
           // Initialize selected gameweek tab if not set
@@ -1918,7 +1918,7 @@ function App() {
               <div className="card">
                 <div className="card-header">
                   <Trophy className="w-5 h-5 text-[#00ff87]" />
-                  Team of the Week
+                  Free Hit of the Week
                 </div>
                 <p className="text-gray-400 text-sm mb-4">
                   View your saved suggested squads. Squads are automatically saved 30 minutes before each gameweek deadline.
