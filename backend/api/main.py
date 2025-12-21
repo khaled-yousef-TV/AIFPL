@@ -15,6 +15,13 @@ from threading import Lock
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Import response models for better API documentation
+from .response_models import (
+    GameWeekResponse, SuggestedSquadResponse, SavedSquadsResponse,
+    SavedSquadResponse, SaveSquadResponse, DeleteSquadResponse,
+    HealthResponse, BettingOddsDebugResponse
+)
 from dotenv import load_dotenv
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -22,8 +29,16 @@ from apscheduler.triggers.date import DateTrigger
 from datetime import timedelta
 
 # Configure logging first (needed for messages below)
-logging.basicConfig(level=logging.INFO)
+from .config import setup_logging, validate_env
+setup_logging()
 logger = logging.getLogger(__name__)
+
+# Validate environment variables
+try:
+    validate_env()
+except ValueError as e:
+    logger.error(f"Environment validation failed: {e}")
+    raise
 
 # Load .env from backend directory (where uvicorn typically runs from)
 # Try multiple paths to ensure we find it
@@ -1967,7 +1982,7 @@ async def get_saved_squads():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/saved-squads/{name}")
+@app.get("/api/saved-squads/{name}", response_model=SavedSquadResponse)
 async def get_saved_squad(name: str):
     """
     Get a specific saved squad by name.
@@ -1984,7 +1999,7 @@ async def get_saved_squad(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/saved-squads")
+@app.post("/api/saved-squads", response_model=SaveSquadResponse)
 async def save_squad(request: SaveSquadRequest):
     """
     Save or update a squad with a custom name.
@@ -2025,7 +2040,7 @@ async def save_squad(request: SaveSquadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/saved-squads/{name}")
+@app.put("/api/saved-squads/{name}", response_model=SaveSquadResponse)
 async def update_saved_squad(name: str, request: SaveSquadRequest):
     """
     Update an existing saved squad.
@@ -2059,7 +2074,7 @@ async def update_saved_squad(name: str, request: SaveSquadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/saved-squads/{name}")
+@app.delete("/api/saved-squads/{name}", response_model=DeleteSquadResponse)
 async def delete_saved_squad(name: str):
     """
     Delete a saved squad by name.
