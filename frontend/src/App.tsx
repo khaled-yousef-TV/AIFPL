@@ -563,7 +563,9 @@ function App() {
     setTransferLoading(true)
     
     try {
-      const suggestionsLimit = Math.max(3, Number.isFinite(freeTransfers) ? freeTransfers : 3)
+      // Request enough suggestions to get N different players (N = free transfers)
+      // Multiply by 3 to account for multiple options per player that will be grouped
+      const suggestionsLimit = Math.max(3, (Number.isFinite(freeTransfers) ? freeTransfers : 1) * 3)
       const res = await fetch(`${API_BASE}/api/transfer-suggestions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1361,7 +1363,7 @@ function App() {
                   const bBest = b.suggestions[0]?.priority_score || 0
                   return bBest - aBest
                 })
-                .slice(0, Math.max(1, freeTransfers)) // Limit to number of free transfers
+                .slice(0, Math.max(1, Number.isFinite(freeTransfers) ? freeTransfers : 1)) // Limit to number of free transfers (each group = 1 transfer)
               
               return (
                 <div className="card">
