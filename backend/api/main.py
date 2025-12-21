@@ -1885,6 +1885,9 @@ async def get_wildcard(request: TransferRequest):
             "resulting_squad": plan.resulting_squad,
             "combined_rationale": plan.combined_rationale,
             "individual_breakdowns": plan.individual_breakdowns,
+            "before_total_points": plan.before_total_points,
+            "after_total_points": plan.after_total_points,
+            "kept_players": plan.kept_players,
         }
         
     except HTTPException:

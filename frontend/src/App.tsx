@@ -1672,8 +1672,8 @@ function App() {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div>
-                      <div className="text-gray-400 text-sm mb-1">Before Total</div>
-                      <div className="text-xl font-bold text-gray-300">
+                      <div className="text-red-400 text-sm mb-1">Before Total</div>
+                      <div className="text-xl font-bold text-red-400">
                         {wildcardPlan.before_total_points?.toFixed(1) || '0.0'}
                       </div>
                     </div>
@@ -1783,7 +1783,7 @@ function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* Before Squad */}
                     <div>
-                      <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
+                      <div className="text-sm font-semibold text-red-400 mb-3">Before</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {mySquad.map((player: SquadPlayer) => {
                           const isTransferOut = wildcardPlan.transfers_out?.some((t: any) => t.id === player.id)
