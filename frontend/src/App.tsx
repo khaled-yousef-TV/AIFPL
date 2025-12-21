@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
@@ -165,6 +165,45 @@ function App() {
   // Mini Rebuild state
   const [miniRebuildLoading, setMiniRebuildLoading] = useState(false)
   const [miniRebuildPlan, setMiniRebuildPlan] = useState<any>(null)
+  
+  // Expanded groups for transfer suggestions
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  
+  // Memoized grouped transfer suggestions
+  const groupedTransferSuggestions = useMemo(() => {
+    if (transferSuggestions.length === 0) return null
+    
+    // Separate hold suggestions from transfer suggestions
+    const holdSuggestions = transferSuggestions.filter((s: any) => s.type === 'hold')
+    const transferOnly = transferSuggestions.filter((s: any) => s.type !== 'hold')
+    
+    // Group transfers by transfer-out player
+    const groupedByOut: Record<string, TransferSuggestion[]> = {}
+    transferOnly.forEach((suggestion) => {
+      const outPlayerId = suggestion.out.id || suggestion.out.name
+      if (!groupedByOut[outPlayerId]) {
+        groupedByOut[outPlayerId] = []
+      }
+      groupedByOut[outPlayerId].push(suggestion)
+    })
+    
+    // Sort groups by best priority_score in each group, then take top N groups (N = free transfers)
+    const sortedGroups = Object.entries(groupedByOut)
+      .map(([outPlayerId, suggestions]) => ({
+        outPlayer: suggestions[0].out,
+        suggestions: suggestions
+          .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))
+          .slice(0, 3) // Top 3 transfer-in options per group
+      }))
+      .sort((a, b) => {
+        const aBest = a.suggestions[0]?.priority_score || 0
+        const bBest = b.suggestions[0]?.priority_score || 0
+        return bBest - aBest
+      })
+      .slice(0, Math.max(1, Number.isFinite(freeTransfers) ? freeTransfers : 1)) // Limit to number of free transfers (each group = 1 transfer)
+    
+    return { holdSuggestions, sortedGroups }
+  }, [transferSuggestions, freeTransfers])
 
   // Saved squads (persist between weeks) - now server-side
   const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
@@ -1361,37 +1400,7 @@ function App() {
             </div>
             
             {/* Transfer Suggestions */}
-            {transferSuggestions.length > 0 && (() => {
-              // Separate hold suggestions from transfer suggestions
-              const holdSuggestions = transferSuggestions.filter((s: any) => s.type === 'hold')
-              const transferOnly = transferSuggestions.filter((s: any) => s.type !== 'hold')
-              
-              // Group transfers by transfer-out player
-              const groupedByOut: Record<string, TransferSuggestion[]> = {}
-              transferOnly.forEach((suggestion) => {
-                const outPlayerId = suggestion.out.id || suggestion.out.name
-                if (!groupedByOut[outPlayerId]) {
-                  groupedByOut[outPlayerId] = []
-                }
-                groupedByOut[outPlayerId].push(suggestion)
-              })
-              
-              // Sort groups by best priority_score in each group, then take top N groups (N = free transfers)
-              const sortedGroups = Object.entries(groupedByOut)
-                .map(([outPlayerId, suggestions]) => ({
-                  outPlayer: suggestions[0].out,
-                  suggestions: suggestions
-                    .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))
-                    .slice(0, 3) // Top 3 transfer-in options per group
-                }))
-                .sort((a, b) => {
-                  const aBest = a.suggestions[0]?.priority_score || 0
-                  const bBest = b.suggestions[0]?.priority_score || 0
-                  return bBest - aBest
-                })
-                .slice(0, Math.max(1, Number.isFinite(freeTransfers) ? freeTransfers : 1)) // Limit to number of free transfers (each group = 1 transfer)
-              
-              return (
+            {groupedTransferSuggestions && (
                 <div className="card">
                   <div className="card-header">
                     <TrendingUp className="w-5 h-5 text-[#00ff87]" />
@@ -1400,7 +1409,7 @@ function App() {
                   
                   <div className="space-y-4">
                     {/* Hold Suggestions */}
-                    {holdSuggestions.map((suggestion, i) => (
+                    {groupedTransferSuggestions.holdSuggestions.map((suggestion, i) => (
                       <div key={`hold-${i}`} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-lg font-bold text-[#00ff87]">✅ Hold</span>
@@ -1439,7 +1448,7 @@ function App() {
                     ))}
                     
                     {/* Grouped Transfer Suggestions */}
-                    {sortedGroups.map((group, groupIndex) => {
+                    {groupedTransferSuggestions.sortedGroups.map((group, groupIndex) => {
                       const groupKey = `group-${group.outPlayer.id || group.outPlayer.name}`
                       const isExpanded = expandedGroups.has(groupKey)
                       const firstOption = group.suggestions[0]
@@ -1597,7 +1606,8 @@ function App() {
                       )
                     })}
                   </div>
-                )})()}
+                </div>
+            )}
           </div>
         )}
             
