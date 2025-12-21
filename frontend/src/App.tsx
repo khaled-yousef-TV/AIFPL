@@ -1285,21 +1285,27 @@ function App() {
                     value={bankInput}
                     onChange={(e) => {
                       const val = e.target.value
-                      setBankInput(val)
-                      const numVal = parseFloat(val)
-                      if (!isNaN(numVal)) {
-                        setBank(numVal)
-                      } else if (val === '' || val === '.') {
-                        setBank(0)
+                      // Allow empty string, single dot, or valid numbers
+                      if (val === '' || val === '.' || /^-?\d*\.?\d*$/.test(val)) {
+                        setBankInput(val)
+                        const numVal = parseFloat(val)
+                        if (!isNaN(numVal) && isFinite(numVal)) {
+                          setBank(numVal)
+                        } else if (val === '' || val === '.' || val === '-') {
+                          setBank(0)
+                        }
                       }
                     }}
                     onBlur={(e) => {
-                      const numVal = parseFloat(e.target.value)
-                      if (isNaN(numVal) || numVal < 0) {
+                      const val = e.target.value
+                      const numVal = parseFloat(val)
+                      if (isNaN(numVal) || !isFinite(numVal) || numVal < 0) {
                         setBankInput('0')
                         setBank(0)
                       } else {
-                        setBankInput(String(numVal))
+                        // Preserve decimals if they exist
+                        const formatted = numVal.toString()
+                        setBankInput(formatted)
                         setBank(numVal)
                       }
                     }}
