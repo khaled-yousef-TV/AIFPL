@@ -21,7 +21,7 @@ Built for **manual decision support** (no login required): it uses public FPL da
 - **🛫 European rotation risk**: UCL/UEL/UECL congestion affects scores + displayed badges
 - **📈 Trend reversal signal**: "bounce-back spots" for strong teams underperforming recently
 - **💰 Betting odds integration**: Incorporate bookmaker odds (goalscorer, clean sheets) to enhance predictions
-- **💾 Saved squads**: save/load/edit squads locally so you don't re-enter weekly
+- **💾 Saved squads**: save/load/edit squads server-side (syncs across devices)
 - **💷 Selling price editing**: use your **selling price** (can differ from current price)
 - **🔎 Player search**: search by player name or team (e.g. `Spurs`, `TOT`) + cheap bench fodder lists
 
@@ -194,7 +194,8 @@ Uses a hybrid approach:
 ## 🔒 Security
 
 - Uses **public FPL data** (no login) and runs locally.
-- Saved squads are stored in your browser via **localStorage**.
+- **Saved squads** are stored server-side in SQLite database (persist across devices).
+- **Draft squad** auto-save uses localStorage (local-only, temporary work-in-progress).
 
 ## 🛣️ Next Ideas
 

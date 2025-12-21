@@ -180,6 +180,37 @@ async def _save_selected_team_async():
     except Exception as e:
         logger.error(f"Error in _save_selected_team_async: {e}")
 
+def save_daily_snapshot_job():
+    """Job to save daily snapshot at midnight (sync wrapper for scheduler)."""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_save_daily_snapshot_async())
+        loop.close()
+    except Exception as e:
+        logger.error(f"Error in save_daily_snapshot_job: {e}")
+
+async def _save_daily_snapshot_async():
+    """Async function to save daily snapshot."""
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
+            logger.warning("No next gameweek found for daily snapshot save job")
+            return
+        
+        # Get the current combined squad suggestion
+        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        
+        # Save daily snapshot (always create new entry)
+        success = db_manager.save_daily_snapshot(next_gw.id, squad_data)
+        if success:
+            logger.info(f"Successfully saved daily snapshot for Gameweek {next_gw.id} at midnight")
+        else:
+            logger.error(f"Failed to save daily snapshot for Gameweek {next_gw.id}")
+    except Exception as e:
+        logger.error(f"Error in _save_daily_snapshot_async: {e}")
+
 def schedule_next_save():
     """Schedule the next selected team save job 30 minutes before deadline."""
     try:
@@ -238,13 +269,74 @@ def schedule_next_save():
     except Exception as e:
         logger.error(f"Error scheduling selected team save: {e}")
 
+async def check_and_run_missed_saves():
+    """Check if we missed any saves while the server was down and run them."""
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw or not next_gw.deadline_time:
+            return
+        
+        # Check if we missed the 30-min-before-deadline save
+        deadline_str = next_gw.deadline_time
+        if isinstance(deadline_str, datetime):
+            deadline = deadline_str
+        elif isinstance(deadline_str, str):
+            deadline_str = deadline_str.replace('Z', '+00:00')
+            try:
+                deadline = datetime.fromisoformat(deadline_str)
+            except ValueError:
+                try:
+                    from dateutil import parser
+                    deadline = parser.parse(deadline_str)
+                except ImportError:
+                    return
+        else:
+            deadline = deadline_str
+        
+        save_time = deadline - timedelta(minutes=30)
+        now = datetime.now(deadline.tzinfo) if hasattr(deadline, 'tzinfo') and deadline.tzinfo else datetime.now()
+        
+        # If we're past the save time but before deadline, and haven't saved yet
+        if save_time <= now < deadline:
+            existing = db_manager.get_selected_team(next_gw.id)
+            if not existing:
+                logger.info(f"Server woke up after scheduled save time but before deadline. Running missed save for GW{next_gw.id}")
+                await _save_selected_team_async()
+        
+        # Check if we missed today's midnight snapshot (run if it's past midnight and we haven't saved today)
+        try:
+            today = datetime.utcnow().date()
+            latest_snapshot = db_manager.get_latest_daily_snapshot(next_gw.id)
+            if latest_snapshot and latest_snapshot.get('saved_at'):
+                snapshot_date_str = latest_snapshot['saved_at']
+                if isinstance(snapshot_date_str, str):
+                    snapshot_date_str = snapshot_date_str.replace('Z', '+00:00')
+                    snapshot_dt = datetime.fromisoformat(snapshot_date_str)
+                    snapshot_date = snapshot_dt.date()
+                    if snapshot_date < today:
+                        logger.info(f"Server woke up after midnight. Running missed daily snapshot for GW{next_gw.id}")
+                        await _save_daily_snapshot_async()
+            elif not latest_snapshot:
+                # No snapshot exists, save one now
+                logger.info(f"No daily snapshot exists for GW{next_gw.id}. Creating one now.")
+                await _save_daily_snapshot_async()
+        except Exception as snapshot_error:
+            logger.error(f"Error checking daily snapshot: {snapshot_error}")
+            
+    except Exception as e:
+        logger.error(f"Error checking missed saves: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     """Start the scheduler on app startup."""
     import asyncio
     scheduler.start()
     logger.info("Selected team scheduler started")
-    # Schedule the first save job
+    
+    # Check for missed saves when server wakes up (for Render free tier spin-down scenario)
+    await check_and_run_missed_saves()
+    
+    # Schedule the first save job (30 min before deadline)
     schedule_next_save()
     # Also schedule a check every 6 hours to reschedule if needed
     from apscheduler.triggers.cron import CronTrigger
@@ -255,6 +347,15 @@ async def startup_event():
         name="Check and Schedule Selected Team Save",
         replace_existing=True
     )
+    # Schedule daily snapshot at midnight (00:00)
+    scheduler.add_job(
+        save_daily_snapshot_job,
+        CronTrigger(hour=0, minute=0),  # Every day at midnight
+        id="save_daily_snapshot",
+        name="Save Daily Snapshot at Midnight",
+        replace_existing=True
+    )
+    logger.info("Scheduled daily snapshot job for midnight")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -267,7 +368,10 @@ async def shutdown_event():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
+    """
+    Health check endpoint.
+    Can also be used to wake up the server on Render free tier.
+    """
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
@@ -1676,10 +1780,61 @@ async def search_players(q: str = "", position: Optional[str] = None, limit: int
 
 @app.get("/api/selected-teams")
 async def get_selected_teams():
-    """Get all saved selected teams (suggested squads) for all gameweeks."""
+    """
+    Get all saved teams for all gameweeks.
+    Returns daily snapshot for current/next gameweek, final team for past gameweeks.
+    """
     try:
-        teams = db_manager.get_all_selected_teams()
-        return {"teams": teams}
+        # Get current/next gameweek
+        next_gw = fpl_client.get_next_gameweek()
+        current_gw_id = next_gw.id if next_gw else None
+        
+        # Get all final teams (30 min before deadline)
+        final_teams = db_manager.get_all_selected_teams()
+        
+        # Build response: use daily snapshot for current gameweek, final team for past
+        teams_result = []
+        processed_gameweeks = set()
+        
+        # Process all final teams
+        for team in final_teams:
+            gw = team["gameweek"]
+            processed_gameweeks.add(gw)
+            
+            # For current/next gameweek, prefer daily snapshot
+            if current_gw_id and gw >= current_gw_id:
+                daily_snapshot = db_manager.get_latest_daily_snapshot(gw)
+                if daily_snapshot:
+                    teams_result.append({
+                        **daily_snapshot,
+                        "type": "daily_snapshot"  # Mark as daily snapshot
+                    })
+                else:
+                    # Fallback to final team if no daily snapshot
+                    teams_result.append({
+                        **team,
+                        "type": "final"
+                    })
+            else:
+                # For past gameweeks, use final team
+                teams_result.append({
+                    **team,
+                    "type": "final"
+                })
+        
+        # If current gameweek has no final team but might have daily snapshot
+        if current_gw_id and current_gw_id not in processed_gameweeks:
+            daily_snapshot = db_manager.get_latest_daily_snapshot(current_gw_id)
+            if daily_snapshot:
+                teams_result.append({
+                    **daily_snapshot,
+                    "type": "daily_snapshot"
+                })
+        
+        # Sort by gameweek descending (newest first)
+        teams_result.sort(key=lambda x: x["gameweek"], reverse=True)
+        
+        return {"teams": teams_result}
     except Exception as e:
         logger.error(f"Error fetching selected teams: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1687,12 +1842,35 @@ async def get_selected_teams():
 
 @app.get("/api/selected-teams/{gameweek}")
 async def get_selected_team(gameweek: int):
-    """Get saved selected team for a specific gameweek."""
+    """
+    Get saved team for a specific gameweek.
+    Returns daily snapshot for current/next gameweek, final team for past gameweeks.
+    """
     try:
-        team = db_manager.get_selected_team(gameweek)
-        if not team:
-            raise HTTPException(status_code=404, detail=f"No selected team found for Gameweek {gameweek}")
-        return team
+        # Get current/next gameweek
+        next_gw = fpl_client.get_next_gameweek()
+        current_gw_id = next_gw.id if next_gw else None
+        
+        # Determine if this is current/next or past gameweek
+        is_current = current_gw_id and gameweek >= current_gw_id
+        
+        if is_current:
+            # For current gameweek, prefer daily snapshot
+            team = db_manager.get_latest_daily_snapshot(gameweek)
+            if team:
+                return {**team, "type": "daily_snapshot"}
+            # Fallback to final team if no daily snapshot
+            team = db_manager.get_selected_team(gameweek)
+            if team:
+                return {**team, "type": "final"}
+        else:
+            # For past gameweeks, use final team
+            team = db_manager.get_selected_team(gameweek)
+            if team:
+                return {**team, "type": "final"}
+        
+        # Not found
+        raise HTTPException(status_code=404, detail=f"No selected team found for Gameweek {gameweek}")
     except HTTPException:
         raise
     except Exception as e:
@@ -1733,6 +1911,180 @@ async def save_selected_team():
     except Exception as e:
         logger.error(f"Error saving selected team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Saved Squads (User-saved with custom names) ====================
+
+class SaveSquadRequest(BaseModel):
+    """Request model for saving a squad."""
+    name: str
+    squad: Dict[str, Any]  # Full squad data (formation, starting_xi, bench, captain, etc.)
+    
+    class Config:
+        """Pydantic config."""
+        json_schema_extra = {
+            "example": {
+                "name": "My Favorite Squad",
+                "squad": {
+                    "formation": "4-4-2",
+                    "starting_xi": [],
+                    "bench": [],
+                    "captain": 123,
+                    "vice_captain": 456
+                }
+            }
+        }
+
+
+@app.get("/api/saved-squads")
+async def get_saved_squads():
+    """Get all user-saved squads (with custom names)."""
+    """
+    Get all user-saved squads (with custom names).
+    Returns list of all saved squads sorted by most recently updated first.
+    """
+    try:
+        squads = db_manager.get_all_saved_squads()
+        return {"squads": squads}
+    except Exception as e:
+        logger.error(f"Error fetching saved squads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/saved-squads/{name}")
+async def get_saved_squad(name: str):
+    """
+    Get a specific saved squad by name.
+    """
+    try:
+        squad = db_manager.get_saved_squad(name)
+        if not squad:
+            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
+        return squad
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching saved squad '{name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/saved-squads")
+async def save_squad(request: SaveSquadRequest):
+    """
+    Save or update a squad with a custom name.
+    If a squad with the same name exists, it will be updated.
+    """
+    try:
+        if not request.name or not request.name.strip():
+            raise HTTPException(status_code=400, detail="Squad name is required")
+        
+        if not request.squad:
+            raise HTTPException(status_code=400, detail="Squad data is required")
+        
+        success = db_manager.save_saved_squad(request.name.strip(), request.squad)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save squad")
+        
+        return {
+            "success": True,
+            "name": request.name.strip(),
+            "message": f"Squad '{request.name.strip()}' saved successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving squad '{request.name if hasattr(request, 'name') else 'unknown'}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/saved-squads/{name}")
+async def update_saved_squad(name: str, request: SaveSquadRequest):
+    """
+    Update an existing saved squad.
+    The name in the URL must match the name in the request body.
+    """
+    try:
+        if request.name != name:
+            raise HTTPException(status_code=400, detail="Name in URL must match name in request body")
+        
+        if not request.squad:
+            raise HTTPException(status_code=400, detail="Squad data is required")
+        
+        # Check if exists
+        existing = db_manager.get_saved_squad(name)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
+        
+        success = db_manager.save_saved_squad(name, request.squad)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update squad")
+        
+        return {
+            "success": True,
+            "name": name,
+            "message": f"Squad '{name}' updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating squad '{name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/saved-squads/{name}")
+async def delete_saved_squad(name: str):
+    """
+    Delete a saved squad by name.
+    """
+    try:
+        success = db_manager.delete_saved_squad(name)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
+        
+        return {
+            "success": True,
+            "name": name,
+            "message": f"Squad '{name}' deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting squad '{name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Wake-up Endpoint for Render Free Tier ====================
+
+@app.post("/api/wake-up")
+async def wake_up():
+    """
+    Endpoint to wake up the server and check for missed saves.
+    Can be called by external cron services (cron-job.org, etc.) to keep the server alive
+    and trigger missed saves when the server wakes up.
+    
+    Use this with a cron service to ping every 30-60 minutes to:
+    1. Keep the server from spinning down
+    2. Trigger any missed saves if the server was asleep
+    """
+    try:
+        # Run missed save checks
+        await check_and_run_missed_saves()
+        
+        # Also trigger a reschedule to ensure jobs are properly scheduled
+        schedule_next_save()
+        
+        return {
+            "status": "awake",
+            "message": "Server is awake and checked for missed saves",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error in wake-up endpoint: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 if __name__ == "__main__":
