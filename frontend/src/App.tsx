@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
-  ArrowRightLeft, Search, Plus, X, Trash2, Trophy
+  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home
 } from 'lucide-react'
 
 // FPL-themed logo component
@@ -732,9 +732,7 @@ function App() {
                 : 'text-gray-400 hover:text-white hover:bg-[#1a1a2e]/50'
             }`}
           >
-            <div className="w-5 h-5 flex items-center justify-center">
-              <div className={`w-4 h-4 rounded ${activeTab === 'home' ? 'bg-[#00ff87]' : 'bg-gray-500'}`}></div>
-            </div>
+            <Home className={`w-5 h-5 ${activeTab === 'home' ? 'text-[#00ff87]' : 'text-gray-400'}`} />
             <span className="text-sm font-medium">Home</span>
           </button>
           {navigationTabs.map(tab => (
