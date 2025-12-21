@@ -406,20 +406,40 @@ class WildcardEngine:
             elif status == "d":
                 keep_score -= 1.5
             
-            # For full wildcard (15 transfers), protect premium players
-            # Only replace if they have poor future fixtures AND low predicted points
+            # For full wildcard (15 transfers), protect premium players ONLY if they're performing well
+            # Don't protect expensive players who aren't scoring points
             if is_full_wildcard:
-                is_premium = price >= 8.0 or pred >= 6.0  # High price or high predicted
+                is_premium = price >= 8.0  # High price indicates premium player
+                form = player.get("form", 0)
+                
                 if is_premium:
-                    # Only consider replacing premium players if:
-                    # 1. They have bad future fixtures (avg_diff >= 3.5) AND
-                    # 2. Their predicted points are below average (pred < 5.0)
-                    if avg_diff_5gw >= 3.5 and pred < 5.0:
-                        # Still penalize, but less aggressively
-                        keep_score -= 1.0
+                    # Only protect premium players if they're actually performing well
+                    # Check form (recent performance) - premium players need to earn their keep
+                    if form >= 5.0:
+                        # Strong form - protect them unless fixtures are terrible
+                        if avg_diff_5gw >= 4.0:
+                            # Very bad fixtures, but good form - minor penalty
+                            keep_score -= 0.5
+                        else:
+                            # Good form + decent fixtures - protect
+                            keep_score += 2.0
+                    elif form >= 4.0:
+                        # Decent form - protect only if fixtures are good
+                        if avg_diff_5gw <= 2.5:
+                            # Good fixtures + decent form - protect
+                            keep_score += 1.0
+                        elif avg_diff_5gw >= 3.5:
+                            # Bad fixtures + only decent form - don't protect
+                            keep_score -= 1.0
                     else:
-                        # Protect premium players - boost their keep score
-                        keep_score += 3.0
+                        # Poor form (< 4.0) - don't protect even if expensive
+                        # Premium players need to perform to be kept
+                        if form < 3.0:
+                            # Very poor form - penalize heavily
+                            keep_score -= 2.0
+                        else:
+                            # Below average form - no protection
+                            keep_score -= 0.5
             
             scored_players.append({
                 **player,
