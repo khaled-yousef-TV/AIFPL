@@ -682,7 +682,7 @@ function App() {
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
     { id: 'best_team_stats', icon: Users, label: 'Best Team - Statistics Way', shortLabel: 'Stats', color: 'text-[#00ff87]', description: 'Optimal squad using statistical methods (Combined/Heuristic/Form/Fixture)' },
-    { id: 'squad_lstm', icon: Brain, label: 'Squad LSTM', shortLabel: 'LSTM', color: 'text-cyan-400', description: 'Squad using LSTM neural network predictions' },
+    { id: 'squad_lstm', icon: Brain, label: 'Best Team - LSTM', shortLabel: 'LSTM', color: 'text-cyan-400', description: 'Squad using LSTM neural network predictions' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
     { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
   ]
@@ -727,8 +727,8 @@ function App() {
     <div className="min-h-screen bg-[#0f0f1a] text-white flex">
       {/* Left Sidebar Navigation - Desktop Only */}
       <aside className="hidden md:flex flex-col w-64 bg-[#1a1a2e] border-r border-[#2a2a4a] sticky top-0 h-screen overflow-y-auto">
-        <div className="p-6 border-b border-[#2a2a4a]">
-          <div className="flex items-center gap-3 mb-2">
+        <div className="px-6 py-4 border-b border-[#2a2a4a]">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20">
               <FPLLogo className="w-6 h-6" />
             </div>
