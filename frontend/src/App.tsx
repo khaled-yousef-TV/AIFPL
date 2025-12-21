@@ -153,6 +153,7 @@ function App() {
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
   const [bank, setBank] = useState(0)
+  const [bankInput, setBankInput] = useState('0')
   const [freeTransfers, setFreeTransfers] = useState(1)
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([])
   const [squadAnalysis, setSquadAnalysis] = useState<any[]>([])
@@ -201,6 +202,7 @@ function App() {
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : new Date(s.saved_at).getTime(),
             squad: squadData.squad || [],
             bank: squadData.bank || 0,
+            bankInput: String(squadData.bank || 0),
             freeTransfers: squadData.freeTransfers || 1,
           }
         })
@@ -224,7 +226,10 @@ function App() {
         const d = JSON.parse(rawDraft)
         if (d && Array.isArray(d.squad)) {
           setMySquad(d.squad)
-          if (typeof d.bank === 'number') setBank(d.bank)
+          if (typeof d.bank === 'number') {
+            setBank(d.bank)
+            setBankInput(String(d.bank))
+          }
           if (typeof d.freeTransfers === 'number') setFreeTransfers(d.freeTransfers)
         }
       }
@@ -283,6 +288,7 @@ function App() {
       
       setMySquad(squadData.squad || [])
       setBank(squadData.bank ?? 0)
+      setBankInput(String(squadData.bank ?? 0))
       setFreeTransfers(squadData.freeTransfers ?? 1)
       setSaveName(data.name || 'My Squad')
     } catch (err) {
@@ -1274,8 +1280,27 @@ function App() {
                   <input
                     type="number"
                     step="0.1"
-                    value={bank}
-                    onChange={(e) => setBank(parseFloat(e.target.value) || 0)}
+                    value={bankInput}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setBankInput(val)
+                      const numVal = parseFloat(val)
+                      if (!isNaN(numVal)) {
+                        setBank(numVal)
+                      } else if (val === '' || val === '.') {
+                        setBank(0)
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const numVal = parseFloat(e.target.value)
+                      if (isNaN(numVal) || numVal < 0) {
+                        setBankInput('0')
+                        setBank(0)
+                      } else {
+                        setBankInput(String(numVal))
+                        setBank(numVal)
+                      }
+                    }}
                     className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
                   />
                 </div>
