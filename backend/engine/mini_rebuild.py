@@ -1,8 +1,9 @@
 """
-Mini Rebuild Engine
+Wildcard Engine
 
-Coordinated multi-transfer optimization that considers all transfers together
-as a cohesive unit, enforcing formation constraints and optimizing for total points gain.
+Coordinated multi-transfer optimization for wildcard usage that considers all transfers together
+as a cohesive unit, enforcing formation constraints and optimizing for total points gain
+across future fixtures (not just the current gameweek).
 """
 
 import logging
@@ -40,8 +41,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MiniRebuildPlan:
-    """Coordinated transfer plan for mini rebuild."""
+class WildcardPlan:
+    """Coordinated transfer plan for wildcard."""
     transfers_out: List[Dict]
     transfers_in: List[Dict]
     total_points_gain: float
@@ -59,21 +60,22 @@ class MiniRebuildPlan:
             self.kept_players = []
 
 
-class MiniRebuildEngine:
+class WildcardEngine:
     """
-    Engine for coordinated multi-transfer optimization.
+    Engine for coordinated multi-transfer optimization for wildcard usage.
     
     Considers:
     - All transfers together as a unit
     - Formation constraints (strict 2-5-5-3)
     - Total budget across all transfers
     - Team balance (max 3 per team)
-    - Combined fixture runs
-    - Total points optimization
+    - Future fixture runs (next 3-5 gameweeks) - not just current fixture
+    - Total points optimization across multiple gameweeks
+    - Protection of premium players for full wildcards (15 transfers)
     """
     
     def __init__(self):
-        """Initialize mini rebuild engine."""
+        """Initialize wildcard engine."""
         pass
     
     def generate_plan(
@@ -87,27 +89,29 @@ class MiniRebuildEngine:
         avg_fixture_5gw: Dict[int, float],
         team_counts: Dict[int, int],
         team_names: Dict[int, str]
-    ) -> Optional[MiniRebuildPlan]:
+    ) -> Optional[WildcardPlan]:
         """
-        Generate coordinated transfer plan.
+        Generate coordinated transfer plan for wildcard.
         
         Args:
             current_squad: Current squad players with id, position, price, team_id
             all_players: All available players with predictions and scores
             bank: Available budget
-            free_transfers: Number of free transfers (must be >= 4)
+            free_transfers: Number of free transfers (must be >= 4, 15 = full wildcard)
             player_predictions: Dict of player_id -> predicted points
-            fixture_info: Dict of team_id -> fixture info
-            avg_fixture_5gw: Dict of team_id -> avg fixture difficulty
+            fixture_info: Dict of team_id -> fixture info (current/next fixture)
+            avg_fixture_5gw: Dict of team_id -> avg fixture difficulty (next 5 gameweeks)
             team_counts: Current count of players per team
             team_names: Dict of team_id -> team name
             
         Returns:
-            MiniRebuildPlan or None if no valid plan found
+            WildcardPlan or None if no valid plan found
         """
         if free_transfers < 4:
-            logger.warning(f"Mini rebuild requires 4+ transfers, got {free_transfers}")
+            logger.warning(f"Wildcard requires 4+ transfers, got {free_transfers}")
             return None
+        
+        is_full_wildcard = free_transfers >= 15
         
         # Analyze current squad
         squad_by_pos = self._group_by_position(current_squad)
@@ -120,9 +124,11 @@ class MiniRebuildEngine:
             "FWD": len(squad_by_pos.get(PlayerPosition.FWD, []))
         }
         
-        # Find worst players to transfer out (prioritize by keep_score or predicted)
+        # Find worst players to transfer out (prioritize by keep_score)
+        # For wildcard, we focus on future fixtures, not just current one
         transfer_out_candidates = self._find_worst_players(
-            current_squad, player_predictions, fixture_info, avg_fixture_5gw, free_transfers
+            current_squad, player_predictions, fixture_info, avg_fixture_5gw, 
+            free_transfers, is_full_wildcard=is_full_wildcard
         )
         
         if len(transfer_out_candidates) < free_transfers:
@@ -188,17 +194,31 @@ class MiniRebuildEngine:
                     continue
                 
                 # Calculate buy score
+                # For wildcard, prioritize future fixtures over current fixture
                 pred = player_predictions.get(player.get("id"), 0)
                 buy_score = pred
                 
                 if player_team:
+                    # Current fixture (less important for wildcard)
                     fix = fixture_info.get(player_team, {})
-                    if fix.get("difficulty", 3) <= 2:
-                        buy_score += 2.0
+                    current_diff = fix.get("difficulty", 3)
                     
-                    avg_diff = avg_fixture_5gw.get(player_team, 3.0)
-                    if avg_diff <= 2.5:
-                        buy_score += 1.5
+                    # Future fixtures (next 5 gameweeks) - MORE IMPORTANT for wildcard
+                    avg_diff_5gw = avg_fixture_5gw.get(player_team, 3.0)
+                    
+                    # Heavily weight future fixture runs for wildcard
+                    if avg_diff_5gw <= 2.0:
+                        buy_score += 3.0  # Excellent future fixtures
+                    elif avg_diff_5gw <= 2.5:
+                        buy_score += 2.0  # Good future fixtures
+                    elif avg_diff_5gw >= 4.0:
+                        buy_score -= 2.0  # Bad future fixtures
+                    elif avg_diff_5gw >= 3.5:
+                        buy_score -= 1.0  # Poor future fixtures
+                    
+                    # Current fixture bonus (minor for wildcard)
+                    if current_diff <= 2:
+                        buy_score += 0.5
                 
                 form = player.get("form", 0)
                 if form >= 6.0:
@@ -299,7 +319,7 @@ class MiniRebuildEngine:
             for i in range(len(replacements))
         ]
         
-        return MiniRebuildPlan(
+        return WildcardPlan(
             transfers_out=selected_outs,
             transfers_in=replacements,
             total_points_gain=round(total_points_gain, 2),
@@ -334,34 +354,72 @@ class MiniRebuildEngine:
         predictions: Dict[int, float],
         fixture_info: Dict[int, Dict],
         avg_fixture_5gw: Dict[int, float],
-        count: int
+        count: int,
+        is_full_wildcard: bool = False
     ) -> List[Dict]:
-        """Find worst players to transfer out."""
+        """
+        Find worst players to transfer out.
+        
+        For wildcard, focuses on future fixtures (next 5 gameweeks) rather than
+        just the current fixture. For full wildcard (15 transfers), protects
+        premium players unless they have very poor future fixtures.
+        """
         scored_players = []
         for player in squad:
             player_id = player.get("id")
             pred = predictions.get(player_id, 0)
+            price = player.get("price", 0)
             
             # Calculate keep score (lower = worse)
+            # For wildcard, base score on predicted points (already considers form/history)
             keep_score = pred
             
-            # Penalize bad fixtures
+            # For wildcard, heavily weight future fixtures (next 5 GWs) over current fixture
             team_id = player.get("team_id")
             if team_id:
+                # Current fixture (less important for wildcard)
                 fix = fixture_info.get(team_id, {})
-                if fix.get("difficulty", 3) >= 4:
-                    keep_score -= 1.5
+                current_diff = fix.get("difficulty", 3)
                 
-                avg_diff = avg_fixture_5gw.get(team_id, 3.0)
-                if avg_diff >= 3.5:
-                    keep_score -= 1.0
+                # Future fixtures (next 5 gameweeks) - MORE IMPORTANT for wildcard
+                avg_diff_5gw = avg_fixture_5gw.get(team_id, 3.0)
+                
+                # For wildcard, prioritize future fixture runs
+                # Penalize bad future fixture runs more heavily
+                if avg_diff_5gw >= 4.0:
+                    keep_score -= 3.0  # Very bad future fixtures
+                elif avg_diff_5gw >= 3.5:
+                    keep_score -= 1.5  # Bad future fixtures
+                elif avg_diff_5gw <= 2.0:
+                    keep_score += 2.0  # Excellent future fixtures
+                elif avg_diff_5gw <= 2.5:
+                    keep_score += 1.0  # Good future fixtures
+                
+                # Current fixture still matters, but less so
+                if current_diff >= 4:
+                    keep_score -= 0.5  # Bad current fixture (minor penalty)
             
-            # Penalize injuries
+            # Penalize injuries (always important)
             status = player.get("status", "a")
             if status in ["i", "s", "u", "n"]:
                 keep_score -= 5.0
             elif status == "d":
                 keep_score -= 1.5
+            
+            # For full wildcard (15 transfers), protect premium players
+            # Only replace if they have poor future fixtures AND low predicted points
+            if is_full_wildcard:
+                is_premium = price >= 8.0 or pred >= 6.0  # High price or high predicted
+                if is_premium:
+                    # Only consider replacing premium players if:
+                    # 1. They have bad future fixtures (avg_diff >= 3.5) AND
+                    # 2. Their predicted points are below average (pred < 5.0)
+                    if avg_diff_5gw >= 3.5 and pred < 5.0:
+                        # Still penalize, but less aggressively
+                        keep_score -= 1.0
+                    else:
+                        # Protect premium players - boost their keep score
+                        keep_score += 3.0
             
             scored_players.append({
                 **player,

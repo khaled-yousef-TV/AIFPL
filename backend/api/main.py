@@ -1718,12 +1718,13 @@ async def get_transfer_suggestions(request: TransferRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== Mini Rebuild ====================
+# ==================== Wildcard ====================
 
-@app.post("/api/mini-rebuild")
-async def get_mini_rebuild(request: TransferRequest):
+@app.post("/api/wildcard")
+async def get_wildcard(request: TransferRequest):
     """
-    Get coordinated multi-transfer plan for mini rebuild (4+ transfers).
+    Get coordinated multi-transfer plan for wildcard (4+ transfers).
+    For wildcard, considers future fixtures (next 5 gameweeks) rather than just current fixture.
     
     Optimizes all transfers together as a cohesive unit:
     - Enforces strict formation constraints (2-5-5-3)
@@ -1735,7 +1736,7 @@ async def get_mini_rebuild(request: TransferRequest):
         if request.free_transfers < 4:
             raise HTTPException(
                 status_code=400,
-                detail=f"Mini rebuild requires 4+ free transfers, got {request.free_transfers}"
+                detail=f"Wildcard requires 4+ free transfers, got {request.free_transfers}"
             )
         
         players = fpl_client.get_players()
@@ -1850,14 +1851,14 @@ async def get_mini_rebuild(request: TransferRequest):
                 "fixture_difficulty": fix.get("difficulty", 3),
             })
         
-        # Generate mini rebuild plan
+        # Generate wildcard plan
         # Handle imports for both local dev (from repo root) and Render (from backend/)
         try:
-            from backend.engine.mini_rebuild import MiniRebuildEngine
+            from backend.engine.mini_rebuild import WildcardEngine
         except ImportError:
-            from engine.mini_rebuild import MiniRebuildEngine
+            from engine.mini_rebuild import WildcardEngine
         
-        engine = MiniRebuildEngine()
+        engine = WildcardEngine()
         plan = engine.generate_plan(
             current_squad=current_squad,
             all_players=all_players,
@@ -1873,7 +1874,7 @@ async def get_mini_rebuild(request: TransferRequest):
         if not plan:
             raise HTTPException(
                 status_code=400,
-                detail="Could not generate a valid mini rebuild plan. Try adjusting your squad or budget."
+                detail="Could not generate a valid wildcard plan. Try adjusting your squad or budget."
             )
         
         return {
@@ -1889,7 +1890,7 @@ async def get_mini_rebuild(request: TransferRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Mini rebuild error: {e}", exc_info=True)
+        logger.error(f"Wildcard error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

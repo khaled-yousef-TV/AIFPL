@@ -162,9 +162,9 @@ function App() {
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
   
-  // Mini Rebuild state
-  const [miniRebuildLoading, setMiniRebuildLoading] = useState(false)
-  const [miniRebuildPlan, setMiniRebuildPlan] = useState<any>(null)
+  // Wildcard state
+  const [wildcardLoading, setWildcardLoading] = useState(false)
+  const [wildcardPlan, setWildcardPlan] = useState<any>(null)
   
   // Expanded groups for transfer suggestions
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
@@ -1061,7 +1061,7 @@ function App() {
           </div>
         )}
 
-        {/* Transfers Tab (Quick Transfers 1-3, Mini Rebuild 4+) */}
+        {/* Transfers Tab (Quick Transfers 1-3, Wildcard 4+) */}
         {activeTab === 'transfers' && (
           <div className={`space-y-6 transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-gradient-to-br from-purple-900/5 to-indigo-900/5 rounded-lg p-1' : ''}`}>
             {/* Instructions */}
@@ -1070,7 +1070,7 @@ function App() {
                 <ArrowRightLeft className={`w-5 h-5 transition-colors duration-300 ${freeTransfers >= 4 ? 'text-purple-400' : 'text-[#00ff87]'}`} />
                 Transfers
                 {freeTransfers >= 4 && (
-                  <span className="ml-2 text-xs text-purple-400 font-medium">Mini Rebuild Mode</span>
+                  <span className="ml-2 text-xs text-purple-400 font-medium">Wildcard Mode</span>
                 )}
               </div>
               <p className="text-gray-400 text-sm mb-4">
@@ -1383,7 +1383,7 @@ function App() {
                       setFreeTransfers(val)
                       // Clear previous results when switching
                       setTransferSuggestions([])
-                      setMiniRebuildPlan(null)
+                      setWildcardPlan(null)
                     }}
                     className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
                   >
@@ -1404,11 +1404,11 @@ function App() {
                       // Quick Transfers
                       await getTransferSuggestions()
                     } else {
-                      // Mini Rebuild
-                      setMiniRebuildLoading(true)
+                      // Wildcard
+                      setWildcardLoading(true)
                       setTransferSuggestions([])
                       try {
-                        const res = await fetch(`${API_BASE}/api/mini-rebuild`, {
+                        const res = await fetch(`${API_BASE}/api/wildcard`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -1422,30 +1422,30 @@ function App() {
                           throw new Error(errorData.detail || `HTTP ${res.status}`)
                         }
                         const data = await res.json()
-                        setMiniRebuildPlan(data)
+                        setWildcardPlan(data)
                       } catch (err) {
-                        console.error('Mini rebuild error:', err)
-                        setError(err instanceof Error ? err.message : 'Failed to generate mini rebuild plan')
-                        setMiniRebuildPlan(null)
+                        console.error('Wildcard error:', err)
+                        setError(err instanceof Error ? err.message : 'Failed to generate wildcard plan')
+                        setWildcardPlan(null)
                       } finally {
-                        setMiniRebuildLoading(false)
+                        setWildcardLoading(false)
                       }
                     }
                   }}
-                  disabled={mySquad.length < 11 || transferLoading || miniRebuildLoading}
+                  disabled={mySquad.length < 11 || transferLoading || wildcardLoading}
                   className={`btn sm:ml-auto w-full sm:w-auto text-sm sm:text-base transition-colors duration-300 ${
                     freeTransfers >= 4 
                       ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500' 
                       : 'btn-primary'
                   }`}
                 >
-                  {(transferLoading || miniRebuildLoading) ? (
+                  {(transferLoading || wildcardLoading) ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />
                       Loading...
                     </>
                   ) : (
-                    freeTransfers <= 3 ? 'Get Suggestions' : 'Generate Mini Rebuild'
+                    freeTransfers <= 3 ? 'Get Suggestions' : 'Generate Wildcard'
                   )}
                 </button>
               </div>
@@ -1661,8 +1661,8 @@ function App() {
                 </div>
             )}
             
-            {/* Mini Rebuild Results - shown when freeTransfers >= 4 */}
-            {freeTransfers >= 4 && miniRebuildPlan && (
+            {/* Wildcard Results - shown when freeTransfers >= 4 */}
+            {freeTransfers >= 4 && wildcardPlan && (
               <div className="space-y-6">
                 {/* Summary Card */}
                 <div className="card">
@@ -1674,53 +1674,53 @@ function App() {
                     <div>
                       <div className="text-gray-400 text-sm mb-1">Before Total</div>
                       <div className="text-xl font-bold text-gray-300">
-                        {miniRebuildPlan.before_total_points?.toFixed(1) || '0.0'}
+                        {wildcardPlan.before_total_points?.toFixed(1) || '0.0'}
                       </div>
                     </div>
                     <div>
                       <div className="text-gray-400 text-sm mb-1">After Total</div>
                       <div className="text-xl font-bold text-[#00ff87]">
-                        {miniRebuildPlan.after_total_points?.toFixed(1) || '0.0'}
+                        {wildcardPlan.after_total_points?.toFixed(1) || '0.0'}
                       </div>
                     </div>
                     <div>
                       <div className="text-gray-400 text-sm mb-1">Points Gain</div>
                       <div className="text-xl font-bold text-[#00ff87]">
-                        +{miniRebuildPlan.total_points_gain?.toFixed(1) || '0.0'}
+                        +{wildcardPlan.total_points_gain?.toFixed(1) || '0.0'}
                       </div>
                     </div>
                     <div>
                       <div className="text-gray-400 text-sm mb-1">Net Cost</div>
-                      <div className={`text-xl font-bold ${miniRebuildPlan.total_cost < 0 ? 'text-green-400' : miniRebuildPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
-                        {miniRebuildPlan.total_cost > 0 ? '+' : ''}£{miniRebuildPlan.total_cost?.toFixed(1) || '0.0'}m
+                      <div className={`text-xl font-bold ${wildcardPlan.total_cost < 0 ? 'text-green-400' : wildcardPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
+                        {wildcardPlan.total_cost > 0 ? '+' : ''}£{wildcardPlan.total_cost?.toFixed(1) || '0.0'}m
                       </div>
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
                     <div className="text-xs text-gray-400">
-                      Transfers: {miniRebuildPlan.transfers_out?.length || 0} • 
-                      Kept: {miniRebuildPlan.kept_players?.length || (mySquad.length - (miniRebuildPlan.transfers_out?.length || 0))}
+                      Transfers: {wildcardPlan.transfers_out?.length || 0} • 
+                      Kept: {wildcardPlan.kept_players?.length || (mySquad.length - (wildcardPlan.transfers_out?.length || 0))}
                     </div>
                   </div>
-                  {miniRebuildPlan.combined_rationale && (
+                  {wildcardPlan.combined_rationale && (
                     <div className="mt-4 p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
                       <div className="text-sm font-semibold text-gray-300 mb-2">Why This Combination Works</div>
                       <div className="text-xs text-gray-400 leading-relaxed">
-                        {miniRebuildPlan.combined_rationale}
+                        {wildcardPlan.combined_rationale}
                       </div>
                     </div>
                   )}
                 </div>
                 
                 {/* Kept Players Section */}
-                {miniRebuildPlan.kept_players && miniRebuildPlan.kept_players.length > 0 && (
+                {wildcardPlan.kept_players && wildcardPlan.kept_players.length > 0 && (
                   <div className="card">
                     <div className="card-header">
                       <Star className="w-5 h-5 text-yellow-400" />
-                      Kept Players ({miniRebuildPlan.kept_players.length})
+                      Kept Players ({wildcardPlan.kept_players.length})
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                      {miniRebuildPlan.kept_players.map((player: any) => (
+                      {wildcardPlan.kept_players.map((player: any) => (
                         <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
                           <div className="flex flex-col">
                             <div className="flex items-center justify-between mb-0.5">
@@ -1739,14 +1739,14 @@ function App() {
                 )}
                 
                 {/* Individual Transfer Breakdown - moved above comparison */}
-                {miniRebuildPlan.individual_breakdowns && miniRebuildPlan.individual_breakdowns.length > 0 && (
+                {wildcardPlan.individual_breakdowns && wildcardPlan.individual_breakdowns.length > 0 && (
                   <div className="card">
                     <div className="card-header">
                       <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                      Transfer Breakdown ({miniRebuildPlan.individual_breakdowns.length})
+                      Transfer Breakdown ({wildcardPlan.individual_breakdowns.length})
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {miniRebuildPlan.individual_breakdowns.map((transfer: any, i: number) => (
+                      {wildcardPlan.individual_breakdowns.map((transfer: any, i: number) => (
                         <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
                           <div className="flex items-center gap-1.5 mb-1.5">
                             <span className="text-xs font-semibold text-[#00ff87]">#{i + 1}</span>
@@ -1786,7 +1786,7 @@ function App() {
                       <div className="text-sm font-semibold text-gray-400 mb-3">Before</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {mySquad.map((player: SquadPlayer) => {
-                          const isTransferOut = miniRebuildPlan.transfers_out?.some((t: any) => t.id === player.id)
+                          const isTransferOut = wildcardPlan.transfers_out?.some((t: any) => t.id === player.id)
                           return (
                             <div 
                               key={player.id} 
@@ -1814,10 +1814,10 @@ function App() {
                     {/* After Squad */}
                     <div>
                       <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
-                      {miniRebuildPlan.resulting_squad?.squad ? (
+                      {wildcardPlan.resulting_squad?.squad ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {miniRebuildPlan.resulting_squad.squad.map((player: any) => {
-                            const isTransferIn = miniRebuildPlan.transfers_in?.some((t: any) => t.id === player.id)
+                          {wildcardPlan.resulting_squad.squad.map((player: any) => {
+                            const isTransferIn = wildcardPlan.transfers_in?.some((t: any) => t.id === player.id)
                             const wasInOriginal = mySquad.some((p: SquadPlayer) => p.id === player.id)
                             return (
                               <div 
