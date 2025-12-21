@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
-  ChevronRight, Star, Target, Flame, AlertTriangle, Plane,
+  ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
   ArrowRightLeft, Search, Plus, X, Trash2, Trophy
 } from 'lucide-react'
 
@@ -1534,10 +1534,13 @@ function App() {
                                 <span>5GW Avg FDR: <span className="text-gray-300">{suggestion.out.avg_fixture_5gw}</span> → <span className="text-[#00ff87]">{suggestion.in.avg_fixture_5gw}</span></span>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                          )
+                          })()}
+                          
+                          {/* Other options - hidden behind dropdown */}
+                          {isExpanded && otherOptions.map((suggestion, optionIndex) => {
+                            const actualIndex = optionIndex + 1
+                            return (
                   </div>
                 </div>
               )
