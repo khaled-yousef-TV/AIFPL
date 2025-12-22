@@ -2136,32 +2136,84 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None):
     Import a team from FPL by team ID.
     
     Uses the public FPL API endpoint: /api/entry/{team_id}/event/{gameweek}/picks/
-    If gameweek is not provided, uses the current/next gameweek.
+    If gameweek is not provided, tries current gameweek first, then next gameweek.
     
     Returns the squad in SquadPlayer format ready for the transfers tab.
     """
     try:
-        # Get gameweek (default to next/current)
+        # Get gameweek (try current first, then next)
         if gameweek is None:
+            current_gw = fpl_client.get_current_gameweek()
             next_gw = fpl_client.get_next_gameweek()
-            if not next_gw:
+            
+            # Try current gameweek first, then next
+            gameweek = None
+            if current_gw:
+                gameweek = current_gw.id
+            elif next_gw:
+                gameweek = next_gw.id
+            else:
                 raise HTTPException(status_code=400, detail="No gameweek found")
-            gameweek = next_gw.id
         
-        # Fetch team picks from FPL API
+        # Fetch team picks from FPL API - try multiple gameweeks if needed
+        picks_data = None
+        picks = None
+        used_gameweek = gameweek
+        last_response = None
+        
+        # Try the requested gameweek first
         picks_url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
-        response = requests.get(picks_url)
+        logger.info(f"Attempting to fetch team {team_id} for gameweek {gameweek}: {picks_url}")
+        response = requests.get(picks_url, timeout=10)
+        last_response = response
         
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"Team {team_id} not found or not public")
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=f"FPL API error: {response.status_code}")
+        if response.status_code == 200:
+            picks_data = response.json()
+            picks = picks_data.get("picks", [])
+            if picks:
+                logger.info(f"Successfully fetched {len(picks)} picks for team {team_id} in gameweek {gameweek}")
         
-        picks_data = response.json()
-        picks = picks_data.get("picks", [])
+        # If no picks found, try current gameweek (if we tried next)
+        if (not picks or not picks_data) and gameweek:
+            current_gw = fpl_client.get_current_gameweek()
+            if current_gw and current_gw.id != gameweek:
+                try_gameweek = current_gw.id
+                picks_url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{try_gameweek}/picks/"
+                logger.info(f"Trying current gameweek {try_gameweek} instead: {picks_url}")
+                response = requests.get(picks_url, timeout=10)
+                last_response = response
+                if response.status_code == 200:
+                    picks_data = response.json()
+                    picks = picks_data.get("picks", [])
+                    if picks:
+                        used_gameweek = try_gameweek
+                        logger.info(f"Successfully fetched {len(picks)} picks for team {team_id} in gameweek {try_gameweek}")
+        
+        # If still no picks, try next gameweek (if we tried current)
+        if (not picks or not picks_data) and gameweek:
+            next_gw = fpl_client.get_next_gameweek()
+            if next_gw and next_gw.id != gameweek and next_gw.id != used_gameweek:
+                try_gameweek = next_gw.id
+                picks_url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{try_gameweek}/picks/"
+                logger.info(f"Trying next gameweek {try_gameweek} instead: {picks_url}")
+                response = requests.get(picks_url, timeout=10)
+                last_response = response
+                if response.status_code == 200:
+                    picks_data = response.json()
+                    picks = picks_data.get("picks", [])
+                    if picks:
+                        used_gameweek = try_gameweek
+                        logger.info(f"Successfully fetched {len(picks)} picks for team {team_id} in gameweek {try_gameweek}")
+        
+        # Final error handling
+        if last_response and last_response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Team {team_id} not found or not public. Make sure the team ID is correct and the team is set to public in FPL settings.")
+        if last_response and last_response.status_code != 200:
+            error_text = last_response.text[:200] if hasattr(last_response, 'text') else 'Unknown error'
+            raise HTTPException(status_code=last_response.status_code, detail=f"FPL API error: {last_response.status_code} - {error_text}")
         
         if not picks:
-            raise HTTPException(status_code=404, detail=f"No team data found for team {team_id} in gameweek {gameweek}")
+            raise HTTPException(status_code=404, detail=f"No team data found for team {team_id}. The team may not have picks for any available gameweek, or the team might be private. Please check that the team ID is correct and the team is set to public.")
         
         # Get player and team data
         players = fpl_client.get_players()
@@ -2216,7 +2268,7 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None):
             "squad": squad,
             "bank": bank,
             "team_id": team_id,
-            "gameweek": gameweek,
+            "gameweek": used_gameweek,
             "team_name": team_name
         }
         
