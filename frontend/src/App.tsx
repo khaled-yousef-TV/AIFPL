@@ -632,9 +632,32 @@ function App() {
     }
   }
 
+  // FPL position limits
+  const POSITION_LIMITS: Record<string, number> = {
+    'GK': 2,
+    'DEF': 5,
+    'MID': 5,
+    'FWD': 3,
+  }
+
+  const getPositionCount = (position: string) => {
+    return mySquad.filter(p => p.position === position).length
+  }
+
+  const isPositionFull = (position: string) => {
+    const limit = POSITION_LIMITS[position] || 0
+    return getPositionCount(position) >= limit
+  }
+
+  const canAddPlayer = (player: Player) => {
+    if (mySquad.length >= 15) return false
+    if (mySquad.find(p => p.id === player.id)) return false
+    if (isPositionFull(player.position)) return false
+    return true
+  }
+
   const addToSquad = (player: Player) => {
-    if (mySquad.length >= 15) return
-    if (mySquad.find(p => p.id === player.id)) return
+    if (!canAddPlayer(player)) return
     
     setMySquad([...mySquad, {
       id: player.id,
@@ -1371,68 +1394,102 @@ function App() {
                   </div>
                   
                   <div className="flex gap-2 mb-4">
-                    {['', 'GK', 'DEF', 'MID', 'FWD'].map(pos => (
-                      <button
-                        key={pos}
-                        onClick={() => {
-                          setSearchPosition(pos)
-                          // If the user hasn't typed anything, show cheapest options for that position.
-                          // If they have typed 2+ chars, search by name.
-                          searchPlayers(searchQuery, pos)
-                        }}
-                        className={`px-3 py-1 rounded text-sm ${
-                          searchPosition === pos 
-                            ? 'bg-[#00ff87] text-[#0f0f1a]' 
-                            : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
-                        }`}
-                      >
-                        {pos || 'All'}
-                      </button>
-                    ))}
+                    {['', 'GK', 'DEF', 'MID', 'FWD'].map(pos => {
+                      const isFull = pos ? isPositionFull(pos) : false
+                      const count = pos ? getPositionCount(pos) : 0
+                      const limit = pos ? POSITION_LIMITS[pos] : 0
+                      
+                      return (
+                        <button
+                          key={pos}
+                          onClick={() => {
+                            setSearchPosition(pos)
+                            // If the user hasn't typed anything, show cheapest options for that position.
+                            // If they have typed 2+ chars, search by name.
+                            searchPlayers(searchQuery, pos)
+                          }}
+                          className={`px-3 py-1 rounded text-sm relative ${
+                            searchPosition === pos 
+                              ? 'bg-[#00ff87] text-[#0f0f1a]' 
+                              : isFull
+                              ? 'bg-[#2a2a4a] text-gray-500 opacity-60'
+                              : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
+                          }`}
+                          title={isFull ? `${pos} position full (${count}/${limit})` : ''}
+                        >
+                          {pos || 'All'}
+                          {isFull && (
+                            <span className="ml-1 text-[10px]">({count}/{limit})</span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                   
                   {/* Search Results */}
                   {searchResults.length > 0 && (
                     <div className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto">
-                      {searchResults.map(player => (
-                        <button
-                          key={player.id}
-                          onClick={() => addToSquad(player)}
-                          disabled={mySquad.find(p => p.id === player.id) !== undefined}
-                          className="w-full flex items-center justify-between p-3 hover:bg-[#1f1f3a] border-b border-[#2a2a4a] last:border-0 disabled:opacity-50"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
-                              {player.position}
-                            </span>
-                            <div className="text-left">
-                              <div className="font-medium">{player.name}</div>
-                              <div className="text-xs text-gray-400">
-                                <span>{player.team}</span>
-                                {player.european_comp && (
-                                  <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
-                                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                    'bg-blue-500/20 text-blue-400'
-                                  }`}>
-                                    {player.european_comp}
-                                  </span>
-                                )}
-                                {typeof (player as any).minutes === 'number' && (
-                                  <span className="text-gray-500"> • {(player as any).minutes}m</span>
-                                )}
-                                {(player as any).status && (player as any).status !== 'a' && (
-                                  <span className="text-orange-400"> • {String((player as any).status).toUpperCase()}</span>
-                                )}
+                      {searchResults.map(player => {
+                        const alreadyInSquad = mySquad.find(p => p.id === player.id) !== undefined
+                        const positionFull = isPositionFull(player.position)
+                        const disabled = alreadyInSquad || positionFull
+                        const positionCount = getPositionCount(player.position)
+                        const positionLimit = POSITION_LIMITS[player.position] || 0
+                        
+                        return (
+                          <button
+                            key={player.id}
+                            onClick={() => addToSquad(player)}
+                            disabled={disabled}
+                            className={`w-full flex items-center justify-between p-3 border-b border-[#2a2a4a] last:border-0 transition-all ${
+                              disabled 
+                                ? 'opacity-50 cursor-not-allowed bg-[#0b0b14]' 
+                                : 'hover:bg-[#1f1f3a] cursor-pointer'
+                            }`}
+                            title={positionFull ? `${player.position} position full (${positionCount}/${positionLimit})` : alreadyInSquad ? 'Already in squad' : ''}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)} flex-shrink-0`}>
+                                {player.position}
+                              </span>
+                              <div className="text-left min-w-0 flex-1">
+                                <div className="font-medium truncate">{player.name}</div>
+                                <div className="text-xs text-gray-400">
+                                  <span>{player.team}</span>
+                                  {player.european_comp && (
+                                    <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
+                                      player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                      player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                      'bg-blue-500/20 text-blue-400'
+                                    }`}>
+                                      {player.european_comp}
+                                    </span>
+                                  )}
+                                  {typeof (player as any).minutes === 'number' && (
+                                    <span className="text-gray-500"> • {(player as any).minutes}m</span>
+                                  )}
+                                  {(player as any).status && (player as any).status !== 'a' && (
+                                    <span className="text-orange-400"> • {String((player as any).status).toUpperCase()}</span>
+                                  )}
+                                  {positionFull && (
+                                    <span className="ml-2 text-orange-400 text-[10px]">
+                                      • {player.position} full ({positionCount}/{positionLimit})
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-mono">£{player.price}m</span>
-                            <Plus className="w-4 h-4 text-[#00ff87]" />
-                          </div>
-                        </button>
-                      ))}
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-sm font-mono">£{player.price}m</span>
+                              {disabled ? (
+                                <X className="w-4 h-4 text-gray-500" />
+                              ) : (
+                                <Plus className="w-4 h-4 text-[#00ff87]" />
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -1459,9 +1516,16 @@ function App() {
                     </div>
                     {['GK', 'DEF', 'MID', 'FWD'].map(pos => {
                       const posPlayers = mySquad.filter(p => p.position === pos)
+                      const limit = POSITION_LIMITS[pos] || 0
+                      const isFull = posPlayers.length >= limit
                       return (
                         <div key={pos}>
-                          <div className="text-xs text-gray-500 mb-1">{pos} ({posPlayers.length})</div>
+                          <div className={`text-xs mb-1 ${
+                            isFull ? 'text-orange-400 font-medium' : 'text-gray-500'
+                          }`}>
+                            {pos} ({posPlayers.length}/{limit})
+                            {isFull && <span className="ml-1 text-[10px]">• Full</span>}
+                          </div>
                           {posPlayers.map(player => (
                             <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
                               <div className="flex items-center gap-2">
