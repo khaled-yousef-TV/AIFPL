@@ -164,7 +164,7 @@ function App() {
   const [searchResults, setSearchResults] = useState<Player[]>([])
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
-  
+
   // Wildcard state
   const [wildcardLoading, setWildcardLoading] = useState(false)
   const [wildcardPlan, setWildcardPlan] = useState<any>(null)
@@ -576,21 +576,21 @@ function App() {
       if (activeTab === 'best_team_stats') {
         // Load based on selected statistics method
         if (statisticsMethod === 'combined') {
-          setSquad(null)
-          const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
-          setSquad(res)
+        setSquad(null)
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
+        setSquad(res)
         } else if (statisticsMethod === 'heuristic') {
-          setSquadHeuristic(null)
-          const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
-          setSquadHeuristic(res)
+        setSquadHeuristic(null)
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
+        setSquadHeuristic(res)
         } else if (statisticsMethod === 'form') {
-          setSquadForm(null)
-          const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
-          setSquadForm(res)
+        setSquadForm(null)
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
+        setSquadForm(res)
         } else if (statisticsMethod === 'fixture') {
-          setSquadFixture(null)
-          const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
-          setSquadFixture(res)
+        setSquadFixture(null)
+        const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
+        setSquadFixture(res)
         }
       } else if (activeTab === 'squad_lstm') {
         setSquadLSTM(null)
@@ -723,6 +723,181 @@ function App() {
       'FWD': 'bg-red-500/20 text-red-400 border-red-500/30'
     }
     return classes[pos] || 'bg-gray-500/20 text-gray-400'
+  }
+
+  // Parse formation string (e.g., "3-5-2" -> {def: 3, mid: 5, fwd: 2})
+  const parseFormation = (formation: string) => {
+    const parts = formation.split('-').map(Number)
+    return {
+      def: parts[0] || 0,
+      mid: parts[1] || 0,
+      fwd: parts[2] || 0,
+      gk: 1
+    }
+  }
+
+  // Render pitch formation view
+  const renderPitchFormation = (startingXi: any[], formation: string) => {
+    const formationLayout = parseFormation(formation)
+    
+    // Group players by position
+    const byPosition = {
+      GK: startingXi.filter((p: any) => p.position === 'GK'),
+      DEF: startingXi.filter((p: any) => p.position === 'DEF'),
+      MID: startingXi.filter((p: any) => p.position === 'MID'),
+      FWD: startingXi.filter((p: any) => p.position === 'FWD'),
+    }
+
+    return (
+      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-4 sm:p-6">
+        {/* Pitch */}
+        <div className="relative min-h-[400px] sm:min-h-[500px]">
+          {/* Forwards */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+            {byPosition.FWD.map((player: any) => (
+              <div
+                key={player.id}
+                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
+                  player.is_captain 
+                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+                    : player.rotation_risk === 'high'
+                    ? 'bg-orange-500/20 border-orange-500/50'
+                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
+                }`}
+              >
+                <div className="flex items-center gap-1 mb-1">
+                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
+                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                    {player.position}
+                  </span>
+                </div>
+                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
+                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
+                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+                {player.european_comp && (
+                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {player.european_comp}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Midfielders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6 flex-wrap">
+            {byPosition.MID.map((player: any) => (
+              <div
+                key={player.id}
+                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
+                  player.is_captain 
+                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+                    : player.rotation_risk === 'high'
+                    ? 'bg-orange-500/20 border-orange-500/50'
+                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
+                }`}
+              >
+                <div className="flex items-center gap-1 mb-1">
+                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
+                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                    {player.position}
+                  </span>
+                </div>
+                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
+                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
+                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+                {player.european_comp && (
+                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {player.european_comp}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Defenders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6 flex-wrap">
+            {byPosition.DEF.map((player: any) => (
+              <div
+                key={player.id}
+                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
+                  player.is_captain 
+                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+                    : player.rotation_risk === 'high'
+                    ? 'bg-orange-500/20 border-orange-500/50'
+                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
+                }`}
+              >
+                <div className="flex items-center gap-1 mb-1">
+                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
+                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                    {player.position}
+                  </span>
+                </div>
+                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
+                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
+                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+                {player.european_comp && (
+                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {player.european_comp}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Goalkeeper */}
+          <div className="flex justify-center items-center">
+            {byPosition.GK.map((player: any) => (
+              <div
+                key={player.id}
+                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
+                  player.is_captain 
+                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+                    : player.rotation_risk === 'high'
+                    ? 'bg-orange-500/20 border-orange-500/50'
+                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
+                }`}
+              >
+                <div className="flex items-center gap-1 mb-1">
+                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
+                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                    {player.position}
+                  </span>
+                </div>
+                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
+                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
+                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+                {player.european_comp && (
+                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {player.european_comp}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const formatDeadline = (dateStr?: string) => {
@@ -866,17 +1041,17 @@ function App() {
               </div>
             </button>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
-              <button 
-                onClick={refresh} 
-                disabled={refreshing}
+          <button 
+            onClick={refresh} 
+            disabled={refreshing}
                 className="btn btn-secondary flex items-center gap-1 text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+          >
                 <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
                 <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-              </button>
+          </button>
             )}
-          </div>
-        </header>
+        </div>
+      </header>
 
         {/* Mobile Navigation */}
         {activeTab !== 'home' && (
@@ -884,22 +1059,22 @@ function App() {
             <div className="flex gap-1 min-w-max py-2">
               {navigationTabs.map(tab => {
                 return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
                     className={`flex items-center gap-1 px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
-                      activeTab === tab.id 
-                        ? 'border-[#00ff87] text-white' 
-                        : 'border-transparent text-gray-400 hover:text-white'
-                    }`}
-                  >
+                  activeTab === tab.id 
+                    ? 'border-[#00ff87] text-white' 
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
                     <tab.icon className="w-4 h-4 flex-shrink-0" />
                     <span className="text-xs">{tab.shortLabel}</span>
-                  </button>
+              </button>
                 )
               })}
-            </div>
-          </nav>
+        </div>
+      </nav>
         )}
 
         {/* Desktop Header */}
@@ -967,7 +1142,7 @@ function App() {
           </div>
         </header>
 
-        {/* Content */}
+      {/* Content */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
         
         {/* Home Page */}
@@ -1145,73 +1320,13 @@ function App() {
               </div>
             </div>
 
-            {/* Starting XI */}
+            {/* Starting XI - Pitch Formation */}
             <div className="card">
               <div className="card-header">
                 <Users className="w-5 h-5 text-[#00ff87]" />
-                Starting XI
+                Starting XI • {currentSquad.formation}
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
-                      <th className="pb-3 w-8"></th>
-                      <th className="pb-3">Player</th>
-                      <th className="pb-3">Fixture</th>
-                      <th className="pb-3">Pos</th>
-                      <th className="pb-3 text-right">Price</th>
-                      <th className="pb-3 text-right">Pts</th>
-                      <th className="pb-3">Selection Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentSquad.starting_xi.map((player: any, i) => (
-                      <tr key={player.id} className={`border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors ${
-                        player.rotation_risk === 'high' ? 'bg-orange-500/5' : ''
-                      }`}>
-                        <td className="py-3">
-                          {player.is_captain && <span className="text-yellow-400 font-bold">©</span>}
-                          {player.is_vice_captain && <span className="text-gray-400">V</span>}
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-center gap-2">
-                            <div>
-                              <span className="font-medium">{player.name}</span>
-                              <span className="text-gray-500 text-xs ml-1">({player.team})</span>
-                            </div>
-                            {player.european_comp && (
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                'bg-blue-500/20 text-blue-400'
-                              }`}>
-                                {player.european_comp}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
-                            player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-red-500/20 text-red-400'
-                          }`}>
-                            {player.is_home ? 'vs' : '@'} {player.opponent} 
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
-                            {player.position}
-                          </span>
-                        </td>
-                        <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
-                        <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">{player.predicted?.toFixed(1) ?? '0.0'}</td>
-                        <td className="py-3 text-xs text-gray-400 max-w-[220px]">{player.reason}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {renderPitchFormation(currentSquad.starting_xi, currentSquad.formation)}
             </div>
 
             {/* Bench */}
@@ -1400,28 +1515,28 @@ function App() {
                       const limit = pos ? POSITION_LIMITS[pos] : 0
                       
                       return (
-                        <button
-                          key={pos}
-                          onClick={() => {
-                            setSearchPosition(pos)
-                            // If the user hasn't typed anything, show cheapest options for that position.
-                            // If they have typed 2+ chars, search by name.
-                            searchPlayers(searchQuery, pos)
-                          }}
+                      <button
+                        key={pos}
+                        onClick={() => {
+                          setSearchPosition(pos)
+                          // If the user hasn't typed anything, show cheapest options for that position.
+                          // If they have typed 2+ chars, search by name.
+                          searchPlayers(searchQuery, pos)
+                        }}
                           className={`px-3 py-1 rounded text-sm relative ${
-                            searchPosition === pos 
-                              ? 'bg-[#00ff87] text-[#0f0f1a]' 
+                          searchPosition === pos 
+                            ? 'bg-[#00ff87] text-[#0f0f1a]' 
                               : isFull
                               ? 'bg-[#2a2a4a] text-gray-500 opacity-60'
-                              : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
-                          }`}
+                            : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
+                        }`}
                           title={isFull ? `${pos} position full (${count}/${limit})` : ''}
-                        >
-                          {pos || 'All'}
+                      >
+                        {pos || 'All'}
                           {isFull && (
                             <span className="ml-1 text-[10px]">({count}/{limit})</span>
                           )}
-                        </button>
+                      </button>
                       )
                     })}
                   </div>
@@ -1437,9 +1552,9 @@ function App() {
                         const positionLimit = POSITION_LIMITS[player.position] || 0
                         
                         return (
-                          <button
-                            key={player.id}
-                            onClick={() => addToSquad(player)}
+                        <button
+                          key={player.id}
+                          onClick={() => addToSquad(player)}
                             disabled={disabled}
                             className={`w-full flex items-center justify-between p-3 border-b border-[#2a2a4a] last:border-0 transition-all ${
                               disabled 
@@ -1450,44 +1565,44 @@ function App() {
                           >
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)} flex-shrink-0`}>
-                                {player.position}
-                              </span>
+                              {player.position}
+                            </span>
                               <div className="text-left min-w-0 flex-1">
                                 <div className="font-medium truncate">{player.name}</div>
-                                <div className="text-xs text-gray-400">
-                                  <span>{player.team}</span>
-                                  {player.european_comp && (
-                                    <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
-                                      player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                      player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                      'bg-blue-500/20 text-blue-400'
-                                    }`}>
-                                      {player.european_comp}
-                                    </span>
-                                  )}
-                                  {typeof (player as any).minutes === 'number' && (
-                                    <span className="text-gray-500"> • {(player as any).minutes}m</span>
-                                  )}
-                                  {(player as any).status && (player as any).status !== 'a' && (
-                                    <span className="text-orange-400"> • {String((player as any).status).toUpperCase()}</span>
-                                  )}
+                              <div className="text-xs text-gray-400">
+                                <span>{player.team}</span>
+                                {player.european_comp && (
+                                  <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
+                                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                    'bg-blue-500/20 text-blue-400'
+                                  }`}>
+                                    {player.european_comp}
+                                  </span>
+                                )}
+                                {typeof (player as any).minutes === 'number' && (
+                                  <span className="text-gray-500"> • {(player as any).minutes}m</span>
+                                )}
+                                {(player as any).status && (player as any).status !== 'a' && (
+                                  <span className="text-orange-400"> • {String((player as any).status).toUpperCase()}</span>
+                                )}
                                   {positionFull && (
                                     <span className="ml-2 text-orange-400 text-[10px]">
                                       • {player.position} full ({positionCount}/{positionLimit})
                                     </span>
                                   )}
-                                </div>
                               </div>
                             </div>
+                          </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-sm font-mono">£{player.price}m</span>
+                            <span className="text-sm font-mono">£{player.price}m</span>
                               {disabled ? (
                                 <X className="w-4 h-4 text-gray-500" />
                               ) : (
-                                <Plus className="w-4 h-4 text-[#00ff87]" />
+                            <Plus className="w-4 h-4 text-[#00ff87]" />
                               )}
-                            </div>
-                          </button>
+                          </div>
+                        </button>
                         )
                       })}
                     </div>
@@ -1692,13 +1807,13 @@ function App() {
             
             {/* Transfer Suggestions */}
             {groupedTransferSuggestions && (
-                <div className="card">
-                  <div className="card-header">
-                    <TrendingUp className="w-5 h-5 text-[#00ff87]" />
-                    Transfer Suggestions
-                  </div>
-                  
-                  <div className="space-y-4">
+              <div className="card">
+                <div className="card-header">
+                  <TrendingUp className="w-5 h-5 text-[#00ff87]" />
+                  Transfer Suggestions
+                </div>
+                
+                <div className="space-y-4">
                     {/* Hold Suggestions */}
                     {groupedTransferSuggestions.holdSuggestions.map((suggestion, i) => (
                       <div key={`hold-${i}`} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
@@ -1753,12 +1868,12 @@ function App() {
                               <span className="text-sm font-medium text-gray-200">Transfer In</span>
                             </div>
                             <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              suggestion.points_gain > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                            }`}>
-                              {suggestion.points_gain > 0 ? '+' : ''}{suggestion.points_gain} pts
-                            </span>
-                          </div>
-                          
+                          suggestion.points_gain > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {suggestion.points_gain > 0 ? '+' : ''}{suggestion.points_gain} pts
+                        </span>
+                      </div>
+                      
                           <div className="flex items-center gap-2 flex-wrap mb-2">
                             <span className="font-medium text-sm">{suggestion.in.name}</span>
                             {suggestion.in.european_comp && (
@@ -1858,14 +1973,14 @@ function App() {
                           {/* Transfer Out Player (shown once per group) */}
                           <div className="mb-4 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
                             <div className="text-xs text-red-400 mb-2 font-semibold">Transfer Out</div>
-                            <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-medium text-base">{group.outPlayer.name}</span>
                               {group.outPlayer.european_comp && (
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                   group.outPlayer.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
                                   group.outPlayer.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                  'bg-blue-500/20 text-blue-400'
-                                }`}>
+                                'bg-blue-500/20 text-blue-400'
+                              }`}>
                                   {group.outPlayer.european_comp}
                                 </span>
                               )}
@@ -1874,15 +1989,15 @@ function App() {
                                   {group.outPlayer.status === 'i' ? 'Injured' : 
                                    group.outPlayer.status === 'd' ? 'Doubtful' :
                                    group.outPlayer.status === 's' ? 'Suspended' : 'Unavailable'}
-                                </span>
-                              )}
-                            </div>
+                              </span>
+                            )}
+                          </div>
                             <div className="text-sm text-gray-400 mt-1">{group.outPlayer.team} • £{group.outPlayer.price}m</div>
                             <div className="text-xs text-gray-500 mt-1">
                               vs {group.outPlayer.fixture} (FDR {group.outPlayer.fixture_difficulty}) • Form: {group.outPlayer.form}
-                            </div>
                           </div>
-                          
+                        </div>
+                        
                           {/* Transfer In Options (ranked) */}
                           <div className="space-y-3">
                             {/* First option - always visible */}
@@ -1893,11 +2008,11 @@ function App() {
                               renderOption(suggestion, optionIndex + 1)
                             )}
                           </div>
-                        </div>
+                          </div>
                       )
                     })}
-                  </div>
-                </div>
+                        </div>
+                      </div>
             )}
             
             {/* Wildcard Results - shown when freeTransfers >= 4 */}
@@ -1935,7 +2050,7 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
+                      <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
                     <div className="text-xs text-gray-400">
                       Transfers: {wildcardPlan.transfers_out?.length || 0} • 
                       Kept: {wildcardPlan.kept_players?.length || (mySquad.length - (wildcardPlan.transfers_out?.length || 0))}
@@ -1947,9 +2062,9 @@ function App() {
                       <div className="text-xs text-gray-400 leading-relaxed">
                         {wildcardPlan.combined_rationale}
                       </div>
-                    </div>
-                  )}
-                </div>
+                          </div>
+                        )}
+                            </div>
                 
                 {/* Kept Players Section */}
                 {wildcardPlan.kept_players && wildcardPlan.kept_players.length > 0 && (
@@ -1973,9 +2088,9 @@ function App() {
                           </div>
                         </div>
                       ))}
-                    </div>
-                  </div>
-                )}
+                            </div>
+                          </div>
+                        )}
                 
                 {/* Individual Transfer Breakdown - moved above comparison */}
                 {wildcardPlan.individual_breakdowns && wildcardPlan.individual_breakdowns.length > 0 && (
@@ -1983,7 +2098,7 @@ function App() {
                     <div className="card-header">
                       <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
                       Transfer Breakdown ({wildcardPlan.individual_breakdowns.length})
-                    </div>
+                        </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {wildcardPlan.individual_breakdowns.map((transfer: any, i: number) => (
                         <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
@@ -1994,7 +2109,7 @@ function App() {
                             <ArrowRightLeft className="w-3 h-3 text-gray-500 flex-shrink-0" />
                             <span className="text-[10px] text-green-400">IN:</span>
                             <span className="text-xs font-medium truncate">{transfer.in?.name}</span>
-                          </div>
+                      </div>
                           {transfer.reason && (
                             <div className="text-[10px] text-gray-400 leading-tight">{transfer.reason}</div>
                           )}
@@ -2006,13 +2121,13 @@ function App() {
                             <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-gray-400'}>
                               {transfer.cost > 0 ? '+' : ''}£{transfer.cost}m
                             </span>
-                          </div>
-                        </div>
-                      ))}
                     </div>
-                  </div>
-                )}
-                
+                        </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
                 {/* Before/After Squad Comparison */}
                 <div className="card">
                   <div className="card-header">
@@ -2093,56 +2208,56 @@ function App() {
             
         {/* Squad Analysis - Only shown in Quick Transfers (1-3 transfers) */}
         {activeTab === 'transfers' && freeTransfers <= 3 && squadAnalysis.length > 0 && (
-          <div className="card">
-                    <div className="card-header">
-                      <Target className="w-5 h-5 text-yellow-400" />
-                      Squad Analysis (sorted by priority to transfer out)
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
-                            <th className="pb-2">Player</th>
-                            <th className="pb-2">Fixture</th>
-                            <th className="pb-2 text-right">Pred</th>
-                            <th className="pb-2 text-right">Form</th>
-                            <th className="pb-2 text-right">5GW FDR</th>
-                            <th className="pb-2 text-right">Keep Score</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {squadAnalysis.map((player: any) => (
-                            <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
-                              player.keep_score < 3 ? 'bg-red-500/10' : ''
+              <div className="card">
+                <div className="card-header">
+                  <Target className="w-5 h-5 text-yellow-400" />
+                  Squad Analysis (sorted by priority to transfer out)
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
+                        <th className="pb-2">Player</th>
+                        <th className="pb-2">Fixture</th>
+                        <th className="pb-2 text-right">Pred</th>
+                        <th className="pb-2 text-right">Form</th>
+                        <th className="pb-2 text-right">5GW FDR</th>
+                        <th className="pb-2 text-right">Keep Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {squadAnalysis.map((player: any) => (
+                        <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
+                          player.keep_score < 3 ? 'bg-red-500/10' : ''
+                        }`}>
+                          <td className="py-2">
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                          </td>
+                          <td className="py-2">
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${
+                              player.fixture_difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                              player.fixture_difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-red-500/20 text-red-400'
                             }`}>
-                              <td className="py-2">
-                                <span className="font-medium">{player.name}</span>
-                                <span className="text-gray-500 text-xs ml-1">({player.team})</span>
-                              </td>
-                              <td className="py-2">
-                                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                  player.fixture_difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
-                                  player.fixture_difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
-                                  'bg-red-500/20 text-red-400'
-                                }`}>
-                                  {player.fixture} ({player.fixture_difficulty})
-                                </span>
-                              </td>
-                              <td className="py-2 text-right font-mono">{player.predicted?.toFixed(1) ?? '0.0'}</td>
-                              <td className="py-2 text-right font-mono">{player.form}</td>
-                              <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
-                              <td className={`py-2 text-right font-mono font-bold ${
-                                player.keep_score < 3 ? 'text-red-400' : 
-                                player.keep_score < 5 ? 'text-yellow-400' : 'text-green-400'
-                              }`}>
-                                {player.keep_score}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                              {player.fixture} ({player.fixture_difficulty})
+                            </span>
+                          </td>
+                          <td className="py-2 text-right font-mono">{player.predicted?.toFixed(1) ?? '0.0'}</td>
+                          <td className="py-2 text-right font-mono">{player.form}</td>
+                          <td className="py-2 text-right font-mono">{player.avg_fixture_5gw}</td>
+                          <td className={`py-2 text-right font-mono font-bold ${
+                            player.keep_score < 3 ? 'text-red-400' : 
+                            player.keep_score < 5 ? 'text-yellow-400' : 'text-green-400'
+                          }`}>
+                            {player.keep_score}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+          </div>
         )}
 
         {/* Free Hit of the Week Tab */}
@@ -2230,44 +2345,26 @@ function App() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                          {/* Starting XI */}
+                        <div className="space-y-6">
+                          {/* Starting XI - Pitch Formation */}
                           <div>
-                            <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Starting XI</h4>
-                            <div className="space-y-2">
-                              {currentTeam.squad.starting_xi.map((player) => (
-                                <div key={player.id} className="flex items-center justify-between text-sm py-2 px-3 bg-[#0b0b14] rounded border border-[#2a2a4a]/50">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium">{player.name}</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-xs ${getPositionClass(player.position)}`}>
-                                      {player.position}
-                                    </span>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-gray-400">{player.team}</div>
-                                    <div className="font-mono text-xs">£{player.price}m</div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                            <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Starting XI • {currentTeam.squad.formation}</h4>
+                            {renderPitchFormation(currentTeam.squad.starting_xi, currentTeam.squad.formation)}
                           </div>
 
                           {/* Bench */}
                           <div>
                             <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Bench</h4>
-                            <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                               {currentTeam.squad.bench.map((player) => (
-                                <div key={player.id} className="flex items-center justify-between text-sm py-2 px-3 bg-[#0b0b14] rounded border border-[#2a2a4a]/50 opacity-75">
-                                  <div className="flex items-center gap-2">
-                                    <span>{player.name}</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-xs ${getPositionClass(player.position)}`}>
+                                <div key={player.id} className="p-3 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] opacity-75">
+                                  <div className="flex items-center gap-1 mb-2">
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
                                       {player.position}
                                     </span>
                                   </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-gray-500">{player.team}</div>
-                                    <div className="font-mono text-xs text-gray-500">£{player.price}m</div>
-                                  </div>
+                                  <div className="font-medium text-sm">{player.name}</div>
+                                  <div className="text-xs text-gray-400">{player.team} • £{player.price}m</div>
                                 </div>
                               ))}
                             </div>
@@ -2391,14 +2488,14 @@ function App() {
             </div>
           </div>
         )}
-        </main>
+      </main>
 
-        {/* Footer */}
-        <footer className="border-t border-[#2a2a4a] py-6 mt-12">
-          <div className="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
-            FPL Squad Suggester • AI-powered predictions • Not affiliated with Premier League
-          </div>
-        </footer>
+      {/* Footer */}
+      <footer className="border-t border-[#2a2a4a] py-6 mt-12">
+        <div className="max-w-6xl mx-auto px-6 text-center text-gray-500 text-sm">
+          FPL Squad Suggester • AI-powered predictions • Not affiliated with Premier League
+        </div>
+      </footer>
       </div>
     </div>
   )
