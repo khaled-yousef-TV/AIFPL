@@ -843,21 +843,19 @@ function App() {
     )
   }
 
-  // Render before/after pitch formations side by side
+  // Render before/after pitch formations side by side (all 15 players on field)
   const renderBeforeAfterPitch = (
-    beforeSquad: any[],
-    afterSquad: any[],
+    beforeSquad: any[], // Full 15-player squad
+    afterSquad: any[], // Full 15-player squad
     beforeFormation: string,
     afterFormation: string,
     transfersOut: any[],
-    transfersIn: any[],
-    beforeBench: any[] = [],
-    afterBench: any[] = []
+    transfersIn: any[]
   ) => {
     const beforeFormationLayout = parseFormation(beforeFormation)
     const afterFormationLayout = parseFormation(afterFormation)
     
-    // Group players by position for before squad
+    // Group players by position for before squad (all 15 players)
     const beforeByPosition = {
       GK: beforeSquad.filter((p: any) => p.position === 'GK'),
       DEF: beforeSquad.filter((p: any) => p.position === 'DEF'),
@@ -865,7 +863,7 @@ function App() {
       FWD: beforeSquad.filter((p: any) => p.position === 'FWD'),
     }
 
-    // Group players by position for after squad
+    // Group players by position for after squad (all 15 players)
     const afterByPosition = {
       GK: afterSquad.filter((p: any) => p.position === 'GK'),
       DEF: afterSquad.filter((p: any) => p.position === 'DEF'),
@@ -892,21 +890,22 @@ function App() {
       return slots
     }
 
-    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string, bench: any[] = []) => {
-      const benchByPosition = {
-        GK: bench.filter((p: any) => p.position === 'GK'),
-        DEF: bench.filter((p: any) => p.position === 'DEF'),
-        MID: bench.filter((p: any) => p.position === 'MID'),
-        FWD: bench.filter((p: any) => p.position === 'FWD'),
-      }
+    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string) => {
+      // Show all players on the field - starting XI in formation, bench players below
+      // Starting XI positions
+      const startingXiGK = byPosition.GK.slice(0, 1)
+      const startingXiDEF = byPosition.DEF.slice(0, formationLayout.def)
+      const startingXiMID = byPosition.MID.slice(0, formationLayout.mid)
+      const startingXiFWD = byPosition.FWD.slice(0, formationLayout.fwd)
       
-      // Order bench: GK, DEF, MID, FWD
-      const orderedBench = [
-        ...benchByPosition.GK,
-        ...benchByPosition.DEF,
-        ...benchByPosition.MID,
-        ...benchByPosition.FWD,
-      ]
+      // Bench players (remaining after starting XI)
+      const benchGK = byPosition.GK.slice(1)
+      const benchDEF = byPosition.DEF.slice(formationLayout.def)
+      const benchMID = byPosition.MID.slice(formationLayout.mid)
+      const benchFWD = byPosition.FWD.slice(formationLayout.fwd)
+      
+      // Combine all bench players in order: GK, DEF, MID, FWD
+      const benchPlayers = [...benchGK, ...benchDEF, ...benchMID, ...benchFWD]
       
       return (
         <div className="flex-1">
@@ -914,70 +913,92 @@ function App() {
             {title}
           </div>
           <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
-            <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
+            <div className="relative min-h-[400px] sm:min-h-[500px] md:min-h-[550px] flex flex-col justify-between">
               {/* Goalkeeper (TOP) */}
               <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                {renderRow(byPosition.GK, 1, 'GK', isBefore).map((slot, idx) => (
+                {renderRow(startingXiGK, 1, 'GK', isBefore).map((slot, idx) => (
                   <div key={`gk-${idx}`}>
                     {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
                   </div>
                 ))}
+                {/* Bench GK */}
+                {benchGK.map((player: any) => {
+                  const isTransferOut = isBefore && transferOutMap.has(player.id)
+                  const isTransferIn = !isBefore && transferInMap.has(player.id)
+                  return (
+                    <div key={`bench-gk-${player.id}`}>
+                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Defenders */}
               <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-                {renderRow(byPosition.DEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
+                {renderRow(startingXiDEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
                   <div key={`def-${idx}`}>
                     {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
                   </div>
                 ))}
+                {/* Bench DEF */}
+                {benchDEF.map((player: any) => {
+                  const isTransferOut = isBefore && transferOutMap.has(player.id)
+                  const isTransferIn = !isBefore && transferInMap.has(player.id)
+                  return (
+                    <div key={`bench-def-${player.id}`}>
+                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Midfielders */}
               <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-                {renderRow(byPosition.MID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
+                {renderRow(startingXiMID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
                   <div key={`mid-${idx}`}>
                     {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
                   </div>
                 ))}
+                {/* Bench MID */}
+                {benchMID.map((player: any) => {
+                  const isTransferOut = isBefore && transferOutMap.has(player.id)
+                  const isTransferIn = !isBefore && transferInMap.has(player.id)
+                  return (
+                    <div key={`bench-mid-${player.id}`}>
+                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Forwards (BOTTOM) */}
               <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-                {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
+                {renderRow(startingXiFWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
                   <div key={`fwd-${idx}`}>
                     {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-          
-          {/* Bench */}
-          {orderedBench.length > 0 && (
-            <div className="mt-4">
-              <div className="text-xs text-gray-400 mb-2 uppercase font-semibold text-center">Bench</div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {orderedBench.map((player: any) => {
+                {/* Bench FWD */}
+                {benchFWD.map((player: any) => {
                   const isTransferOut = isBefore && transferOutMap.has(player.id)
                   const isTransferIn = !isBefore && transferInMap.has(player.id)
                   return (
-                    <div key={player.id}>
+                    <div key={`bench-fwd-${player.id}`}>
                       {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
                     </div>
                   )
                 })}
               </div>
             </div>
-          )}
+          </div>
         </div>
       )
     }
 
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before', beforeBench)}
-        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After', afterBench)}
+        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before')}
+        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After')}
       </div>
     )
   }
@@ -2323,8 +2344,65 @@ function App() {
                         )}
                             </div>
                 
-                {/* Kept Players Section */}
-                {/* Kept Players and Transfer Breakdown - Side by Side */}
+                {/* Before/After Squad Comparison - Pitch Formation (on top) */}
+                {wildcardPlan.resulting_squad?.squad && (
+                  <div className="card">
+                    <div className="card-header">
+                      <Users className="w-5 h-5 text-[#00ff87]" />
+                      Squad Comparison
+                    </div>
+                    {(() => {
+                      // Construct before starting XI from mySquad
+                      // Group by position and select best players for starting XI
+                      const byPosition = {
+                        GK: mySquad.filter((p: SquadPlayer) => p.position === 'GK'),
+                        DEF: mySquad.filter((p: SquadPlayer) => p.position === 'DEF'),
+                        MID: mySquad.filter((p: SquadPlayer) => p.position === 'MID'),
+                        FWD: mySquad.filter((p: SquadPlayer) => p.position === 'FWD'),
+                      }
+                      
+                      // Determine formation from before squad or use default
+                      // Try to infer from squad structure, default to 3-5-2
+                      const beforeFormation = wildcardPlan.before_formation || 
+                        (() => {
+                          // Infer formation from squad structure
+                          const defCount = Math.min(byPosition.DEF.length, 5)
+                          const midCount = Math.min(byPosition.MID.length, 5)
+                          const fwdCount = Math.min(byPosition.FWD.length, 3)
+                          // Ensure we have 11 players
+                          if (defCount + midCount + fwdCount + 1 === 11) {
+                            return `${defCount}-${midCount}-${fwdCount}`
+                          }
+                          return '3-5-2' // Default
+                        })()
+                      
+                      const formationLayout = parseFormation(beforeFormation)
+                      
+                      // Use full squad (all 15 players) for before
+                      const beforeFullSquad = mySquad
+                      
+                      // Use full squad (all 15 players) for after
+                      const afterFullSquad = wildcardPlan.resulting_squad.squad
+                      
+                      // Handle formation - could be string "3-5-2" or dict {"GK": 1, "DEF": 3, "MID": 5, "FWD": 2}
+                      const afterFormationRaw = wildcardPlan.resulting_squad.formation || '3-5-2'
+                      const afterFormation = typeof afterFormationRaw === 'string' 
+                        ? afterFormationRaw 
+                        : `${afterFormationRaw.DEF || 3}-${afterFormationRaw.MID || 5}-${afterFormationRaw.FWD || 2}`
+                      
+                      return renderBeforeAfterPitch(
+                        beforeFullSquad,
+                        afterFullSquad,
+                        beforeFormation,
+                        afterFormation,
+                        wildcardPlan.transfers_out || [],
+                        wildcardPlan.transfers_in || []
+                      )
+                    })()}
+                  </div>
+                )}
+                
+                {/* Kept Players and Transfer Breakdown - Side by Side (below pitch) */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Kept Players */}
                   {wildcardPlan.kept_players && wildcardPlan.kept_players.length > 0 && (
@@ -2388,95 +2466,6 @@ function App() {
                     </div>
                   )}
                 </div>
-            
-                {/* Before/After Squad Comparison - Pitch Formation */}
-                {wildcardPlan.resulting_squad?.squad && (
-                  <div className="card">
-                    <div className="card-header">
-                      <Users className="w-5 h-5 text-[#00ff87]" />
-                      Squad Comparison
-                    </div>
-                    {(() => {
-                      // Construct before starting XI from mySquad
-                      // Group by position and select best players for starting XI
-                      const byPosition = {
-                        GK: mySquad.filter((p: SquadPlayer) => p.position === 'GK'),
-                        DEF: mySquad.filter((p: SquadPlayer) => p.position === 'DEF'),
-                        MID: mySquad.filter((p: SquadPlayer) => p.position === 'MID'),
-                        FWD: mySquad.filter((p: SquadPlayer) => p.position === 'FWD'),
-                      }
-                      
-                      // Determine formation from before squad or use default
-                      // Try to infer from squad structure, default to 3-5-2
-                      const beforeFormation = wildcardPlan.before_formation || 
-                        (() => {
-                          // Infer formation from squad structure
-                          const defCount = Math.min(byPosition.DEF.length, 5)
-                          const midCount = Math.min(byPosition.MID.length, 5)
-                          const fwdCount = Math.min(byPosition.FWD.length, 3)
-                          // Ensure we have 11 players
-                          if (defCount + midCount + fwdCount + 1 === 11) {
-                            return `${defCount}-${midCount}-${fwdCount}`
-                          }
-                          return '3-5-2' // Default
-                        })()
-                      
-                      const formationLayout = parseFormation(beforeFormation)
-                      
-                      // Construct starting XI (first player of each position, up to formation limits)
-                      const beforeStartingXi: SquadPlayer[] = [
-                        ...byPosition.GK.slice(0, 1),
-                        ...byPosition.DEF.slice(0, formationLayout.def),
-                        ...byPosition.MID.slice(0, formationLayout.mid),
-                        ...byPosition.FWD.slice(0, formationLayout.fwd),
-                      ]
-                      
-                      // Construct after starting XI from resulting squad
-                      // If starting_xi is provided, use it; otherwise derive from squad
-                      const afterSquad = wildcardPlan.resulting_squad.squad
-                      const afterByPosition = {
-                        GK: afterSquad.filter((p: any) => p.position === 'GK'),
-                        DEF: afterSquad.filter((p: any) => p.position === 'DEF'),
-                        MID: afterSquad.filter((p: any) => p.position === 'MID'),
-                        FWD: afterSquad.filter((p: any) => p.position === 'FWD'),
-                      }
-                      
-                      // Handle formation - could be string "3-5-2" or dict {"GK": 1, "DEF": 3, "MID": 5, "FWD": 2}
-                      const afterFormationRaw = wildcardPlan.resulting_squad.formation || '3-5-2'
-                      const afterFormation = typeof afterFormationRaw === 'string' 
-                        ? afterFormationRaw 
-                        : `${afterFormationRaw.DEF || 3}-${afterFormationRaw.MID || 5}-${afterFormationRaw.FWD || 2}`
-                      const afterFormationLayout = parseFormation(afterFormation)
-                      
-                      // Use starting_xi if available, otherwise construct from squad
-                      const afterStartingXi = wildcardPlan.resulting_squad.starting_xi || [
-                        ...afterByPosition.GK.slice(0, 1),
-                        ...afterByPosition.DEF.slice(0, afterFormationLayout.def),
-                        ...afterByPosition.MID.slice(0, afterFormationLayout.mid),
-                        ...afterByPosition.FWD.slice(0, afterFormationLayout.fwd),
-                      ]
-                      
-                      // Construct before bench (remaining players not in starting XI)
-                      const beforeStartingXiIds = new Set(beforeStartingXi.map(p => p.id))
-                      const beforeBench = mySquad.filter((p: SquadPlayer) => !beforeStartingXiIds.has(p.id))
-                      
-                      // Construct after bench (remaining players not in starting XI)
-                      const afterStartingXiIds = new Set(afterStartingXi.map((p: any) => p.id))
-                      const afterBench = afterSquad.filter((p: any) => !afterStartingXiIds.has(p.id))
-                      
-                      return renderBeforeAfterPitch(
-                        beforeStartingXi,
-                        afterStartingXi,
-                        beforeFormation,
-                        afterFormation,
-                        wildcardPlan.transfers_out || [],
-                        wildcardPlan.transfers_in || [],
-                        beforeBench,
-                        afterBench
-                      )
-                    })()}
-                  </div>
-                )}
               </div>
             )}
           </div>
