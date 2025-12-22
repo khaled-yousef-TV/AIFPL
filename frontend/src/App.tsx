@@ -511,25 +511,6 @@ function App() {
     }
   }
 
-  const ensureSquadLoaded = async (method: 'combined' | 'heuristic' | 'form' | 'fixture') => {
-    const hasData =
-      method === 'combined' ? squad :
-      method === 'heuristic' ? squadHeuristic :
-      method === 'form' ? squadForm :
-      squadFixture
-    if (hasData) return
-
-    try {
-      const res = await fetch(`${API_BASE}/api/suggested-squad?method=${method}`).then(r => r.json())
-      if (method === 'combined') setSquad(res)
-      if (method === 'heuristic') setSquadHeuristic(res)
-      if (method === 'form') setSquadForm(res)
-      if (method === 'fixture') setSquadFixture(res)
-    } catch (err) {
-      console.error('Squad load error:', err)
-    }
-  }
-
   const ensurePicksLoaded = async () => {
     if (Object.keys(topPicks).length > 0) return
     try {
@@ -552,19 +533,9 @@ function App() {
 
   useEffect(() => {
     // Lazy-load heavy tabs only when the user opens them
-    if (activeTab === 'best_team_stats') ensureSquadLoaded(statisticsMethod)
-    if (activeTab === 'squad_lstm') {
-      if (!squadLSTM) {
-        setSquadLSTM(null)
-        fetch(`${API_BASE}/api/suggested-squad?method=lstm`)
-          .then(r => r.json())
-          .then(res => setSquadLSTM(res))
-          .catch(err => console.error('LSTM squad load error:', err))
-      }
-    }
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-  }, [activeTab, statisticsMethod])
+  }, [activeTab])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -578,30 +549,7 @@ function App() {
 
     // Refresh only the currently active heavy tab to keep UX snappy.
     try {
-      if (activeTab === 'best_team_stats') {
-        // Load based on selected statistics method
-        if (statisticsMethod === 'combined') {
-        setSquad(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=combined`).then(r => r.json())
-        setSquad(res)
-        } else if (statisticsMethod === 'heuristic') {
-        setSquadHeuristic(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=heuristic`).then(r => r.json())
-        setSquadHeuristic(res)
-        } else if (statisticsMethod === 'form') {
-        setSquadForm(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=form`).then(r => r.json())
-        setSquadForm(res)
-        } else if (statisticsMethod === 'fixture') {
-        setSquadFixture(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=fixture`).then(r => r.json())
-        setSquadFixture(res)
-        }
-      } else if (activeTab === 'squad_lstm') {
-        setSquadLSTM(null)
-        const res = await fetch(`${API_BASE}/api/suggested-squad?method=lstm`).then(r => r.json())
-        setSquadLSTM(res)
-      } else if (activeTab === 'picks') {
+      if (activeTab === 'picks') {
         setTopPicks({})
         const res = await fetch(`${API_BASE}/api/top-picks`).then(r => r.json())
         setTopPicks(res)
@@ -1219,23 +1167,10 @@ function App() {
   const navigationTabs = [
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
-    { id: 'best_team_stats', icon: Users, label: 'Best Team - Statistics Way', shortLabel: 'Stats', color: 'text-[#00ff87]', description: 'Optimal squad using statistical methods (Combined/Heuristic/Form/Fixture)' },
-    { id: 'squad_lstm', icon: Brain, label: 'Best Team - LSTM', shortLabel: 'LSTM', color: 'text-cyan-400', description: 'Squad using LSTM neural network predictions' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
     { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
   ]
 
-  const isSquadTab = activeTab === 'best_team_stats' || activeTab === 'squad_lstm'
-  const currentSquad: SuggestedSquad | null =
-    activeTab === 'best_team_stats' ? (
-      statisticsMethod === 'combined' ? squad :
-      statisticsMethod === 'heuristic' ? squadHeuristic :
-      statisticsMethod === 'form' ? squadForm :
-      statisticsMethod === 'fixture' ? squadFixture :
-      null
-    ) :
-    activeTab === 'squad_lstm' ? squadLSTM :
-    null
 
   if (loading) {
     return (
@@ -1485,202 +1420,6 @@ function App() {
           </div>
         )}
         
-        {/* Squad Tabs */}
-        {isSquadTab && !currentSquad && (
-          <div className="text-center text-gray-400 py-8">Loading squad...</div>
-        )}
-
-        {isSquadTab && currentSquad && (
-          <div className="space-y-6">
-            {/* Method Sub-tabs (only for best_team_stats) */}
-            {activeTab === 'best_team_stats' && (
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-3">Statistics Method</div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => {
-                      setStatisticsMethod('combined')
-                      setSquad(null)
-                    }}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      statisticsMethod === 'combined'
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
-                    }`}
-                  >
-                    Combined
-                  </button>
-                  <button
-                    onClick={() => {
-                      setStatisticsMethod('heuristic')
-                      setSquadHeuristic(null)
-                    }}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      statisticsMethod === 'heuristic'
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
-                    }`}
-                  >
-                    Heuristic
-                  </button>
-                  <button
-                    onClick={() => {
-                      setStatisticsMethod('form')
-                      setSquadForm(null)
-                    }}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      statisticsMethod === 'form'
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
-                    }`}
-                  >
-                    Form
-                  </button>
-                  <button
-                    onClick={() => {
-                      setStatisticsMethod('fixture')
-                      setSquadFixture(null)
-                    }}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      statisticsMethod === 'fixture'
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-[#0f0f1a] text-gray-300 hover:bg-[#1a1a2e] border border-[#2a2a4a]'
-                    }`}
-                  >
-                    Fixture
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-1">Method</div>
-                <div className="text-lg font-bold text-[#00ff87]">{(currentSquad as any).method || (activeTab === 'squad_lstm' ? 'LSTM' : statisticsMethod.charAt(0).toUpperCase() + statisticsMethod.slice(1))}</div>
-              </div>
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-1">Formation</div>
-                <div className="text-2xl font-bold text-[#00ff87]">{currentSquad.formation}</div>
-              </div>
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-1">Predicted Points</div>
-                <div className="text-2xl font-bold text-[#00ff87]">{(currentSquad.predicted_points ?? 0).toFixed(1)}</div>
-              </div>
-              <div className="card">
-                <div className="text-gray-400 text-sm mb-1">Squad Cost</div>
-                <div className="text-2xl font-bold">£{currentSquad.total_cost}m</div>
-              </div>
-            </div>
-
-            {/* European Rotation Notice */}
-            <div className="bg-[#1a1a2e]/50 border border-[#2a2a4a] rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <Plane className="w-5 h-5 text-blue-400 mt-0.5" />
-                <div>
-                  <h3 className="font-medium text-sm mb-1">European Rotation Risk</h3>
-                  <p className="text-xs text-gray-400 mb-2">
-                    Teams in UCL/UEL/UECL may rotate players, especially for easier league games.
-                  </p>
-                  <div className="flex flex-wrap gap-3 text-xs">
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                      <span className="text-orange-400">High risk</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                      <span className="text-yellow-400">Medium risk</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                      <span className="text-blue-400">In Europe (low risk)</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Captain Pick */}
-            <div className="card">
-              <div className="card-header">
-                <Award className="w-5 h-5 text-yellow-400" />
-                Captain Pick
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-                <div className="flex-1 p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-yellow-400 text-lg font-bold">©</span>
-                    <span className="font-semibold text-lg">{currentSquad.captain.name}</span>
-                  </div>
-                  <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{(currentSquad.captain.predicted ?? 0).toFixed(1)} × 2 = {((currentSquad.captain.predicted ?? 0) * 2).toFixed(1)}</span></span>
-                </div>
-                <div className="flex-1 p-4 bg-purple-500/10 rounded-lg border border-purple-500/30">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-purple-400 text-lg font-bold">V</span>
-                    <span className="font-semibold text-lg">{currentSquad.vice_captain.name}</span>
-                  </div>
-                  <span className="text-gray-400">Predicted: <span className="text-purple-400 font-mono">{(currentSquad.vice_captain.predicted ?? 0).toFixed(1)}</span></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Starting XI - Pitch Formation */}
-            <div className="card">
-              <div className="card-header">
-                <Users className="w-5 h-5 text-[#00ff87]" />
-                Starting XI • {currentSquad.formation}
-              </div>
-              {renderPitchFormation(currentSquad.starting_xi, currentSquad.formation)}
-            </div>
-
-            {/* Bench */}
-            <div className="card">
-              <div className="card-header">
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-                Bench
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {[...currentSquad.bench].sort((a: any, b: any) => {
-                  // Order: GK, DEF, MID, FWD
-                  const order: Record<string, number> = { 'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3 }
-                  return (order[a.position] ?? 99) - (order[b.position] ?? 99)
-                }).map((player: any, i) => (
-                  <div key={player.id} className={`p-3 bg-[#0f0f1a] rounded-lg border ${
-                    player.rotation_risk === 'high' ? 'border-orange-500/50' : 'border-[#2a2a4a]'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
-                          {player.position}
-                        </span>
-                        {player.european_comp && (
-                          <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
-                            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                            'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {player.european_comp}
-                          </span>
-                        )}
-                      </div>
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        player.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
-                        player.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-red-500/20 text-red-400'
-                      }`}>
-                        {player.is_home ? 'vs' : '@'} {player.opponent}
-                      </span>
-                    </div>
-                    <div className="font-medium">{player.name}</div>
-                    <div className="text-sm text-gray-400">{player.team} • £{player.price}m</div>
-                    <div className="text-sm text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'} pts</div>
-                    <div className="text-xs text-gray-500 mt-1">{player.reason}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Transfers Tab (Quick Transfers 1-3, Wildcard 4+) */}
         {activeTab === 'transfers' && (
