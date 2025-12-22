@@ -753,6 +753,8 @@ function App() {
         className={`${pillClasses} ${
           player.is_captain 
             ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+            : player.is_vice_captain
+            ? 'bg-purple-500/30 border-purple-400 shadow-lg shadow-purple-500/20'
             : player.rotation_risk === 'high'
             ? 'bg-orange-500/20 border-orange-500/50'
             : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
@@ -760,7 +762,7 @@ function App() {
       >
         <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
           {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
-          {player.is_vice_captain && <span className="text-gray-400 text-[10px]">V</span>}
+          {player.is_vice_captain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
             {player.position}
           </span>
@@ -1376,12 +1378,12 @@ function App() {
                   </div>
                   <span className="text-gray-400">Predicted: <span className="text-[#00ff87] font-mono">{(currentSquad.captain.predicted ?? 0).toFixed(1)} × 2 = {((currentSquad.captain.predicted ?? 0) * 2).toFixed(1)}</span></span>
                 </div>
-                <div className="flex-1 p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                <div className="flex-1 p-4 bg-purple-500/10 rounded-lg border border-purple-500/30">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-gray-400">V</span>
-                    <span className="font-medium">{currentSquad.vice_captain.name}</span>
+                    <span className="text-purple-400 text-lg font-bold">V</span>
+                    <span className="font-semibold text-lg">{currentSquad.vice_captain.name}</span>
                   </div>
-                  <span className="text-gray-400">Predicted: <span className="font-mono">{(currentSquad.vice_captain.predicted ?? 0).toFixed(1)}</span></span>
+                  <span className="text-gray-400">Predicted: <span className="text-purple-400 font-mono">{(currentSquad.vice_captain.predicted ?? 0).toFixed(1)}</span></span>
                 </div>
               </div>
             </div>
@@ -1402,7 +1404,11 @@ function App() {
                 Bench
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {currentSquad.bench.map((player: any, i) => (
+                {[...currentSquad.bench].sort((a: any, b: any) => {
+                  // Order: GK, DEF, MID, FWD
+                  const order: Record<string, number> = { 'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3 }
+                  return (order[a.position] ?? 99) - (order[b.position] ?? 99)
+                }).map((player: any, i) => (
                   <div key={player.id} className={`p-3 bg-[#0f0f1a] rounded-lg border ${
                     player.rotation_risk === 'high' ? 'border-orange-500/50' : 'border-[#2a2a4a]'
                   }`}>
@@ -2408,7 +2414,11 @@ function App() {
                           <div>
                             <h4 className="text-sm text-gray-400 mb-3 uppercase font-semibold">Bench</h4>
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                              {currentTeam.squad.bench.map((player) => (
+                              {[...currentTeam.squad.bench].sort((a: any, b: any) => {
+                                // Order: GK, DEF, MID, FWD
+                                const order: Record<string, number> = { 'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3 }
+                                return (order[a.position] ?? 99) - (order[b.position] ?? 99)
+                              }).map((player) => (
                                 <div key={player.id} className="p-3 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] opacity-75">
                                   <div className="flex items-center gap-1 mb-2">
                                     <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getPositionClass(player.position)}`}>
@@ -2428,8 +2438,8 @@ function App() {
                               </div>
                               <div className="flex items-center gap-2 text-sm">
                                 <span className="text-gray-400">Vice-Captain:</span>
-                                <span>{currentTeam.squad.vice_captain.name}</span>
-                                <span className="text-gray-500 font-mono">({(currentTeam.squad.vice_captain.predicted ?? 0).toFixed(1)})</span>
+                                <span className="font-semibold text-purple-400">{currentTeam.squad.vice_captain.name}</span>
+                                <span className="text-purple-400 font-mono">({(currentTeam.squad.vice_captain.predicted ?? 0).toFixed(1)})</span>
                               </div>
                             </div>
                           </div>
