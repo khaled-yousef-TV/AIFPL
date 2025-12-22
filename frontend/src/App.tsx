@@ -785,6 +785,166 @@ function App() {
     )
   }
 
+  // Render player pill with transfer highlighting (red for out, green for in)
+  const renderPlayerPillWithTransfer = (player: any | null, isEmpty: boolean, isTransferOut: boolean, isTransferIn: boolean) => {
+    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
+    
+    if (isEmpty || !player) {
+      return (
+        <div className={`${pillClasses} bg-[#0b0b14]/50 border-[#2a2a4a]/30 border-dashed opacity-50`}>
+          <div className="text-gray-500 text-[10px] text-center">Empty</div>
+        </div>
+      )
+    }
+
+    // Determine border color based on transfer status
+    let borderClass = 'border-[#2a2a4a]'
+    let bgClass = 'bg-[#0f0f1a]/80'
+    if (isTransferOut) {
+      borderClass = 'border-red-400'
+      bgClass = 'bg-red-500/20'
+    } else if (isTransferIn) {
+      borderClass = 'border-green-400'
+      bgClass = 'bg-green-500/20'
+    }
+
+    return (
+      <div
+        className={`${pillClasses} ${bgClass} ${borderClass} ${
+          player.is_captain 
+            ? 'shadow-lg shadow-yellow-500/20' 
+            : player.is_vice_captain
+            ? 'shadow-lg shadow-purple-500/20'
+            : ''
+        }`}
+      >
+        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
+          {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
+          {player.is_vice_captain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+            {player.position}
+          </span>
+        </div>
+        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
+        <div className="text-[9px] text-gray-400 truncate w-full text-center mt-0.5">{player.team}</div>
+        {player.predicted !== undefined && (
+          <div className="text-[9px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+        )}
+        {player.european_comp && (
+          <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+            'bg-blue-500/20 text-blue-400'
+          }`}>
+            {player.european_comp}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // Render before/after pitch formations side by side
+  const renderBeforeAfterPitch = (
+    beforeSquad: any[],
+    afterSquad: any[],
+    beforeFormation: string,
+    afterFormation: string,
+    transfersOut: any[],
+    transfersIn: any[]
+  ) => {
+    const beforeFormationLayout = parseFormation(beforeFormation)
+    const afterFormationLayout = parseFormation(afterFormation)
+    
+    // Group players by position for before squad
+    const beforeByPosition = {
+      GK: beforeSquad.filter((p: any) => p.position === 'GK'),
+      DEF: beforeSquad.filter((p: any) => p.position === 'DEF'),
+      MID: beforeSquad.filter((p: any) => p.position === 'MID'),
+      FWD: beforeSquad.filter((p: any) => p.position === 'FWD'),
+    }
+
+    // Group players by position for after squad
+    const afterByPosition = {
+      GK: afterSquad.filter((p: any) => p.position === 'GK'),
+      DEF: afterSquad.filter((p: any) => p.position === 'DEF'),
+      MID: afterSquad.filter((p: any) => p.position === 'MID'),
+      FWD: afterSquad.filter((p: any) => p.position === 'FWD'),
+    }
+
+    // Create transfer lookup maps
+    const transferOutMap = new Set(transfersOut.map((t: any) => t.id))
+    const transferInMap = new Set(transfersIn.map((t: any) => t.id))
+
+    const renderRow = (players: any[], expectedCount: number, position: string, isBefore: boolean) => {
+      const slots: any[] = []
+      for (let i = 0; i < expectedCount; i++) {
+        if (i < players.length) {
+          const player = players[i]
+          const isTransferOut = isBefore && transferOutMap.has(player.id)
+          const isTransferIn = !isBefore && transferInMap.has(player.id)
+          slots.push({ player, isTransferOut, isTransferIn })
+        } else {
+          slots.push({ player: null, isTransferOut: false, isTransferIn: false })
+        }
+      }
+      return slots
+    }
+
+    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string) => (
+      <div className="flex-1">
+        <div className="text-sm font-semibold mb-3 text-center" style={{ color: isBefore ? '#f87171' : '#00ff87' }}>
+          {title}
+        </div>
+        <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+          <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
+            {/* Goalkeeper (TOP) */}
+            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              {renderRow(byPosition.GK, 1, 'GK', isBefore).map((slot, idx) => (
+                <div key={`gk-${idx}`}>
+                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                </div>
+              ))}
+            </div>
+
+            {/* Defenders */}
+            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+              {renderRow(byPosition.DEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
+                <div key={`def-${idx}`}>
+                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                </div>
+              ))}
+            </div>
+
+            {/* Midfielders */}
+            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+              {renderRow(byPosition.MID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
+                <div key={`mid-${idx}`}>
+                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                </div>
+              ))}
+            </div>
+
+            {/* Forwards (BOTTOM) */}
+            <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+              {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
+                <div key={`fwd-${idx}`}>
+                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before')}
+        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After')}
+      </div>
+    )
+  }
+
   // Render pitch formation view (GK top, FWD bottom)
   const renderPitchFormation = (startingXi: any[], formation: string, showEmptySlots: boolean = false) => {
     const formationLayout = parseFormation(formation)
@@ -1681,72 +1841,74 @@ function App() {
                   )}
                 </div>
                 
-                {/* Current Squad - Pitch Formation */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
+                {/* Current Squad - Pitch Formation (only show when no results) */}
+                {!wildcardPlan && !groupedTransferSuggestions && (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
+                      {mySquad.length > 0 && (
+                        <button 
+                          onClick={() => setMySquad([])}
+                          className="text-xs text-red-400 hover:text-red-300"
+                        >
+                          Clear All
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="mb-4">
+                      <div className="text-xs text-gray-500 mb-2">
+                        Prices from search are <span className="text-gray-300">current FPL prices</span>. Your in-game
+                        <span className="text-gray-300"> selling price</span> can be different (e.g. you bought before a price rise).
+                        Click a player to edit price or remove.
+                      </div>
+                      {renderTransfersPitch()}
+                    </div>
+
+                    {/* Player list for editing prices */}
                     {mySquad.length > 0 && (
-                      <button 
-                        onClick={() => setMySquad([])}
-                        className="text-xs text-red-400 hover:text-red-300"
-                      >
-                        Clear All
-                      </button>
+                      <div className="space-y-2 max-h-60 overflow-y-auto border-t border-[#2a2a4a] pt-4">
+                        {mySquad.map(player => (
+                          <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                                {player.position}
+                              </span>
+                              <span className="text-sm">{player.name}</span>
+                              <span className="text-xs text-gray-500">{player.team}</span>
+                              {player.european_comp && (
+                                <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                  player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                  player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                  'bg-blue-500/20 text-blue-400'
+                                }`}>
+                                  {player.european_comp}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
+                                <span>£</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  value={Number.isFinite(player.price) ? player.price : 0}
+                                  onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
+                                  className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
+                                />
+                                <span>m</span>
+                              </div>
+                              <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  
-                  <div className="mb-4">
-                    <div className="text-xs text-gray-500 mb-2">
-                      Prices from search are <span className="text-gray-300">current FPL prices</span>. Your in-game
-                      <span className="text-gray-300"> selling price</span> can be different (e.g. you bought before a price rise).
-                      Click a player to edit price or remove.
-                    </div>
-                    {renderTransfersPitch()}
-                  </div>
-
-                  {/* Player list for editing prices */}
-                  {mySquad.length > 0 && (
-                    <div className="space-y-2 max-h-60 overflow-y-auto border-t border-[#2a2a4a] pt-4">
-                      {mySquad.map(player => (
-                        <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                              {player.position}
-                            </span>
-                            <span className="text-sm">{player.name}</span>
-                            <span className="text-xs text-gray-500">{player.team}</span>
-                            {player.european_comp && (
-                              <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
-                                player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                'bg-blue-500/20 text-blue-400'
-                              }`}>
-                                {player.european_comp}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
-                              <span>£</span>
-                              <input
-                                type="number"
-                                step="0.1"
-                                min="0"
-                                value={Number.isFinite(player.price) ? player.price : 0}
-                                onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
-                                className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
-                              />
-                              <span>m</span>
-                            </div>
-                            <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
               
               {/* Bank & Free Transfers */}
@@ -2186,79 +2348,84 @@ function App() {
               </div>
             )}
             
-                {/* Before/After Squad Comparison */}
-                <div className="card">
-                  <div className="card-header">
-                    <Users className="w-5 h-5 text-[#00ff87]" />
-                    Squad Comparison
-                  </div>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {/* Before Squad */}
-                    <div>
-                      <div className="text-sm font-semibold text-red-400 mb-3">Before</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {mySquad.map((player: SquadPlayer) => {
-                          const isTransferOut = wildcardPlan.transfers_out?.some((t: any) => t.id === player.id)
-                          return (
-                            <div 
-                              key={player.id} 
-                              className={`p-1.5 rounded border ${
-                                isTransferOut 
-                                  ? 'bg-red-500/10 border-red-500/30' 
-                                  : 'bg-[#0f0f1a] border-[#2a2a4a]'
-                              }`}
-                            >
-                              <div className="flex flex-col">
-                                <div className="flex items-center justify-between mb-0.5">
-                                  <span className={`font-medium text-xs truncate ${isTransferOut ? 'text-red-400' : ''}`}>
-                                    {player.name}
-                                  </span>
-                                  <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
-                                </div>
-                                <span className="text-[10px] text-gray-500">{player.team}</span>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                {/* Before/After Squad Comparison - Pitch Formation */}
+                {wildcardPlan.resulting_squad?.squad && (
+                  <div className="card">
+                    <div className="card-header">
+                      <Users className="w-5 h-5 text-[#00ff87]" />
+                      Squad Comparison
                     </div>
-                    
-                    {/* After Squad */}
-                    <div>
-                      <div className="text-sm font-semibold text-[#00ff87] mb-3">After</div>
-                      {wildcardPlan.resulting_squad?.squad ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {wildcardPlan.resulting_squad.squad.map((player: any) => {
-                            const isTransferIn = wildcardPlan.transfers_in?.some((t: any) => t.id === player.id)
-                            const wasInOriginal = mySquad.some((p: SquadPlayer) => p.id === player.id)
-                            return (
-                              <div 
-                                key={player.id} 
-                                className={`p-1.5 rounded border ${
-                                  isTransferIn 
-                                    ? 'bg-green-500/10 border-green-500/30' 
-                                    : 'bg-[#0f0f1a] border-[#2a2a4a]'
-                                }`}
-                              >
-                                <div className="flex flex-col">
-                                  <div className="flex items-center justify-between mb-0.5">
-                                    <span className={`font-medium text-xs truncate ${isTransferIn ? 'text-green-400' : ''}`}>
-                                      {player.name}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
-                                  </div>
-                                  <span className="text-[10px] text-gray-500">{player.team}</span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <div className="text-gray-500 text-sm">Loading...</div>
-                      )}
-                    </div>
+                    {(() => {
+                      // Construct before starting XI from mySquad
+                      // Group by position and select best players for starting XI
+                      const byPosition = {
+                        GK: mySquad.filter((p: SquadPlayer) => p.position === 'GK'),
+                        DEF: mySquad.filter((p: SquadPlayer) => p.position === 'DEF'),
+                        MID: mySquad.filter((p: SquadPlayer) => p.position === 'MID'),
+                        FWD: mySquad.filter((p: SquadPlayer) => p.position === 'FWD'),
+                      }
+                      
+                      // Determine formation from before squad or use default
+                      // Try to infer from squad structure, default to 3-5-2
+                      const beforeFormation = wildcardPlan.before_formation || 
+                        (() => {
+                          // Infer formation from squad structure
+                          const defCount = Math.min(byPosition.DEF.length, 5)
+                          const midCount = Math.min(byPosition.MID.length, 5)
+                          const fwdCount = Math.min(byPosition.FWD.length, 3)
+                          // Ensure we have 11 players
+                          if (defCount + midCount + fwdCount + 1 === 11) {
+                            return `${defCount}-${midCount}-${fwdCount}`
+                          }
+                          return '3-5-2' // Default
+                        })()
+                      
+                      const formationLayout = parseFormation(beforeFormation)
+                      
+                      // Construct starting XI (first player of each position, up to formation limits)
+                      const beforeStartingXi: SquadPlayer[] = [
+                        ...byPosition.GK.slice(0, 1),
+                        ...byPosition.DEF.slice(0, formationLayout.def),
+                        ...byPosition.MID.slice(0, formationLayout.mid),
+                        ...byPosition.FWD.slice(0, formationLayout.fwd),
+                      ]
+                      
+                      // Construct after starting XI from resulting squad
+                      // If starting_xi is provided, use it; otherwise derive from squad
+                      const afterSquad = wildcardPlan.resulting_squad.squad
+                      const afterByPosition = {
+                        GK: afterSquad.filter((p: any) => p.position === 'GK'),
+                        DEF: afterSquad.filter((p: any) => p.position === 'DEF'),
+                        MID: afterSquad.filter((p: any) => p.position === 'MID'),
+                        FWD: afterSquad.filter((p: any) => p.position === 'FWD'),
+                      }
+                      
+                      // Handle formation - could be string "3-5-2" or dict {"GK": 1, "DEF": 3, "MID": 5, "FWD": 2}
+                      const afterFormationRaw = wildcardPlan.resulting_squad.formation || '3-5-2'
+                      const afterFormation = typeof afterFormationRaw === 'string' 
+                        ? afterFormationRaw 
+                        : `${afterFormationRaw.DEF || 3}-${afterFormationRaw.MID || 5}-${afterFormationRaw.FWD || 2}`
+                      const afterFormationLayout = parseFormation(afterFormation)
+                      
+                      // Use starting_xi if available, otherwise construct from squad
+                      const afterStartingXi = wildcardPlan.resulting_squad.starting_xi || [
+                        ...afterByPosition.GK.slice(0, 1),
+                        ...afterByPosition.DEF.slice(0, afterFormationLayout.def),
+                        ...afterByPosition.MID.slice(0, afterFormationLayout.mid),
+                        ...afterByPosition.FWD.slice(0, afterFormationLayout.fwd),
+                      ]
+                      
+                      return renderBeforeAfterPitch(
+                        beforeStartingXi,
+                        afterStartingXi,
+                        beforeFormation,
+                        afterFormation,
+                        wildcardPlan.transfers_out || [],
+                        wildcardPlan.transfers_in || []
+                      )
+                    })()}
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
