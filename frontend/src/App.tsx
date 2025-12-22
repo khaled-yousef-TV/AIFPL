@@ -158,6 +158,8 @@ function App() {
   const [bank, setBank] = useState(0)
   const [bankInput, setBankInput] = useState('0')
   const [freeTransfers, setFreeTransfers] = useState(1)
+  // Track slot positions for each player to preserve positions when removing
+  const [playerSlotPositions, setPlayerSlotPositions] = useState<Map<number, { position: string; slotIndex: number }>>(new Map())
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([])
   const [squadAnalysis, setSquadAnalysis] = useState<any[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -612,7 +614,13 @@ function App() {
   const addToSquad = (player: Player) => {
     if (!canAddPlayer(player)) return
     
-    setMySquad([...mySquad, {
+    // Find the first available slot for this position
+    const positionPlayers = mySquad.filter(p => p.position === player.position)
+    const maxSlots = POSITION_LIMITS[player.position] || 0
+    let slotIndex = positionPlayers.length
+    if (slotIndex >= maxSlots) slotIndex = maxSlots - 1
+    
+    const newPlayer: SquadPlayer = {
       id: player.id,
       name: player.name,
       position: player.position,
@@ -621,13 +629,19 @@ function App() {
       team: player.team,
       rotation_risk: player.rotation_risk,
       european_comp: player.european_comp,
-    }])
+    }
+    
+    setMySquad([...mySquad, newPlayer])
+    setPlayerSlotPositions(new Map(playerSlotPositions.set(player.id, { position: player.position, slotIndex })))
     setSearchQuery('')
     setSearchResults([])
   }
 
   const removeFromSquad = (playerId: number) => {
     setMySquad(mySquad.filter(p => p.id !== playerId))
+    const newMap = new Map(playerSlotPositions)
+    newMap.delete(playerId)
+    setPlayerSlotPositions(newMap)
   }
 
   const updateSquadPrice = (playerId: number, newPrice: number) => {
@@ -1040,28 +1054,56 @@ function App() {
 
   // Render transfers pitch with empty slots based on current squad
   const renderTransfersPitch = () => {
-    // Use standard FPL formation (3-5-2) to show all slots
-    const formation = { def: 5, mid: 5, fwd: 3, gk: 1 }
+    // Use standard FPL formation (3-5-2) to show all slots - 2 GKs allowed
+    const formation = { def: 5, mid: 5, fwd: 3, gk: 2 }
 
-    // Group current squad by position
-    const byPosition = {
-      GK: mySquad.filter(p => p.position === 'GK'),
-      DEF: mySquad.filter(p => p.position === 'DEF'),
-      MID: mySquad.filter(p => p.position === 'MID'),
-      FWD: mySquad.filter(p => p.position === 'FWD'),
+    // Group current squad by position and maintain slot positions
+    // Create slot-based structure to preserve positions when removing players
+    const getSlotsForPosition = (position: string, maxSlots: number) => {
+      const players = mySquad.filter(p => p.position === position)
+      const slots: (SquadPlayer | null)[] = new Array(maxSlots).fill(null)
+      const pendingUpdates = new Map<number, { position: string; slotIndex: number }>()
+      
+      // Fill slots based on stored slot positions, preserving positions when players are removed
+      players.forEach((player) => {
+        const slotInfo = playerSlotPositions.get(player.id)
+        if (slotInfo && slotInfo.slotIndex < maxSlots && slots[slotInfo.slotIndex] === null) {
+          // Use stored slot position if available
+          slots[slotInfo.slotIndex] = player
+        } else {
+          // If no stored position or slot is taken, find first available slot
+          for (let i = 0; i < maxSlots; i++) {
+            if (slots[i] === null) {
+              slots[i] = player
+              // Track pending update (will be applied after render)
+              if (!slotInfo || slotInfo.slotIndex !== i) {
+                pendingUpdates.set(player.id, { position, slotIndex: i })
+              }
+              break
+            }
+          }
+        }
+      })
+      
+      // Apply pending updates after render completes
+      if (pendingUpdates.size > 0) {
+        setTimeout(() => {
+          const newMap = new Map(playerSlotPositions)
+          pendingUpdates.forEach((value, key) => {
+            newMap.set(key, value)
+          })
+          setPlayerSlotPositions(newMap)
+        }, 0)
+      }
+      
+      return slots
     }
 
-    // Create arrays with empty slots
-    const renderRow = (players: any[], expectedCount: number, position: string) => {
-      const slots: any[] = []
-      for (let i = 0; i < expectedCount; i++) {
-        if (i < players.length) {
-          slots.push(players[i])
-        } else {
-          slots.push(null) // null indicates empty slot
-        }
-      }
-      return slots
+    const byPosition = {
+      GK: getSlotsForPosition('GK', formation.gk),
+      DEF: getSlotsForPosition('DEF', formation.def),
+      MID: getSlotsForPosition('MID', formation.mid),
+      FWD: getSlotsForPosition('FWD', formation.fwd),
     }
 
     const handleSlotClick = (position: string) => {
@@ -1078,13 +1120,13 @@ function App() {
         <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
           {/* Goalkeeper (TOP) */}
           <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-            {renderRow(byPosition.GK, 1, 'GK').map((slot, idx) => {
+            {byPosition.GK.map((slot, idx) => {
               const isEmpty = slot === null
               const isFull = isPositionFull('GK')
               return (
                 <div 
                   key={`gk-${idx}`} 
-                  onClick={() => !isEmpty && !isFull && handleSlotClick('GK')} 
+                  onClick={() => isEmpty && !isFull && handleSlotClick('GK')} 
                   className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                   title={isEmpty && !isFull ? 'Click to search for GK players' : isEmpty && isFull ? 'GK position full' : ''}
                 >
@@ -1096,7 +1138,7 @@ function App() {
 
           {/* Defenders */}
           <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {renderRow(byPosition.DEF, formation.def, 'DEF').map((slot, idx) => {
+            {byPosition.DEF.map((slot, idx) => {
               const isEmpty = slot === null
               const isFull = isPositionFull('DEF')
               return (
@@ -1114,7 +1156,7 @@ function App() {
 
           {/* Midfielders */}
           <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {renderRow(byPosition.MID, formation.mid, 'MID').map((slot, idx) => {
+            {byPosition.MID.map((slot, idx) => {
               const isEmpty = slot === null
               const isFull = isPositionFull('MID')
               return (
@@ -1132,7 +1174,7 @@ function App() {
 
           {/* Forwards (BOTTOM) */}
           <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-            {renderRow(byPosition.FWD, formation.fwd, 'FWD').map((slot, idx) => {
+            {byPosition.FWD.map((slot, idx) => {
               const isEmpty = slot === null
               const isFull = isPositionFull('FWD')
               return (
