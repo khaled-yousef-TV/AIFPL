@@ -742,7 +742,7 @@ function App() {
   }
 
   // Render a single player pill (uniform size)
-  const renderPlayerPill = (player: any | null, isEmpty: boolean = false) => {
+  const renderPlayerPill = (player: any | null, isEmpty: boolean = false, showRemoveButton: boolean = false) => {
     const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
     
     if (isEmpty || !player) {
@@ -755,7 +755,7 @@ function App() {
 
     return (
       <div
-        className={`${pillClasses} ${
+        className={`${pillClasses} relative ${
           player.is_captain 
             ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
             : player.is_vice_captain
@@ -765,6 +765,19 @@ function App() {
             : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
         }`}
       >
+        {/* Remove button - top right */}
+        {showRemoveButton && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              removeFromSquad(player.id)
+            }}
+            className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-500/80 hover:bg-red-500 text-white opacity-80 hover:opacity-100 transition-opacity z-10"
+            title="Remove player"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
         <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
           {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
           {player.is_vice_captain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
@@ -1127,7 +1140,7 @@ function App() {
                   className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                   title={isEmpty && !isFull ? 'Click to search for GK players' : isEmpty && isFull ? 'GK position full' : ''}
                 >
-                  {renderPlayerPill(slot, isEmpty)}
+                  {renderPlayerPill(slot, isEmpty, true)}
                 </div>
               )
             })}
@@ -1145,7 +1158,7 @@ function App() {
                   className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                   title={isEmpty && !isFull ? 'Click to search for DEF players' : isEmpty && isFull ? 'DEF position full' : ''}
                 >
-                  {renderPlayerPill(slot, isEmpty)}
+                  {renderPlayerPill(slot, isEmpty, true)}
                 </div>
               )
             })}
@@ -1163,7 +1176,7 @@ function App() {
                   className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                   title={isEmpty && !isFull ? 'Click to search for MID players' : isEmpty && isFull ? 'MID position full' : ''}
                 >
-                  {renderPlayerPill(slot, isEmpty)}
+                  {renderPlayerPill(slot, isEmpty, true)}
                 </div>
               )
             })}
@@ -1181,7 +1194,7 @@ function App() {
                   className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                   title={isEmpty && !isFull ? 'Click to search for FWD players' : isEmpty && isFull ? 'FWD position full' : ''}
                 >
-                  {renderPlayerPill(slot, isEmpty)}
+                  {renderPlayerPill(slot, isEmpty, true)}
                 </div>
               )
             })}
