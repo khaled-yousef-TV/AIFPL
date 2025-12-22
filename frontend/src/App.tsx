@@ -383,6 +383,11 @@ function App() {
       setBankInput(String(squadData.bank ?? 0))
       setFreeTransfers(squadData.freeTransfers ?? 1)
       setSaveName(data.name || 'My Squad')
+      
+      // Reset view when loading a new squad
+      setWildcardPlan(null)
+      setTransferSuggestions([])
+      setSquadAnalysis([])
     } catch (err) {
       console.error('Failed to load saved squad:', err)
       alert('Failed to load saved squad. Please try again.')
@@ -1904,14 +1909,76 @@ function App() {
                   <div>
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
-                      {mySquad.length > 0 && (
-                        <button 
-                          onClick={() => setMySquad([])}
-                          className="text-xs text-red-400 hover:text-red-300"
+                      <div className="flex items-center gap-3">
+                        {/* Generate Wildcard/Suggestions Button */}
+                        <button
+                          onClick={async () => {
+                            if (mySquad.length < 15) {
+                              setError('Please add all 15 players to your squad')
+                              return
+                            }
+                            setError(null)
+                            
+                            if (freeTransfers <= 3) {
+                              // Quick Transfers
+                              await getTransferSuggestions()
+                            } else {
+                              // Wildcard
+                              setWildcardLoading(true)
+                              setTransferSuggestions([])
+                              try {
+                                const res = await fetch(`${API_BASE}/api/wildcard`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    squad: mySquad,
+                                    bank: bank,
+                                    free_transfers: freeTransfers,
+                                  }),
+                                })
+                                if (!res.ok) {
+                                  const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }))
+                                  throw new Error(errorData.detail || `HTTP ${res.status}`)
+                                }
+                                const data = await res.json()
+                                setWildcardPlan(data)
+                              } catch (err) {
+                                console.error('Wildcard error:', err)
+                                setError(err instanceof Error ? err.message : 'Failed to generate wildcard plan')
+                                setWildcardPlan(null)
+                              } finally {
+                                setWildcardLoading(false)
+                              }
+                            }
+                          }}
+                          disabled={mySquad.length < 15 || transferLoading || wildcardLoading}
+                          title={mySquad.length < 15 ? `Squad incomplete (${mySquad.length}/15 players). Add all 15 players to generate suggestions.` : ''}
+                          className={`btn text-xs sm:text-sm transition-colors duration-300 ${
+                            mySquad.length < 15
+                              ? 'bg-gray-600 text-gray-400 cursor-not-allowed border-gray-500'
+                              : freeTransfers >= 4 
+                              ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500' 
+                              : 'btn-primary'
+                          }`}
                         >
-                          Clear All
+                          {(transferLoading || wildcardLoading) ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4 animate-spin inline mr-1 sm:mr-2" />
+                              <span className="hidden sm:inline">Loading...</span>
+                            </>
+                          ) : (
+                            freeTransfers <= 3 ? 'Get Suggestions' : 'Generate Wildcard'
+                          )}
                         </button>
-                      )}
+                        {mySquad.length > 0 && (
+                          <button 
+                            onClick={() => setMySquad([])}
+                            className="text-xs text-red-400 hover:text-red-300"
+                          >
+                            Clear All
+                          </button>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="mb-4">
@@ -2024,62 +2091,6 @@ function App() {
                     ))}
                   </select>
                 </div>
-                <button
-                  onClick={async () => {
-                    if (mySquad.length < 11) {
-                      setError('Please add at least 11 players to your squad')
-                      return
-                    }
-                    setError(null)
-                    
-                    if (freeTransfers <= 3) {
-                      // Quick Transfers
-                      await getTransferSuggestions()
-                    } else {
-                      // Wildcard
-                      setWildcardLoading(true)
-                      setTransferSuggestions([])
-                      try {
-                        const res = await fetch(`${API_BASE}/api/wildcard`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            squad: mySquad,
-                            bank: bank,
-                            free_transfers: freeTransfers,
-                          }),
-                        })
-                        if (!res.ok) {
-                          const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }))
-                          throw new Error(errorData.detail || `HTTP ${res.status}`)
-                        }
-                        const data = await res.json()
-                        setWildcardPlan(data)
-                      } catch (err) {
-                        console.error('Wildcard error:', err)
-                        setError(err instanceof Error ? err.message : 'Failed to generate wildcard plan')
-                        setWildcardPlan(null)
-                      } finally {
-                        setWildcardLoading(false)
-                      }
-                    }
-                  }}
-                  disabled={mySquad.length < 11 || transferLoading || wildcardLoading}
-                  className={`btn sm:ml-auto w-full sm:w-auto text-sm sm:text-base transition-colors duration-300 ${
-                    freeTransfers >= 4 
-                      ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500' 
-                      : 'btn-primary'
-                  }`}
-                >
-                  {(transferLoading || wildcardLoading) ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />
-                      Loading...
-                    </>
-                  ) : (
-                    freeTransfers <= 3 ? 'Get Suggestions' : 'Generate Wildcard'
-                  )}
-                </button>
               </div>
             </div>
             
