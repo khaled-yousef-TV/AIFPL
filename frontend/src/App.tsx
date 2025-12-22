@@ -681,7 +681,15 @@ function App() {
       
       // Scroll to results after a short delay to ensure DOM is updated
       setTimeout(() => {
-        resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        if (resultsSectionRef.current) {
+          const element = resultsSectionRef.current
+          const elementPosition = element.getBoundingClientRect().top + window.pageYOffset
+          const offsetPosition = elementPosition - 100 // Scroll 100px above to show more content
+          window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+          })
+        }
       }, 100)
     } catch (err) {
       console.error('Transfer suggestion error:', err)
@@ -1804,7 +1812,15 @@ function App() {
                                 
                                 // Scroll to results after a short delay to ensure DOM is updated
                                 setTimeout(() => {
-                                  resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                  if (resultsSectionRef.current) {
+                                    const element = resultsSectionRef.current
+                                    const elementPosition = element.getBoundingClientRect().top + window.pageYOffset
+                                    const offsetPosition = elementPosition - 100 // Scroll 100px above to show more content
+                                    window.scrollTo({
+                                      top: offsetPosition,
+                                      behavior: 'smooth'
+                                    })
+                                  }
                                 }, 100)
                               } catch (err) {
                                 console.error('Wildcard error:', err)
