@@ -771,7 +771,7 @@ function App() {
             <div className="flex-1 min-w-0">
               <h1 className="font-bold text-sm leading-tight">FPL Squad Suggester</h1>
               <p className="text-[10px] text-gray-400 leading-tight">
-                {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
+                {gameweek?.next?.id ? `GW${gameweek.next.id}` : 'Loading...'}
               </p>
             </div>
           </div>
@@ -837,7 +837,7 @@ function App() {
                   </div>
                 ) : (
                   <p className="text-[10px] text-gray-400 animate-pulse">
-                    {gameweek?.next ? `GW${gameweek.next.id}` : 'Loading...'}
+                    {gameweek?.next?.id ? `GW${gameweek.next.id}` : 'Loading...'}
                   </p>
                 )}
               </div>
