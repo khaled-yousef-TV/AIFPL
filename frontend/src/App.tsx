@@ -684,7 +684,7 @@ function App() {
         if (resultsSectionRef.current) {
           const element = resultsSectionRef.current
           const elementPosition = element.getBoundingClientRect().top + window.pageYOffset
-          const offsetPosition = elementPosition - 100 // Scroll 100px above to show more content
+          const offsetPosition = elementPosition + 100 // Scroll 100px more down to show full content
           window.scrollTo({
             top: offsetPosition,
             behavior: 'smooth'
@@ -1815,7 +1815,7 @@ function App() {
                                   if (resultsSectionRef.current) {
                                     const element = resultsSectionRef.current
                                     const elementPosition = element.getBoundingClientRect().top + window.pageYOffset
-                                    const offsetPosition = elementPosition - 100 // Scroll 100px above to show more content
+                                    const offsetPosition = elementPosition + 100 // Scroll 100px more down to show full content
                                     window.scrollTo({
                                       top: offsetPosition,
                                       behavior: 'smooth'
