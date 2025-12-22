@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
@@ -173,6 +173,9 @@ function App() {
   
   // Expanded groups for transfer suggestions
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  
+  // Ref for scrolling to results after generation
+  const resultsSectionRef = useRef<HTMLDivElement>(null)
   
   // Memoized grouped transfer suggestions
   const groupedTransferSuggestions = useMemo(() => {
@@ -675,6 +678,11 @@ function App() {
       const data = await res.json()
       setTransferSuggestions(data.suggestions || [])
       setSquadAnalysis(data.squad_analysis || [])
+      
+      // Scroll to results after a short delay to ensure DOM is updated
+      setTimeout(() => {
+        resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
     } catch (err) {
       console.error('Transfer suggestion error:', err)
     } finally {
@@ -1793,6 +1801,11 @@ function App() {
                                 }
                                 const data = await res.json()
                                 setWildcardPlan(data)
+                                
+                                // Scroll to results after a short delay to ensure DOM is updated
+                                setTimeout(() => {
+                                  resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                }, 100)
                               } catch (err) {
                                 console.error('Wildcard error:', err)
                                 setError(err instanceof Error ? err.message : 'Failed to generate wildcard plan')
@@ -1890,7 +1903,7 @@ function App() {
             
             {/* Transfer Suggestions */}
             {groupedTransferSuggestions && (
-              <div className="card">
+              <div ref={resultsSectionRef} className="card">
                 <div className="card-header">
                   <TrendingUp className="w-5 h-5 text-[#00ff87]" />
                   Transfer Suggestions
@@ -2100,7 +2113,7 @@ function App() {
             
             {/* Wildcard Results - shown when freeTransfers >= 4 */}
             {freeTransfers >= 4 && wildcardPlan && (
-              <div className="space-y-6">
+              <div ref={resultsSectionRef} className="space-y-6">
                 {/* Summary Card */}
                 <div className="card">
                   <div className="card-header">
