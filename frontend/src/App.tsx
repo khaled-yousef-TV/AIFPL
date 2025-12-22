@@ -850,7 +850,9 @@ function App() {
     beforeFormation: string,
     afterFormation: string,
     transfersOut: any[],
-    transfersIn: any[]
+    transfersIn: any[],
+    beforeBench: any[] = [],
+    afterBench: any[] = []
   ) => {
     const beforeFormationLayout = parseFormation(beforeFormation)
     const afterFormationLayout = parseFormation(afterFormation)
@@ -890,57 +892,92 @@ function App() {
       return slots
     }
 
-    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string) => (
-      <div className="flex-1">
-        <div className="text-sm font-semibold mb-3 text-center" style={{ color: isBefore ? '#f87171' : '#00ff87' }}>
-          {title}
-        </div>
-        <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
-          <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
-            {/* Goalkeeper (TOP) */}
-            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-              {renderRow(byPosition.GK, 1, 'GK', isBefore).map((slot, idx) => (
-                <div key={`gk-${idx}`}>
-                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                </div>
-              ))}
-            </div>
+    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string, bench: any[] = []) => {
+      const benchByPosition = {
+        GK: bench.filter((p: any) => p.position === 'GK'),
+        DEF: bench.filter((p: any) => p.position === 'DEF'),
+        MID: bench.filter((p: any) => p.position === 'MID'),
+        FWD: bench.filter((p: any) => p.position === 'FWD'),
+      }
+      
+      // Order bench: GK, DEF, MID, FWD
+      const orderedBench = [
+        ...benchByPosition.GK,
+        ...benchByPosition.DEF,
+        ...benchByPosition.MID,
+        ...benchByPosition.FWD,
+      ]
+      
+      return (
+        <div className="flex-1">
+          <div className="text-sm font-semibold mb-3 text-center" style={{ color: isBefore ? '#f87171' : '#00ff87' }}>
+            {title}
+          </div>
+          <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+            <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
+              {/* Goalkeeper (TOP) */}
+              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                {renderRow(byPosition.GK, 1, 'GK', isBefore).map((slot, idx) => (
+                  <div key={`gk-${idx}`}>
+                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                  </div>
+                ))}
+              </div>
 
-            {/* Defenders */}
-            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-              {renderRow(byPosition.DEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
-                <div key={`def-${idx}`}>
-                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                </div>
-              ))}
-            </div>
+              {/* Defenders */}
+              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+                {renderRow(byPosition.DEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
+                  <div key={`def-${idx}`}>
+                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                  </div>
+                ))}
+              </div>
 
-            {/* Midfielders */}
-            <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-              {renderRow(byPosition.MID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
-                <div key={`mid-${idx}`}>
-                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                </div>
-              ))}
-            </div>
+              {/* Midfielders */}
+              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+                {renderRow(byPosition.MID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
+                  <div key={`mid-${idx}`}>
+                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                  </div>
+                ))}
+              </div>
 
-            {/* Forwards (BOTTOM) */}
-            <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-              {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
-                <div key={`fwd-${idx}`}>
-                  {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                </div>
-              ))}
+              {/* Forwards (BOTTOM) */}
+              <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+                {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
+                  <div key={`fwd-${idx}`}>
+                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
+          
+          {/* Bench */}
+          {orderedBench.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs text-gray-400 mb-2 uppercase font-semibold text-center">Bench</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {orderedBench.map((player: any) => {
+                  const isTransferOut = isBefore && transferOutMap.has(player.id)
+                  const isTransferIn = !isBefore && transferInMap.has(player.id)
+                  return (
+                    <div key={player.id}>
+                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    )
+      )
+    }
 
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before')}
-        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After')}
+        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before', beforeBench)}
+        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After', afterBench)}
       </div>
     )
   }
@@ -2287,66 +2324,70 @@ function App() {
                             </div>
                 
                 {/* Kept Players Section */}
-                {wildcardPlan.kept_players && wildcardPlan.kept_players.length > 0 && (
-                  <div className="card">
-                    <div className="card-header">
-                      <Star className="w-5 h-5 text-yellow-400" />
-                      Kept Players ({wildcardPlan.kept_players.length})
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                      {wildcardPlan.kept_players.map((player: any) => (
-                        <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
-                          <div className="flex flex-col">
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="font-medium text-xs truncate">{player.name}</span>
-                              <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-gray-500">{player.team}</span>
-                              <span className="text-[10px] text-[#00ff87] font-mono">{player.predicted?.toFixed(1) || '0.0'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                            </div>
-                          </div>
-                        )}
-                
-                {/* Individual Transfer Breakdown - moved above comparison */}
-                {wildcardPlan.individual_breakdowns && wildcardPlan.individual_breakdowns.length > 0 && (
-                  <div className="card">
-                    <div className="card-header">
-                      <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
-                      Transfer Breakdown ({wildcardPlan.individual_breakdowns.length})
-                        </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {wildcardPlan.individual_breakdowns.map((transfer: any, i: number) => (
-                        <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                          <div className="flex items-center gap-1.5 mb-1.5">
-                            <span className="text-xs font-semibold text-[#00ff87]">#{i + 1}</span>
-                            <span className="text-[10px] text-red-400">OUT:</span>
-                            <span className="text-xs font-medium truncate">{transfer.out?.name}</span>
-                            <ArrowRightLeft className="w-3 h-3 text-gray-500 flex-shrink-0" />
-                            <span className="text-[10px] text-green-400">IN:</span>
-                            <span className="text-xs font-medium truncate">{transfer.in?.name}</span>
+                {/* Kept Players and Transfer Breakdown - Side by Side */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Kept Players */}
+                  {wildcardPlan.kept_players && wildcardPlan.kept_players.length > 0 && (
+                    <div className="card">
+                      <div className="card-header">
+                        <Star className="w-5 h-5 text-yellow-400" />
+                        Kept Players ({wildcardPlan.kept_players.length})
                       </div>
-                          {transfer.reason && (
-                            <div className="text-[10px] text-gray-400 leading-tight">{transfer.reason}</div>
-                          )}
-                          <div className="flex items-center gap-2 mt-1.5 text-[10px]">
-                            <span className={`${transfer.points_gain > 0 ? 'text-green-400' : 'text-gray-400'}`}>
-                              {transfer.points_gain > 0 ? '+' : ''}{transfer.points_gain} pts
-                            </span>
-                            <span className="text-gray-500">•</span>
-                            <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-gray-400'}>
-                              {transfer.cost > 0 ? '+' : ''}£{transfer.cost}m
-                            </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {wildcardPlan.kept_players.map((player: any) => (
+                          <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
+                            <div className="flex flex-col">
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="font-medium text-xs truncate">{player.name}</span>
+                                <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-gray-500">{player.team}</span>
+                                <span className="text-[10px] text-[#00ff87] font-mono">{player.predicted?.toFixed(1) || '0.0'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                        </div>
-                  ))}
+                  )}
+                  
+                  {/* Individual Transfer Breakdown */}
+                  {wildcardPlan.individual_breakdowns && wildcardPlan.individual_breakdowns.length > 0 && (
+                    <div className="card">
+                      <div className="card-header">
+                        <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+                        Transfer Breakdown ({wildcardPlan.individual_breakdowns.length})
+                      </div>
+                      <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                        {wildcardPlan.individual_breakdowns.map((transfer: any, i: number) => (
+                          <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <span className="text-xs font-semibold text-[#00ff87]">#{i + 1}</span>
+                              <span className="text-[10px] text-red-400">OUT:</span>
+                              <span className="text-xs font-medium truncate">{transfer.out?.name}</span>
+                              <ArrowRightLeft className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                              <span className="text-[10px] text-green-400">IN:</span>
+                              <span className="text-xs font-medium truncate">{transfer.in?.name}</span>
+                            </div>
+                            {transfer.reason && (
+                              <div className="text-[10px] text-gray-400 leading-tight">{transfer.reason}</div>
+                            )}
+                            <div className="flex items-center gap-2 mt-1.5 text-[10px]">
+                              <span className={`${transfer.points_gain > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                                {transfer.points_gain > 0 ? '+' : ''}{transfer.points_gain} pts
+                              </span>
+                              <span className="text-gray-500">•</span>
+                              <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-gray-400'}>
+                                {transfer.cost > 0 ? '+' : ''}£{transfer.cost}m
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
             
                 {/* Before/After Squad Comparison - Pitch Formation */}
                 {wildcardPlan.resulting_squad?.squad && (
@@ -2415,13 +2456,23 @@ function App() {
                         ...afterByPosition.FWD.slice(0, afterFormationLayout.fwd),
                       ]
                       
+                      // Construct before bench (remaining players not in starting XI)
+                      const beforeStartingXiIds = new Set(beforeStartingXi.map(p => p.id))
+                      const beforeBench = mySquad.filter((p: SquadPlayer) => !beforeStartingXiIds.has(p.id))
+                      
+                      // Construct after bench (remaining players not in starting XI)
+                      const afterStartingXiIds = new Set(afterStartingXi.map((p: any) => p.id))
+                      const afterBench = afterSquad.filter((p: any) => !afterStartingXiIds.has(p.id))
+                      
                       return renderBeforeAfterPitch(
                         beforeStartingXi,
                         afterStartingXi,
                         beforeFormation,
                         afterFormation,
                         wildcardPlan.transfers_out || [],
-                        wildcardPlan.transfers_in || []
+                        wildcardPlan.transfers_in || [],
+                        beforeBench,
+                        afterBench
                       )
                     })()}
                   </div>
