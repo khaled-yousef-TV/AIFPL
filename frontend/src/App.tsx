@@ -219,6 +219,10 @@ function App() {
   const [saveName, setSaveName] = useState<string>('My Squad')
   const [loadingSavedSquads, setLoadingSavedSquads] = useState(false)
   
+  // FPL team import
+  const [fplTeamId, setFplTeamId] = useState<string>('')
+  const [importingFplTeam, setImportingFplTeam] = useState(false)
+  
   // Removed: selectedSavedId (old localStorage-based code)
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
@@ -498,6 +502,72 @@ function App() {
       alert(err.message || 'Failed to delete squad. Please try again.')
     } finally {
       setDeletingSquad(false)
+    }
+  }
+
+  const importFplTeam = async () => {
+    const teamId = parseInt(fplTeamId.trim())
+    if (!teamId || isNaN(teamId) || teamId <= 0) {
+      alert('Please enter a valid FPL Team ID')
+      return
+    }
+    
+    setImportingFplTeam(true)
+    try {
+      // Import team from FPL
+      const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
+        throw new Error(error.detail || 'Failed to import FPL team')
+      }
+      
+      const data = await res.json()
+      const squad = data.squad || []
+      const bank = data.bank || 0
+      const teamName = data.team_name || `FPL Team ${teamId}`
+      
+      // Load the squad into the UI
+      setMySquad(squad)
+      setBank(bank)
+      setBankInput(String(bank))
+      setSaveName(teamName)
+      
+      // Save to database
+      const squadData = {
+        squad: squad,
+        bank: bank,
+        freeTransfers: freeTransfers
+      }
+      
+      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName, squad: squadData })
+      })
+      
+      if (!saveRes.ok) {
+        // If save fails, still keep the imported squad loaded
+        console.warn('Failed to save imported team to database, but squad is loaded')
+      } else {
+        // Reload saved squads and select the newly imported one
+        await loadSavedSquads()
+        setSelectedSavedName(teamName)
+      }
+      
+      // Reset view when importing a new squad
+      setWildcardPlan(null)
+      setTransferSuggestions([])
+      setSquadAnalysis([])
+      
+      // Clear the input
+      setFplTeamId('')
+      
+      alert(`Successfully imported ${teamName}!`)
+    } catch (err: any) {
+      console.error('Failed to import FPL team:', err)
+      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
+    } finally {
+      setImportingFplTeam(false)
     }
   }
 
@@ -1587,6 +1657,38 @@ function App() {
                       className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[#080811]"
                       placeholder="My Squad"
                     />
+                  </div>
+
+                  {/* FPL Team Import */}
+                  <div className="pt-3 border-t border-[#2a2a4a]">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
+                      <input
+                        type="number"
+                        value={fplTeamId}
+                        onChange={(e) => setFplTeamId(e.target.value)}
+                        disabled={importingFplTeam}
+                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="FPL Team ID"
+                      />
+                      <button
+                        onClick={importFplTeam}
+                        disabled={!fplTeamId.trim() || importingFplTeam || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {importingFplTeam ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Importing...</span>
+                          </>
+                        ) : (
+                          'Import'
+                        )}
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1.5">
+                      Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
+                    </div>
                   </div>
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">

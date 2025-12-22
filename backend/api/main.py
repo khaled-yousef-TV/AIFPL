@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from time import time
 from threading import Lock
+import requests
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -2127,6 +2128,103 @@ async def get_selected_team(gameweek: int):
     except Exception as e:
         logger.error(f"Error fetching selected team for GW{gameweek}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/import-fpl-team/{team_id}")
+async def import_fpl_team(team_id: int, gameweek: Optional[int] = None):
+    """
+    Import a team from FPL by team ID.
+    
+    Uses the public FPL API endpoint: /api/entry/{team_id}/event/{gameweek}/picks/
+    If gameweek is not provided, uses the current/next gameweek.
+    
+    Returns the squad in SquadPlayer format ready for the transfers tab.
+    """
+    try:
+        # Get gameweek (default to next/current)
+        if gameweek is None:
+            next_gw = fpl_client.get_next_gameweek()
+            if not next_gw:
+                raise HTTPException(status_code=400, detail="No gameweek found")
+            gameweek = next_gw.id
+        
+        # Fetch team picks from FPL API
+        picks_url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
+        response = requests.get(picks_url)
+        
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Team {team_id} not found or not public")
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"FPL API error: {response.status_code}")
+        
+        picks_data = response.json()
+        picks = picks_data.get("picks", [])
+        
+        if not picks:
+            raise HTTPException(status_code=404, detail=f"No team data found for team {team_id} in gameweek {gameweek}")
+        
+        # Get player and team data
+        players = fpl_client.get_players()
+        teams = fpl_client.get_teams()
+        players_by_id = {p.id: p for p in players}
+        teams_by_id = {t.id: t.short_name for t in teams}
+        
+        # Position mapping from FPL element_type to position string
+        position_map = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+        
+        # Convert picks to SquadPlayer format
+        squad = []
+        for pick in picks:
+            player_id = pick.get("element")
+            player = players_by_id.get(player_id)
+            
+            if not player:
+                logger.warning(f"Player {player_id} not found in FPL data, skipping")
+                continue
+            
+            # Get position
+            position = position_map.get(player.element_type, "MID")
+            
+            # Get selling price (picks include purchase_price, but we want current price for selling)
+            # The picks API returns purchase_price, but for transfers we need selling price
+            # We'll use current price as default, user can edit if needed
+            selling_price = player.price
+            
+            squad.append({
+                "id": player_id,
+                "name": player.web_name,
+                "position": position,
+                "price": selling_price,
+                "team": teams_by_id.get(player.team, "UNK"),
+            })
+        
+        if not squad:
+            raise HTTPException(status_code=404, detail="No valid players found in team")
+        
+        # Get bank value and team name from entry data if available
+        entry_url = f"{fpl_client.BASE_URL}/entry/{team_id}/"
+        entry_response = requests.get(entry_url)
+        bank = 0.0
+        team_name = f"FPL Team {team_id}"
+        if entry_response.status_code == 200:
+            entry_data = entry_response.json()
+            # Bank is in 0.1m units, convert to millions
+            bank = (entry_data.get("last_deadline_bank", 0) or 0) / 10.0
+            team_name = entry_data.get("name", team_name)
+        
+        return {
+            "squad": squad,
+            "bank": bank,
+            "team_id": team_id,
+            "gameweek": gameweek,
+            "team_name": team_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error importing FPL team {team_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to import team: {str(e)}")
 
 
 @app.post("/api/selected-teams")
