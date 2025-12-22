@@ -736,8 +736,55 @@ function App() {
     }
   }
 
-  // Render pitch formation view
-  const renderPitchFormation = (startingXi: any[], formation: string) => {
+  // Render a single player pill (uniform size)
+  const renderPlayerPill = (player: any | null, isEmpty: boolean = false) => {
+    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
+    
+    if (isEmpty || !player) {
+      return (
+        <div className={`${pillClasses} bg-[#0b0b14]/50 border-[#2a2a4a]/30 border-dashed opacity-50`}>
+          <div className="text-gray-500 text-[10px] text-center">Empty</div>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        className={`${pillClasses} ${
+          player.is_captain 
+            ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+            : player.rotation_risk === 'high'
+            ? 'bg-orange-500/20 border-orange-500/50'
+            : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
+        }`}
+      >
+        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
+          {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
+          {player.is_vice_captain && <span className="text-gray-400 text-[10px]">V</span>}
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+            {player.position}
+          </span>
+        </div>
+        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
+        <div className="text-[9px] text-gray-400 truncate w-full text-center mt-0.5">{player.team}</div>
+        {player.predicted !== undefined && (
+          <div className="text-[9px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
+        )}
+        {player.european_comp && (
+          <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
+            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+            'bg-blue-500/20 text-blue-400'
+          }`}>
+            {player.european_comp}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // Render pitch formation view (GK top, FWD bottom)
+  const renderPitchFormation = (startingXi: any[], formation: string, showEmptySlots: boolean = false) => {
     const formationLayout = parseFormation(formation)
     
     // Group players by position
@@ -748,152 +795,171 @@ function App() {
       FWD: startingXi.filter((p: any) => p.position === 'FWD'),
     }
 
-    return (
-      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-4 sm:p-6">
-        {/* Pitch */}
-        <div className="relative min-h-[400px] sm:min-h-[500px]">
-          {/* Forwards */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
-            {byPosition.FWD.map((player: any) => (
-              <div
-                key={player.id}
-                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
-                  player.is_captain 
-                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
-                    : player.rotation_risk === 'high'
-                    ? 'bg-orange-500/20 border-orange-500/50'
-                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
-                }`}
-              >
-                <div className="flex items-center gap-1 mb-1">
-                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
-                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                    {player.position}
-                  </span>
-                </div>
-                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
-                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
-                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-                {player.european_comp && (
-                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                    'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {player.european_comp}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
+    // Create arrays with empty slots if needed
+    const renderRow = (players: any[], expectedCount: number, position: string) => {
+      const slots: any[] = []
+      for (let i = 0; i < expectedCount; i++) {
+        if (i < players.length) {
+          slots.push(players[i])
+        } else if (showEmptySlots) {
+          slots.push(null) // null indicates empty slot
+        }
+      }
+      return slots
+    }
 
-          {/* Midfielders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6 flex-wrap">
-            {byPosition.MID.map((player: any) => (
-              <div
-                key={player.id}
-                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
-                  player.is_captain 
-                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
-                    : player.rotation_risk === 'high'
-                    ? 'bg-orange-500/20 border-orange-500/50'
-                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
-                }`}
-              >
-                <div className="flex items-center gap-1 mb-1">
-                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
-                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                    {player.position}
-                  </span>
-                </div>
-                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
-                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
-                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-                {player.european_comp && (
-                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                    'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {player.european_comp}
-                  </span>
-                )}
+    return (
+      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+        {/* Pitch - Rotated: GK top, FWD bottom */}
+        <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
+          {/* Goalkeeper (TOP) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+            {renderRow(byPosition.GK, 1, 'GK').map((slot, idx) => (
+              <div key={`gk-${idx}`}>
+                {renderPlayerPill(slot, slot === null)}
               </div>
             ))}
           </div>
 
           {/* Defenders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-4 sm:mb-6 flex-wrap">
-            {byPosition.DEF.map((player: any) => (
-              <div
-                key={player.id}
-                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
-                  player.is_captain 
-                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
-                    : player.rotation_risk === 'high'
-                    ? 'bg-orange-500/20 border-orange-500/50'
-                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
-                }`}
-              >
-                <div className="flex items-center gap-1 mb-1">
-                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
-                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                    {player.position}
-                  </span>
-                </div>
-                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
-                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
-                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-                {player.european_comp && (
-                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                    'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {player.european_comp}
-                  </span>
-                )}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {renderRow(byPosition.DEF, formationLayout.def, 'DEF').map((slot, idx) => (
+              <div key={`def-${idx}`}>
+                {renderPlayerPill(slot, slot === null)}
               </div>
             ))}
           </div>
 
-          {/* Goalkeeper */}
-          <div className="flex justify-center items-center">
-            {byPosition.GK.map((player: any) => (
-              <div
-                key={player.id}
-                className={`flex flex-col items-center p-2 sm:p-3 rounded-lg border-2 min-w-[80px] sm:min-w-[100px] transition-all ${
-                  player.is_captain 
-                    ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
-                    : player.rotation_risk === 'high'
-                    ? 'bg-orange-500/20 border-orange-500/50'
-                    : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
-                }`}
-              >
-                <div className="flex items-center gap-1 mb-1">
-                  {player.is_captain && <span className="text-yellow-400 font-bold text-xs">©</span>}
-                  {player.is_vice_captain && <span className="text-gray-400 text-xs">V</span>}
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                    {player.position}
-                  </span>
-                </div>
-                <div className="font-medium text-xs sm:text-sm text-center truncate w-full">{player.name}</div>
-                <div className="text-[10px] text-gray-400 truncate w-full text-center">{player.team}</div>
-                <div className="text-[10px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-                {player.european_comp && (
-                  <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                    'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {player.european_comp}
-                  </span>
-                )}
+          {/* Midfielders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {renderRow(byPosition.MID, formationLayout.mid, 'MID').map((slot, idx) => (
+              <div key={`mid-${idx}`}>
+                {renderPlayerPill(slot, slot === null)}
               </div>
             ))}
+          </div>
+
+          {/* Forwards (BOTTOM) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+            {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD').map((slot, idx) => (
+              <div key={`fwd-${idx}`}>
+                {renderPlayerPill(slot, slot === null)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Render transfers pitch with empty slots based on current squad
+  const renderTransfersPitch = () => {
+    // Use standard FPL formation (3-5-2) to show all slots
+    const formation = { def: 5, mid: 5, fwd: 3, gk: 1 }
+
+    // Group current squad by position
+    const byPosition = {
+      GK: mySquad.filter(p => p.position === 'GK'),
+      DEF: mySquad.filter(p => p.position === 'DEF'),
+      MID: mySquad.filter(p => p.position === 'MID'),
+      FWD: mySquad.filter(p => p.position === 'FWD'),
+    }
+
+    // Create arrays with empty slots
+    const renderRow = (players: any[], expectedCount: number, position: string) => {
+      const slots: any[] = []
+      for (let i = 0; i < expectedCount; i++) {
+        if (i < players.length) {
+          slots.push(players[i])
+        } else {
+          slots.push(null) // null indicates empty slot
+        }
+      }
+      return slots
+    }
+
+    const handleSlotClick = (position: string) => {
+      if (isPositionFull(position)) return
+      // Focus search and filter by position
+      setSearchPosition(position)
+      if (!searchQuery.trim()) {
+        searchPlayers('', position)
+      }
+    }
+
+    return (
+      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+        <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
+          {/* Goalkeeper (TOP) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+            {renderRow(byPosition.GK, 1, 'GK').map((slot, idx) => {
+              const isEmpty = slot === null
+              const isFull = isPositionFull('GK')
+              return (
+                <div 
+                  key={`gk-${idx}`} 
+                  onClick={() => !isEmpty && !isFull && handleSlotClick('GK')} 
+                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                  title={isEmpty && !isFull ? 'Click to search for GK players' : isEmpty && isFull ? 'GK position full' : ''}
+                >
+                  {renderPlayerPill(slot, isEmpty)}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Defenders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {renderRow(byPosition.DEF, formation.def, 'DEF').map((slot, idx) => {
+              const isEmpty = slot === null
+              const isFull = isPositionFull('DEF')
+              return (
+                <div 
+                  key={`def-${idx}`} 
+                  onClick={() => isEmpty && !isFull && handleSlotClick('DEF')} 
+                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                  title={isEmpty && !isFull ? 'Click to search for DEF players' : isEmpty && isFull ? 'DEF position full' : ''}
+                >
+                  {renderPlayerPill(slot, isEmpty)}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Midfielders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {renderRow(byPosition.MID, formation.mid, 'MID').map((slot, idx) => {
+              const isEmpty = slot === null
+              const isFull = isPositionFull('MID')
+              return (
+                <div 
+                  key={`mid-${idx}`} 
+                  onClick={() => isEmpty && !isFull && handleSlotClick('MID')} 
+                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                  title={isEmpty && !isFull ? 'Click to search for MID players' : isEmpty && isFull ? 'MID position full' : ''}
+                >
+                  {renderPlayerPill(slot, isEmpty)}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Forwards (BOTTOM) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+            {renderRow(byPosition.FWD, formation.fwd, 'FWD').map((slot, idx) => {
+              const isEmpty = slot === null
+              const isFull = isPositionFull('FWD')
+              return (
+                <div 
+                  key={`fwd-${idx}`} 
+                  onClick={() => isEmpty && !isFull && handleSlotClick('FWD')} 
+                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                  title={isEmpty && !isFull ? 'Click to search for FWD players' : isEmpty && isFull ? 'FWD position full' : ''}
+                >
+                  {renderPlayerPill(slot, isEmpty)}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -1609,7 +1675,7 @@ function App() {
                   )}
                 </div>
                 
-                {/* Current Squad */}
+                {/* Current Squad - Pitch Formation */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
@@ -1623,71 +1689,57 @@ function App() {
                     )}
                   </div>
                   
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                  <div className="mb-4">
                     <div className="text-xs text-gray-500 mb-2">
                       Prices from search are <span className="text-gray-300">current FPL prices</span>. Your in-game
                       <span className="text-gray-300"> selling price</span> can be different (e.g. you bought before a price rise).
-                      Edit the £ value below to match your selling price.
+                      Click a player to edit price or remove.
                     </div>
-                    {['GK', 'DEF', 'MID', 'FWD'].map(pos => {
-                      const posPlayers = mySquad.filter(p => p.position === pos)
-                      const limit = POSITION_LIMITS[pos] || 0
-                      const isFull = posPlayers.length >= limit
-                      return (
-                        <div key={pos}>
-                          <div className={`text-xs mb-1 ${
-                            isFull ? 'text-orange-400 font-medium' : 'text-gray-500'
-                          }`}>
-                            {pos} ({posPlayers.length}/{limit})
-                            {isFull && <span className="ml-1 text-[10px]">• Full</span>}
-                          </div>
-                          {posPlayers.map(player => (
-                            <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
-                              <div className="flex items-center gap-2">
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-                                  {player.position}
-                                </span>
-                                <span className="text-sm">{player.name}</span>
-                                <span className="text-xs text-gray-500">{player.team}</span>
-                                {player.european_comp && (
-                                  <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
-                                    player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-                                    player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                    'bg-blue-500/20 text-blue-400'
-                                  }`}>
-                                    {player.european_comp}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
-                                  <span>£</span>
-                                  <input
-                                    type="number"
-                                    step="0.1"
-                                    min="0"
-                                    value={Number.isFinite(player.price) ? player.price : 0}
-                                    onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
-                                    className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
-                                  />
-                                  <span>m</span>
-                                </div>
-                                <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })}
-                    
-                    {mySquad.length === 0 && (
-                      <div className="text-center text-gray-500 py-8">
-                        Search and add players to your squad
-                      </div>
-                    )}
+                    {renderTransfersPitch()}
                   </div>
+
+                  {/* Player list for editing prices */}
+                  {mySquad.length > 0 && (
+                    <div className="space-y-2 max-h-60 overflow-y-auto border-t border-[#2a2a4a] pt-4">
+                      {mySquad.map(player => (
+                        <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+                              {player.position}
+                            </span>
+                            <span className="text-sm">{player.name}</span>
+                            <span className="text-xs text-gray-500">{player.team}</span>
+                            {player.european_comp && (
+                              <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
+                                player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                'bg-blue-500/20 text-blue-400'
+                              }`}>
+                                {player.european_comp}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
+                              <span>£</span>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                value={Number.isFinite(player.price) ? player.price : 0}
+                                onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
+                                className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
+                              />
+                              <span>m</span>
+                            </div>
+                            <button onClick={() => removeFromSquad(player.id)} className="text-red-400 hover:text-red-300">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               
