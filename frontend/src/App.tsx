@@ -1904,6 +1904,63 @@ function App() {
                   )}
                 </div>
                 
+                {/* Bank & Free Transfers - Always visible in stable position */}
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-400 whitespace-nowrap">Bank (£m)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={bankInput}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        // Allow empty string, single dot, or valid numbers
+                        if (val === '' || val === '.' || /^-?\d*\.?\d*$/.test(val)) {
+                          setBankInput(val)
+                          const numVal = parseFloat(val)
+                          if (!isNaN(numVal) && isFinite(numVal)) {
+                            setBank(numVal)
+                          } else if (val === '' || val === '.' || val === '-') {
+                            setBank(0)
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const val = e.target.value
+                        const numVal = parseFloat(val)
+                        if (isNaN(numVal) || !isFinite(numVal) || numVal < 0) {
+                          setBankInput('0')
+                          setBank(0)
+                        } else {
+                          // Preserve decimals if they exist
+                          const formatted = numVal.toString()
+                          setBankInput(formatted)
+                          setBank(numVal)
+                        }
+                      }}
+                      className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
+                    <select
+                      value={freeTransfers}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 1
+                        setFreeTransfers(val)
+                        // Clear previous results when switching
+                        setTransferSuggestions([])
+                        setWildcardPlan(null)
+                      }}
+                      className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
+                    >
+                      {Array.from({ length: 15 }, (_, i) => i + 1).map(num => (
+                        <option key={num} value={num}>{num}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
                 {/* Current Squad - Pitch Formation (only show when no results) */}
                 {!wildcardPlan && !groupedTransferSuggestions && (
                   <div>
@@ -2034,63 +2091,6 @@ function App() {
                     )}
                   </div>
                 )}
-              </div>
-              
-              {/* Bank & Free Transfers */}
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-400 whitespace-nowrap">Bank (£m)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={bankInput}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      // Allow empty string, single dot, or valid numbers
-                      if (val === '' || val === '.' || /^-?\d*\.?\d*$/.test(val)) {
-                        setBankInput(val)
-                        const numVal = parseFloat(val)
-                        if (!isNaN(numVal) && isFinite(numVal)) {
-                          setBank(numVal)
-                        } else if (val === '' || val === '.' || val === '-') {
-                          setBank(0)
-                        }
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const val = e.target.value
-                      const numVal = parseFloat(val)
-                      if (isNaN(numVal) || !isFinite(numVal) || numVal < 0) {
-                        setBankInput('0')
-                        setBank(0)
-                      } else {
-                        // Preserve decimals if they exist
-                        const formatted = numVal.toString()
-                        setBankInput(formatted)
-                        setBank(numVal)
-                      }
-                    }}
-                    className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
-                  <select
-                    value={freeTransfers}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value) || 1
-                      setFreeTransfers(val)
-                      // Clear previous results when switching
-                      setTransferSuggestions([])
-                      setWildcardPlan(null)
-                    }}
-                    className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
-                  >
-                    {Array.from({ length: 15 }, (_, i) => i + 1).map(num => (
-                      <option key={num} value={num}>{num}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
             </div>
             
