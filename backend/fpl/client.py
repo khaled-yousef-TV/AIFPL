@@ -5,6 +5,7 @@ Wrapper for the Fantasy Premier League API.
 """
 
 import logging
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import time
@@ -43,7 +44,10 @@ class FPLClient:
         # Cache
         self._bootstrap_cache: Optional[Dict[str, Any]] = None
         self._bootstrap_cache_time: Optional[datetime] = None
-        self._cache_ttl = timedelta(minutes=30)
+        # Reduced cache TTL to 5 minutes to catch player status changes (injuries, suspensions) faster
+        # Can be overridden via environment variable FPL_CACHE_TTL_MINUTES
+        cache_ttl_minutes = int(os.getenv("FPL_CACHE_TTL_MINUTES", "5"))
+        self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
         
         # Derived model caches (built from bootstrap-static)
         self._models_cache_time: Optional[datetime] = None

@@ -230,8 +230,59 @@ async def _save_daily_snapshot_async():
             logger.warning("No next gameweek found for daily snapshot save job")
             return
         
-        # Get the current combined squad suggestion
-        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        # Force refresh FPL data to get latest player status before generating squad
+        logger.info("Forcing FPL data refresh before daily snapshot generation")
+        fpl_client.get_bootstrap(force_refresh=True)
+        
+        # Get the current combined squad suggestion with refresh enabled
+        squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
+        
+        # Validate squad doesn't contain unavailable/doubtful players and regenerate if needed
+        # (max 2 attempts to avoid infinite loop)
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            invalid_players = []
+            all_player_ids = []
+            for player in squad_data.get("starting_xi", []) + squad_data.get("bench", []):
+                all_player_ids.append(player.get("id"))
+            
+            # Get fresh player data to validate
+            players = fpl_client.get_players()
+            player_dict = {p.id: p for p in players}
+            
+            for pid in all_player_ids:
+                player = player_dict.get(pid)
+                if not player:
+                    continue
+                # Check status (exclude injured, suspended, unavailable, not available, AND doubtful)
+                if player.status in [PlayerStatus.INJURED, PlayerStatus.SUSPENDED, 
+                                    PlayerStatus.UNAVAILABLE, PlayerStatus.NOT_AVAILABLE, PlayerStatus.DOUBTFUL]:
+                    invalid_players.append(f"{player.web_name} {player.second_name} (status: {player.status})")
+                    continue
+                # Check chance of playing
+                chance = player.chance_of_playing_next_round
+                if chance is not None and chance < 50:
+                    invalid_players.append(f"{player.web_name} {player.second_name} (chance: {chance}%)")
+                    continue
+                # Check news field
+                news_lower = (player.news or "").lower()
+                if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
+                    invalid_players.append(f"{player.web_name} {player.second_name} (news: {player.news[:50]})")
+            
+            if not invalid_players:
+                # Squad is valid, break out of validation loop
+                break
+            
+            if attempt < max_attempts - 1:
+                logger.warning(f"Daily snapshot contains {len(invalid_players)} invalid players: {', '.join(invalid_players)}")
+                logger.warning(f"Regenerating squad (attempt {attempt + 1}/{max_attempts})...")
+                # Force another refresh and regenerate
+                fpl_client.get_bootstrap(force_refresh=True)
+                squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
+            else:
+                # Final attempt still has invalid players - log warning but save anyway
+                logger.error(f"Daily snapshot still contains {len(invalid_players)} invalid players after {max_attempts} attempts: {', '.join(invalid_players)}")
+                logger.error("Saving snapshot anyway, but squad may contain unavailable/doubtful players")
         
         # Save daily snapshot (always create new entry)
         success = db_manager.save_daily_snapshot(next_gw.id, squad_data)
@@ -571,15 +622,23 @@ async def get_predictions(position: Optional[int] = None, top_n: int = 100):
 async def _build_squad_with_predictor(
     predictor,
     method_name: str,
-    budget: float = 100.0
+    budget: float = 100.0,
+    force_refresh: bool = False
 ) -> Dict[str, Any]:
     """Build squad using a specific predictor method."""
+    # Force refresh FPL data if requested
+    if force_refresh:
+        fpl_client.get_bootstrap(force_refresh=True)
+    
     next_gw = fpl_client.get_next_gameweek()
     gw_id = next_gw.id if next_gw else 0
     cache_key = (method_name, gw_id, round(budget, 1))
-    cached = _cache_get("squad", cache_key)
-    if cached is not None:
-        return cached
+    
+    # Skip cache if forcing refresh
+    if not force_refresh:
+        cached = _cache_get("squad", cache_key)
+        if cached is not None:
+            return cached
 
     players = fpl_client.get_players()
     teams = fpl_client.get_teams()
@@ -650,9 +709,19 @@ async def _build_squad_with_predictor(
         # Allow players with at least 1 minute (includes new signings, rotation players)
         if player.minutes < 1:
             continue
-        # Skip unavailable players (injured/suspended/not available) but allow doubtful
+        # Skip unavailable players (injured/suspended/not available/doubtful)
+        # For free hit team, we exclude doubtful players as well to ensure reliability
         if player.status in [PlayerStatus.INJURED, PlayerStatus.SUSPENDED, 
-                             PlayerStatus.UNAVAILABLE, PlayerStatus.NOT_AVAILABLE]:
+                             PlayerStatus.UNAVAILABLE, PlayerStatus.NOT_AVAILABLE, PlayerStatus.DOUBTFUL]:
+            continue
+        # Also filter by chance_of_playing_next_round - if it's None or < 50%, exclude
+        # This catches cases where FPL API status is "a" but player is actually unavailable
+        chance = player.chance_of_playing_next_round
+        if chance is not None and chance < 50:
+            continue
+        # Check news field for injury/suspension keywords (FPL sometimes doesn't update status immediately)
+        news_lower = (player.news or "").lower()
+        if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
             continue
         
         try:
@@ -789,26 +858,30 @@ async def _build_squad_with_predictor(
 # ==================== Suggested Squad ====================
 
 @app.get("/api/suggested-squad")
-async def get_suggested_squad(budget: float = 100.0, method: str = "combined"):
+async def get_suggested_squad(budget: float = 100.0, method: str = "combined", refresh: bool = False):
     """
     Get optimal suggested squad for next gameweek.
     
     Args:
         budget: Total budget in millions (default 100.0)
         method: Prediction method - "heuristic", "form", "fixture", or "combined" (default)
+        refresh: Force refresh FPL data cache (default False) - use this if player status seems stale
     """
     try:
+        # Force refresh FPL data if requested (to get latest player status)
+        if refresh:
+            fpl_client.get_bootstrap(force_refresh=True)
         if method == "heuristic":
-            return await _build_squad_with_predictor(predictor_heuristic, "Heuristic (Balanced)", budget)
+            return await _build_squad_with_predictor(predictor_heuristic, "Heuristic (Balanced)", budget, force_refresh=refresh)
         elif method == "form":
-            return await _build_squad_with_predictor(predictor_form, "Form-Focused", budget)
+            return await _build_squad_with_predictor(predictor_form, "Form-Focused", budget, force_refresh=refresh)
         elif method == "fixture":
-            return await _build_squad_with_predictor(predictor_fixture, "Fixture-Focused", budget)
+            return await _build_squad_with_predictor(predictor_fixture, "Fixture-Focused", budget, force_refresh=refresh)
         else:  # combined
             # Get predictions from all 3 methods
-            heuristic_squad = await _build_squad_with_predictor(predictor_heuristic, "Heuristic", budget)
-            form_squad = await _build_squad_with_predictor(predictor_form, "Form", budget)
-            fixture_squad = await _build_squad_with_predictor(predictor_fixture, "Fixture", budget)
+            heuristic_squad = await _build_squad_with_predictor(predictor_heuristic, "Heuristic", budget, force_refresh=refresh)
+            form_squad = await _build_squad_with_predictor(predictor_form, "Form", budget, force_refresh=refresh)
+            fixture_squad = await _build_squad_with_predictor(predictor_fixture, "Fixture", budget, force_refresh=refresh)
             
             # Average predictions for each player
             all_players = {}
@@ -1433,6 +1506,14 @@ async def get_transfer_suggestions(request: TransferRequest):
                 # Skip unavailable players (injured/suspended/not available) but allow doubtful
                 if player.status in ["i", "s", "u", "n"]:
                     continue
+                # Also filter by chance_of_playing_next_round - if it's None or < 50%, exclude
+                chance = player.chance_of_playing_next_round
+                if chance is not None and chance < 50:
+                    continue
+                # Check news field for injury/suspension keywords
+                news_lower = (player.news or "").lower()
+                if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
+                    continue
                 
                 # Allow players with at least 1 minute (includes new signings, rotation players)
                 if player.minutes < 1:
@@ -1825,6 +1906,14 @@ async def get_wildcard(request: TransferRequest):
                 continue
             
             if player.status in ["i", "s", "u", "n"]:
+                continue
+            # Also filter by chance_of_playing_next_round - if it's None or < 50%, exclude
+            chance = player.chance_of_playing_next_round
+            if chance is not None and chance < 50:
+                continue
+            # Check news field for injury/suspension keywords
+            news_lower = (player.news or "").lower()
+            if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
                 continue
             
             if player.minutes < 1:
