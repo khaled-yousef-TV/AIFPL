@@ -233,6 +233,8 @@ function App() {
   }
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
   const [loadingSelectedTeams, setLoadingSelectedTeams] = useState(false)
+  const [updatingSnapshot, setUpdatingSnapshot] = useState(false)
+  const [snapshotUpdateMessage, setSnapshotUpdateMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
@@ -357,6 +359,34 @@ function App() {
       console.error('Failed to load selected teams:', err)
     } finally {
       setLoadingSelectedTeams(false)
+    }
+  }
+
+  // Update daily snapshot manually
+  const updateDailySnapshot = async () => {
+    setUpdatingSnapshot(true)
+    setSnapshotUpdateMessage(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/daily-snapshot/update`, {
+        method: 'POST',
+      }).then(r => r.json())
+      
+      if (res.success) {
+        setSnapshotUpdateMessage({ type: 'success', text: 'Free hit team updated successfully!' })
+        // Reload teams to show the updated snapshot
+        await loadSelectedTeams()
+        // Clear message after 3 seconds
+        setTimeout(() => setSnapshotUpdateMessage(null), 3000)
+      } else {
+        setSnapshotUpdateMessage({ type: 'error', text: res.message || 'Failed to update snapshot' })
+        setTimeout(() => setSnapshotUpdateMessage(null), 5000)
+      }
+    } catch (err) {
+      console.error('Failed to update daily snapshot:', err)
+      setSnapshotUpdateMessage({ type: 'error', text: 'Failed to update snapshot. Please try again.' })
+      setTimeout(() => setSnapshotUpdateMessage(null), 5000)
+    } finally {
+      setUpdatingSnapshot(false)
     }
   }
 
@@ -2472,11 +2502,39 @@ function App() {
             <div className="space-y-6">
               <div className="card">
                 <div className="card-header">
-                  <Trophy className="w-5 h-5 text-[#00ff87]" />
-                  Free Hit of the Week
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2">
+                      <Trophy className="w-5 h-5 text-[#00ff87]" />
+                      <span>Free Hit of the Week</span>
+                    </div>
+                    <button
+                      onClick={updateDailySnapshot}
+                      disabled={updatingSnapshot}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-[#00ff87]/10 hover:bg-[#00ff87]/20 text-[#00ff87] rounded-lg border border-[#00ff87]/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                      title="Refresh free hit team with latest player status"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${updatingSnapshot ? 'animate-spin' : ''}`} />
+                      <span className="hidden sm:inline">{updatingSnapshot ? 'Updating...' : 'Refresh Now'}</span>
+                    </button>
+                  </div>
                 </div>
+                {snapshotUpdateMessage && (
+                  <div className={`mb-4 p-3 rounded-lg border ${
+                    snapshotUpdateMessage.type === 'success' 
+                      ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'
+                  }`}>
+                    <div className="flex items-center gap-2 text-sm">
+                      {snapshotUpdateMessage.type === 'success' ? (
+                        <span>✓ {snapshotUpdateMessage.text}</span>
+                      ) : (
+                        <span>✗ {snapshotUpdateMessage.text}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <p className="text-gray-400 text-sm mb-4">
-                  View your saved suggested squads. Squads are automatically saved 30 minutes before each gameweek deadline.
+                  View your saved suggested squads. Squads are automatically saved daily at midnight and 30 minutes before each gameweek deadline. Use "Refresh Now" to get the latest squad with updated player availability.
                 </p>
 
                 {Object.keys(selectedTeams).length === 0 ? (

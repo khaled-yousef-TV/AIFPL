@@ -2219,6 +2219,23 @@ async def get_selected_team(gameweek: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/daily-snapshot/update")
+async def update_daily_snapshot():
+    """
+    Manually trigger an update of the daily snapshot for the current/next gameweek.
+    This forces a refresh of FPL data and regenerates the squad with latest player status.
+    """
+    try:
+        await _save_daily_snapshot_async()
+        return {
+            "success": True,
+            "message": "Daily snapshot updated successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error updating daily snapshot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/import-fpl-team/{team_id}")
 async def import_fpl_team(team_id: int, gameweek: Optional[int] = None):
     """
