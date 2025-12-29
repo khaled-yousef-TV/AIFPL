@@ -31,11 +31,14 @@ def initialize_chips_router(client: FPLClient, engineer: FeatureEngineer):
 
 @router.get("/triple-captain")
 async def get_triple_captain_recommendations(
-    gameweek_range: int = Query(5, ge=1, le=10, description="Number of gameweeks to analyze"),
-    top_n: int = Query(20, ge=1, le=50, description="Number of top recommendations to return")
+    gameweek: Optional[int] = Query(None, description="Specific gameweek to get recommendations for. If not provided, returns all recommendations."),
+    top_n: int = Query(20, ge=1, le=50, description="Number of top recommendations to return per gameweek")
 ):
     """
     Get Triple Captain recommendations from database (calculated daily at midnight).
+    
+    If gameweek is provided, returns recommendations for that specific gameweek.
+    If not provided, returns all recommendations for all gameweeks (for tab display).
     
     Returns cached recommendations that were calculated during the daily snapshot job.
     """
@@ -48,34 +51,50 @@ async def get_triple_captain_recommendations(
         )
     
     try:
-        # Get current/next gameweek
-        next_gw = fpl_client.get_next_gameweek()
-        if not next_gw:
-            raise HTTPException(
-                status_code=404,
-                detail="No next gameweek found"
-            )
-        
-        # Get recommendations from database
         db_manager = DatabaseManager()
-        cached_recs = db_manager.get_triple_captain_recommendations(next_gw.id)
         
-        if cached_recs:
-            # Return cached recommendations
-            recommendations = cached_recs["recommendations"][:top_n]
-            return {
-                "recommendations": recommendations,
-                "gameweek_range": cached_recs["gameweek_range"],
-                "total_recommendations": len(recommendations),
-                "calculated_at": cached_recs["calculated_at"],
-                "cached": True
-            }
+        if gameweek is not None:
+            # Get recommendations for specific gameweek
+            cached_recs = db_manager.get_triple_captain_recommendations(gameweek)
+            
+            if cached_recs:
+                recommendations = cached_recs["recommendations"][:top_n]
+                return {
+                    "recommendations": recommendations,
+                    "gameweek_range": cached_recs["gameweek_range"],
+                    "total_recommendations": len(recommendations),
+                    "calculated_at": cached_recs["calculated_at"],
+                    "gameweek": cached_recs["gameweek"],
+                    "cached": True
+                }
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No Triple Captain recommendations found for GW{gameweek}."
+                )
         else:
-            # No cached recommendations found
-            raise HTTPException(
-                status_code=404,
-                detail=f"No Triple Captain recommendations found for GW{next_gw.id}. They will be calculated at midnight."
-            )
+            # Get all recommendations for all gameweeks
+            all_recs = db_manager.get_all_triple_captain_recommendations()
+            
+            if not all_recs:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No Triple Captain recommendations found. They will be calculated at midnight."
+                )
+            
+            # Format response similar to Free Hit teams structure
+            return {
+                "recommendations_by_gameweek": {
+                    rec["gameweek"]: {
+                        "gameweek": rec["gameweek"],
+                        "recommendations": rec["recommendations"][:top_n],
+                        "gameweek_range": rec["gameweek_range"],
+                        "total_recommendations": len(rec["recommendations"]),
+                        "calculated_at": rec["calculated_at"]
+                    }
+                    for rec in all_recs
+                }
+            }
     except HTTPException:
         raise
     except Exception as e:

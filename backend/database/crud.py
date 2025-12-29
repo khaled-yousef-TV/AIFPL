@@ -688,5 +688,35 @@ class DatabaseManager:
                     "calculated_at": recs.calculated_at.isoformat() if recs.calculated_at else None
                 }
             return None
+    
+    def get_all_triple_captain_recommendations(self) -> List[Dict[str, Any]]:
+        """
+        Get all Triple Captain recommendations, sorted by gameweek (newest first).
+        
+        Returns:
+            List of dictionaries with recommendations and metadata
+        """
+        with self.get_session() as session:
+            # Get the most recent recommendation for each gameweek
+            recs = session.query(TripleCaptainRecommendations).order_by(
+                TripleCaptainRecommendations.gameweek.desc(),
+                TripleCaptainRecommendations.calculated_at.desc()
+            ).all()
+            
+            # Group by gameweek and take the most recent for each
+            seen_gameweeks = set()
+            result = []
+            for rec in recs:
+                if rec.gameweek not in seen_gameweeks:
+                    seen_gameweeks.add(rec.gameweek)
+                    result.append({
+                        "gameweek": rec.gameweek,
+                        "recommendations": rec.recommendations,
+                        "gameweek_range": rec.gameweek_range,
+                        "total_recommendations": rec.total_recommendations,
+                        "calculated_at": rec.calculated_at.isoformat() if rec.calculated_at else None
+                    })
+            
+            return result
 
 
