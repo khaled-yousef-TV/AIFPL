@@ -6,7 +6,7 @@ Provides endpoints for Triple Captain, Bench Boost, and Wildcard chip optimizati
 
 import logging
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, BackgroundTasks
 from pydantic import BaseModel
 
 from fpl.client import FPLClient
@@ -105,32 +105,15 @@ async def get_triple_captain_recommendations(
         )
 
 
-@router.post("/triple-captain/calculate")
-async def calculate_triple_captain_recommendations():
+def _calculate_triple_captain_background(gameweek_id: int):
     """
-    Manually trigger calculation of Triple Captain recommendations.
-    This will calculate and save recommendations to the database.
-    Usually done automatically at midnight with the daily snapshot.
+    Background task to calculate Triple Captain recommendations.
+    This runs asynchronously so the API can return immediately.
     """
-    if not fpl_client or not feature_engineer:
-        raise HTTPException(
-            status_code=500,
-            detail="Chips router not initialized. Please ensure dependencies are set."
-        )
-    
     try:
         from database.crud import DatabaseManager
         
-        # Get current/next gameweek
-        next_gw = fpl_client.get_next_gameweek()
-        if not next_gw:
-            raise HTTPException(
-                status_code=404,
-                detail="No next gameweek found"
-            )
-        
-        # Calculate recommendations
-        logger.info(f"Manually calculating Triple Captain recommendations for GW{next_gw.id}")
+        logger.info(f"Starting background calculation of Triple Captain recommendations for GW{gameweek_id}")
         optimizer = TripleCaptainOptimizer(fpl_client, feature_engineer)
         recommendations = optimizer.get_triple_captain_recommendations(
             gameweek_range=5,
@@ -140,30 +123,60 @@ async def calculate_triple_captain_recommendations():
         # Save to database
         db_manager = DatabaseManager()
         success = db_manager.save_triple_captain_recommendations(
-            gameweek=next_gw.id,
+            gameweek=gameweek_id,
             recommendations=recommendations,
             gameweek_range=5
         )
         
         if success:
-            return {
-                "success": True,
-                "message": f"Triple Captain recommendations calculated and saved for GW{next_gw.id}",
-                "total_recommendations": len(recommendations),
-                "gameweek": next_gw.id
-            }
+            logger.info(f"Successfully calculated and saved {len(recommendations)} Triple Captain recommendations for GW{gameweek_id}")
         else:
+            logger.error(f"Failed to save Triple Captain recommendations for GW{gameweek_id} to database")
+    except Exception as e:
+        logger.error(f"Error in background Triple Captain calculation for GW{gameweek_id}: {e}", exc_info=True)
+
+
+@router.post("/triple-captain/calculate")
+async def calculate_triple_captain_recommendations(background_tasks: BackgroundTasks):
+    """
+    Manually trigger calculation of Triple Captain recommendations.
+    This will calculate and save recommendations to the database in the background.
+    Returns immediately - calculation runs asynchronously.
+    Usually done automatically at midnight with the daily snapshot.
+    """
+    if not fpl_client or not feature_engineer:
+        raise HTTPException(
+            status_code=500,
+            detail="Chips router not initialized. Please ensure dependencies are set."
+        )
+    
+    try:
+        # Get current/next gameweek
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
             raise HTTPException(
-                status_code=500,
-                detail="Failed to save recommendations to database"
+                status_code=404,
+                detail="No next gameweek found"
             )
+        
+        # Add calculation to background tasks
+        background_tasks.add_task(_calculate_triple_captain_background, next_gw.id)
+        
+        logger.info(f"Queued Triple Captain calculation for GW{next_gw.id} (running in background)")
+        
+        return {
+            "success": True,
+            "message": f"Triple Captain calculation started for GW{next_gw.id}. Results will be available shortly.",
+            "gameweek": next_gw.id,
+            "status": "processing"
+        }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error calculating Triple Captain recommendations: {e}", exc_info=True)
+        logger.error(f"Error queuing Triple Captain calculation: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to calculate Triple Captain recommendations: {str(e)}"
+            detail=f"Failed to queue Triple Captain calculation: {str(e)}"
         )
 
 

@@ -148,10 +148,10 @@ function App() {
   const [calculatingTripleCaptain, setCalculatingTripleCaptain] = useState(false)
   const [tcCalculationMessage, setTcCalculationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedTcGameweekTab, setSelectedTcGameweekTab] = useState<number | null>(null)
+  const [tcPollingInterval, setTcPollingInterval] = useState<NodeJS.Timeout | null>(null)
   
   // AbortController refs for cleanup
   const tcAbortControllerRef = useRef<AbortController | null>(null)
-  const tcCalculateAbortControllerRef = useRef<AbortController | null>(null)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
@@ -400,62 +400,68 @@ function App() {
   }
 
   const calculateTripleCaptain = async () => {
-    // Cancel any existing calculation
-    if (tcCalculateAbortControllerRef.current) {
-      tcCalculateAbortControllerRef.current.abort()
-    }
-    
-    // Create new AbortController
-    const abortController = new AbortController()
-    tcCalculateAbortControllerRef.current = abortController
-    
     setCalculatingTripleCaptain(true)
     setTcCalculationMessage(null)
     
     try {
-      // Add timeout (10 minutes max)
-      const timeoutId = setTimeout(() => {
-        abortController.abort()
-      }, 10 * 60 * 1000)
-      
       const res = await fetch(`${API_BASE}/api/chips/triple-captain/calculate`, {
         method: 'POST',
-        signal: abortController.signal,
       }).then(r => r.json())
       
-      clearTimeout(timeoutId)
-      
-      // Check if aborted
-      if (abortController.signal.aborted) {
-        return
-      }
-      
       if (res.success) {
-        setTcCalculationMessage({ type: 'success', text: `Triple Captain recommendations calculated successfully! (${res.recommendations_count} recommendations)` })
-        // Reload recommendations to show the newly calculated ones
-        setTripleCaptainRecs({})
-        setSelectedTcGameweekTab(null)
-        await ensureTripleCaptainLoaded()
-        // Clear message after 5 seconds
-        setTimeout(() => setTcCalculationMessage(null), 5000)
+        setTcCalculationMessage({ 
+          type: 'success', 
+          text: 'Calculation started! It will run in the background. Check back in a few minutes or refresh the page.' 
+        })
+        // Reset loading state immediately - calculation is running in background
+        setCalculatingTripleCaptain(false)
+        
+        // Start polling for results (check every 10 seconds, max 5 minutes)
+        let pollCount = 0
+        const maxPolls = 30 // 30 * 10 seconds = 5 minutes max
+        
+        const pollInterval = setInterval(async () => {
+          pollCount++
+          
+          // Force reload recommendations
+          setTripleCaptainRecs({})
+          setSelectedTcGameweekTab(null)
+          await ensureTripleCaptainLoaded()
+          
+          // Check if we got results
+          if (Object.keys(tripleCaptainRecs).length > 0 || pollCount >= maxPolls) {
+            clearInterval(pollInterval)
+            if (Object.keys(tripleCaptainRecs).length > 0) {
+              setTcCalculationMessage({ 
+                type: 'success', 
+                text: 'Calculation complete! Recommendations are now available.' 
+              })
+            } else {
+              setTcCalculationMessage({ 
+                type: 'error', 
+                text: 'Calculation is taking longer than expected. Please refresh the page in a few minutes.' 
+              })
+            }
+            setTimeout(() => setTcCalculationMessage(null), 10000)
+          }
+        }, 10000) // Poll every 10 seconds
+        
+        // Clear message after showing it for a bit
+        setTimeout(() => {
+          if (pollCount < maxPolls) {
+            setTcCalculationMessage(null)
+          }
+        }, 8000)
       } else {
-        setTcCalculationMessage({ type: 'error', text: res.message || 'Failed to calculate recommendations' })
+        setTcCalculationMessage({ type: 'error', text: res.message || 'Failed to start calculation' })
+        setCalculatingTripleCaptain(false)
         setTimeout(() => setTcCalculationMessage(null), 5000)
       }
     } catch (err: any) {
-      // Don't show error if it was aborted (user navigated away)
-      if (err.name === 'AbortError' || abortController.signal.aborted) {
-        return
-      }
-      console.error('Error calculating Triple Captain:', err)
-      setTcCalculationMessage({ type: 'error', text: 'Failed to calculate recommendations. This may take a few minutes. Please try again.' })
+      console.error('Error starting Triple Captain calculation:', err)
+      setTcCalculationMessage({ type: 'error', text: 'Failed to start calculation. Please try again.' })
+      setCalculatingTripleCaptain(false)
       setTimeout(() => setTcCalculationMessage(null), 5000)
-    } finally {
-      // Only reset if not aborted
-      if (!abortController.signal.aborted) {
-        setCalculatingTripleCaptain(false)
-      }
-      tcCalculateAbortControllerRef.current = null
     }
   }
 
@@ -2917,7 +2923,7 @@ function App() {
                     <strong className="text-gray-400">Haul Probability:</strong> The probability (0-100%) that a player will score 15+ points in a gameweek, calculated using Monte Carlo simulation based on expected goals (xG), expected assists (xA), clean sheet probability, and bonus points. Higher probability = better Triple Captain opportunity.
                   </span>
                   <span className="block mt-2 text-xs text-gray-500">
-                    <strong className="text-gray-400">Expected Pts:</strong> The average (mean) points a player is expected to score in that gameweek, calculated from 10,000 Monte Carlo simulations. For Double Gameweeks (DGW), this is the sum of points from both fixtures. This gives you an idea of the player's point potential beyond just the haul probability.
+                    <strong className="text-gray-400">Expected Pts:</strong> The average (mean) <strong>base points</strong> a player is expected to score in that gameweek (NOT tripled). With Triple Captain chip, these points are multiplied by 3. For Double Gameweeks (DGW), this is the sum of points from both fixtures. Example: 25 base points = 75 points with Triple Captain.
                   </span>
                   <span className="block mt-1 text-xs">
                     Recommendations are calculated daily at midnight and cached for fast access.
