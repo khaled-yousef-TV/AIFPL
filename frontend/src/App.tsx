@@ -416,11 +416,11 @@ function App() {
         // Reset loading state immediately - calculation is running in background
         setCalculatingTripleCaptain(false)
         
-        // Start polling for results (check every 10 seconds, max 5 minutes)
+        // Start polling for results (check every 10 seconds, max 1 hour)
         let pollCount = 0
-        const maxPolls = 30 // 30 * 10 seconds = 5 minutes max
+        const maxPolls = 360 // 360 * 10 seconds = 60 minutes (1 hour) max
         
-        const pollInterval = setInterval(async () => {
+        const interval = setInterval(async () => {
           pollCount++
           
           // Force reload recommendations
@@ -430,7 +430,8 @@ function App() {
           
           // Check if we got results
           if (Object.keys(tripleCaptainRecs).length > 0 || pollCount >= maxPolls) {
-            clearInterval(pollInterval)
+            clearInterval(interval)
+            setTcPollingInterval(null)
             if (Object.keys(tripleCaptainRecs).length > 0) {
               setTcCalculationMessage({ 
                 type: 'success', 
@@ -445,6 +446,8 @@ function App() {
             setTimeout(() => setTcCalculationMessage(null), 10000)
           }
         }, 10000) // Poll every 10 seconds
+        
+        setTcPollingInterval(interval)
         
         // Clear message after showing it for a bit
         setTimeout(() => {
