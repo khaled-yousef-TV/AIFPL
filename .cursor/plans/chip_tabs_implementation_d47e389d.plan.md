@@ -1,6 +1,6 @@
 ---
 name: Chip Tabs Implementation
-overview: Implement three FPL chip optimization tabs (Triple Captain, Bench Boost, Wildcard) using existing XGBoost/heuristic building blocks. NOTE: LSTM is NOT available after revert - will use XGBoost/heuristic for predictions instead. Phased approach starting from simplest (TC) to most complex (WC).
+overview: "Implement three FPL chip optimization tabs (Triple Captain, Bench Boost, Wildcard) using existing XGBoost/heuristic building blocks. NOTE: LSTM is NOT available after revert - will use XGBoost/heuristic for predictions instead. Phased approach starting from simplest (TC) to most complex (WC)."
 todos: []
 ---
 
@@ -23,16 +23,16 @@ ion Plan
 ### Missing Components (Critical)
 
 - **LSTM Model**: ❌ NOT AVAILABLE - LSTM implementation was removed in revert
-  - No `backend/ml/lstm/predictor.py`
-  - No `backend/ml/lstm/model.py`
-  - Only checkpoints directory exists (empty)
-  - **Impact**: TC needs LSTM for xG/xA predictions, BB/WC need LSTM for multi-GW forecasting
+- No `backend/ml/lstm/predictor.py`
+- No `backend/ml/lstm/model.py`
+- Only checkpoints directory exists (empty)
+- **Impact**: TC needs LSTM for xG/xA predictions, BB/WC need LSTM for multi-GW forecasting
 
 ### Missing Components
 
 - **LSTM Model**: ❌ Complete LSTM implementation needed (was removed in revert)
-  - Model architecture, training, predictor - all need to be rebuilt
-  - This is a prerequisite for all chip implementations
+- Model architecture, training, predictor - all need to be rebuilt
+- This is a prerequisite for all chip implementations
 - Multi-gameweek LSTM forecasting (needed for BB and WC)
 - XGBoost static overlay integration (needed for WC)
 - Opponent Elo ratings (needed for WC seasonality)
@@ -58,10 +58,10 @@ ion Plan
 
 1. **Poisson Simulation**: Use `scipy.stats.poisson` library to simulate goals and assists independently
 
-   - Goals: `scipy.stats.poisson.rvs(lambda_xg)` where λ = xG prediction
-     - **Note**: Since LSTM is not available, use XGBoost/heuristic to get xG from `PlayerFeatures.xG` or calculate from expected_goals
-   - Assists: `scipy.stats.poisson.rvs(lambda_xa)` where λ = xA prediction
-     - **Note**: Use `PlayerFeatures.xA` or calculate from expected_assists
+- Goals: `scipy.stats.poisson.rvs(lambda_xg)` where λ = xG prediction
+    - **Note**: Since LSTM is not available, use XGBoost/heuristic to get xG from `PlayerFeatures.xG` or calculate from expected_goals
+- Assists: `scipy.stats.poisson.rvs(lambda_xa)` where λ = xA prediction
+    - **Note**: Use `PlayerFeatures.xA` or calculate from expected_assists
 - Simulate clean sheets (for DEF/GK) based on fixture difficulty
 - Calculate bonus points based on goals, assists, BPS
 
@@ -93,39 +93,42 @@ GET /api/chips/triple-captain?gameweek_range=5
 
 ### Phase 2: Bench Boost (BB) - Medium Complexity
 
-**Goal**: MILP optimization for 15-man squad (not just XI)**Prerequisites**: Phase 1 complete**Files to Create**:
+**Goal**: MILP optimization for 15-man squad (not just XI) over 3-gameweek horizon**Prerequisites**: Phase 1 complete, **LSTM base implementation required** (see "Next Steps" below)**Files to Create**:
 
 - `backend/ml/chips/bench_boost.py` - MILP optimizer
 - `backend/ml/chips/minutes_predictor.py` - Minutes probability predictor
-- **LSTM Multi-GW**: Need to implement LSTM first, then add `predict_multi_gameweek()` method (3-GW horizon)
-  - **Alternative**: Use XGBoost with rolling predictions or heuristic-based multi-GW forecast
+- **LSTM Multi-GW**: Add `predict_multi_gameweek()` method to LSTM (3-GW horizon)
 - Update `backend/api/routes/chips.py` - Add BB endpoint
 - Update `frontend/src/App.tsx` - Add BB tab
 
 **Key Implementation**:
 
-1. **Multi-GW Forecasting**: Need LSTM implementation first, then add rolling prediction method
+1. **Multi-GW LSTM Forecasting**: Rolling prediction method for 3-GW horizon
 
-   - **If LSTM available**: Use current sequence to predict GW1, append synthetic entry, predict GW2, GW3
-   - **If LSTM not available**: Use XGBoost/heuristic with fixture-based adjustments for 3-GW forecast
-   - **Fallback**: Simple heuristic: `pred_gw2 = pred_gw1 * fixture_factor_gw2`, etc.
+- **Forecast Horizon**: 3-gameweek window
+- **Prediction Logic**: Rolling predictions where:
+  - Use current sequence to predict GW1
+  - Feed GW1 predicted output back into sequence to predict GW2
+  - Feed GW2 predicted output back into sequence to predict GW3
+- **Method**: `predict_multi_gameweek(player_id, horizon=3)` in LSTM predictor
 
-2. **Minutes Predictor**: Heuristic based on form + fixture difficulty
+2. **Minutes Predictor**: Ensures bench players have >75% start probability
 
-- `xMins = (form / 10) * (1 - (FDR-1)/5) * availability`
-- Filter bench players: `xMins > 0.75`
+- Heuristic based on form + fixture difficulty + availability
+- Formula: `xMins = (form / 10) * (1 - (FDR-1)/5) * availability`
+- **Critical**: Filter bench players: `xMins > 0.75` (75% start probability minimum)
 
-3. **MILP Optimizer**: Use PuLP
+3. **MILP Optimizer**: Use PuLP for 15-man squad optimization
 
-- Decision variables: `x_i` (selected), `start_i` (XI), `bench_i` (bench)
-- Objective: `max ∑(xP_i * x_i)` where xP_i is 3-GW sum
+- **Decision variables**: `x_i` (selected), `start_i` (XI), `bench_i` (bench)
+- **Objective**: `max ∑(xP_i * x_i)` where xP_i is **3-GW sum** of predicted points
 - **Strict 15-man Squad Constraints**:
-- Exactly 2 Goalkeepers (GKs)
-- Exactly 5 Defenders (DEFs)
-- Exactly 5 Midfielders (MIDs)
-- Exactly 3 Forwards (FWDs)
-- Total: 15 players (2 + 5 + 5 + 3 = 15)
-- Additional constraints: Budget, max 3 per team, bench minutes (>75%)
+  - Exactly 2 Goalkeepers (GKs): `∑x_i for position=GK == 2`
+  - Exactly 5 Defenders (DEFs): `∑x_i for position=DEF == 5`
+  - Exactly 5 Midfielders (MIDs): `∑x_i for position=MID == 5`
+  - Exactly 3 Forwards (FWDs): `∑x_i for position=FWD == 3`
+  - Total: 15 players (2 + 5 + 5 + 3 = 15)
+- **Additional constraints**: Budget, max 3 per team, bench minutes (>75%)
 
 **Dependencies to Add**:
 
@@ -142,44 +145,53 @@ Body: { budget: 100.0, gameweek_range: 3 }
 
 ### Phase 3: Wildcard (WC) - Most Complex
 
-**Goal**: 8-gameweek optimization with LSTM+XGBoost overlay**Prerequisites**: Phase 2 complete (multi-GW LSTM working)**Files to Create**:
+**Goal**: 8-gameweek optimization with LSTM+XGBoost hybrid overlay**Prerequisites**: Phase 2 complete (3-GW LSTM working), **LSTM base implementation required** (see "Next Steps" below)**Files to Create**:
 
-- `backend/ml/chips/wildcard_predictor.py` - LSTM + XGBoost integration (or XGBoost-only if LSTM unavailable)
+- `backend/ml/chips/wildcard_predictor.py` - LSTM + XGBoost hybrid predictor
 - `backend/ml/chips/wildcard_optimizer.py` - MILP optimizer for 8-GW
 - `backend/ml/chips/fdr_overlay.py` - FDR adjustment calculations
 - `backend/ml/chips/transfer_decay.py` - Transfer decay logic
 - `backend/ml/chips/elo_ratings.py` - Elo rating system (optional for MVP)
-- **LSTM 8-GW**: Need LSTM implementation first, then extend to 8-GW forecasting
-  - **Alternative**: Use XGBoost with fixture-based multi-GW forecast
+- **LSTM 8-GW**: Extend `predict_multi_gameweek()` to support `horizon=8`
 - Update `backend/api/routes/chips.py` - Add WC endpoint
 - Update `frontend/src/App.tsx` - Add WC tab
 
 **Key Implementation**:
 
-1. **8-GW LSTM Forecasting**: Extend rolling predictions to 8 gameweeks
+1. **8-GW LSTM Forecasting**: Extended rolling predictions to 8 gameweeks
 
-- Modify `predict_multi_gameweek()` to support `horizon=8`
+- **Extended Horizon**: 8-gameweek forecast using same rolling prediction method
+- **Method**: Extend `predict_multi_gameweek()` to support `horizon=8`
+- **Logic**: Same rolling approach as 3-GW, but extended to 8 gameweeks
 
-2. **XGBoost Static Overlay**: Create `WildcardPredictor` class
+2. **Hybrid Overlay (WildcardPredictor)**: Combine LSTM temporal + XGBoost static features
 
-- Get LSTM 8-GW forecast (temporal patterns)
-- Get XGBoost single prediction (static features)
-- Calculate 8-GW average FDR
-- Combine: `0.7 * LSTM + 0.3 * XGBoost` with FDR adjustment
-- FDR factor: `1.0 + (3.0 - avg_fdr) * 0.1` (boost for easy fixtures)
+- **LSTM Component**: Get 8-GW forecast from LSTM (temporal patterns, form, fatigue)
+- **XGBoost Component**: Get single prediction from XGBoost (static features, current form)
+- **Weighted Formula**: `0.7 × LSTM + 0.3 × XGBoost`
+  - LSTM provides 70% weight (temporal patterns are more important for long-term)
+  - XGBoost provides 30% weight (static features provide stability)
+- **FDR Adjustment**: Calculate 8-GW average FDR and apply adjustment
+  - FDR factor: `1.0 + (3.0 - avg_fdr) * 0.1` (boost for easy fixtures)
 
-3. **Transfer Decay**: Implement as multiplicative factor in MILP objective
+3. **Transfer Decay**: Multiplicative factor for long-term prediction uncertainty
 
-- Decay weights: `[0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0, 1.0]` for GW1-8
-- Formula: `Weighted_xP = xP × Decay_Weight[gw]` for each gameweek
-- Logic: Can fix GW1 issues with free transfers, GW8 issues are harder
-- Apply to objective: `max ∑(Weighted_xP_i)` where `Weighted_xP_i = sum(xP_gw × Decay_Weight[gw] for gw in 1..8)`
+- **Decay Weights**: `[0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0, 1.0]` for GW1-8
+- **Formula**: `Weighted_xP = xP × Decay_Weight[gw]` for each gameweek
+- **Logic**: 
+  - GW1 (0.8): Can fix issues with free transfers, lower weight
+  - GW2-4: Gradually increasing weight (0.85, 0.9, 0.95)
+  - GW5-8 (1.0): Full weight, harder to fix with transfers
+- **Apply to Objective**: `max ∑(Weighted_xP_i)` where `Weighted_xP_i = sum(xP_gw × Decay_Weight[gw] for gw in 1..8)`
 
 4. **MILP Optimizer**: 8-GW optimization with transfer decay
 
-- Objective: `max ∑(Weighted_xP_i * x_i)` where Weighted_xP uses multiplicative decay factor
-- Constraints: Budget ≤ Current Team Value, formation (2 GK, 5 DEF, 5 MID, 3 FWD), max 3 per team
-- Simplified approach (not full MDP for MVP)
+- **Objective**: `max ∑(Weighted_xP_i * x_i)` where Weighted_xP uses multiplicative decay factor
+- **Constraints**: 
+  - Budget ≤ Current Team Value
+  - Formation: 2 GK, 5 DEF, 5 MID, 3 FWD (15-man squad)
+  - Max 3 players per team
+- **Simplified approach** (not full MDP for MVP)
 
 5. **Elo Ratings** (Optional for MVP, Phase 3.5):
 
@@ -254,8 +266,8 @@ pulp>=2.7.0             # Phase 2 & 3: MILP solver
 - Create new router file: `backend/api/routes/chips.py`
 - Import into `backend/api/main.py`:
   ```python
-            from api.routes import chips
-            app.include_router(chips.router, prefix="/api/chips", tags=["chips"])
+              from api.routes import chips
+              app.include_router(chips.router, prefix="/api/chips", tags=["chips"])
   ```
 
 
@@ -263,9 +275,9 @@ pulp>=2.7.0             # Phase 2 & 3: MILP solver
 
 - Add to `navigationTabs` array in `frontend/src/App.tsx`:
   ```typescript
-            { id: 'triple-captain', label: 'Triple Captain', ... },
-            { id: 'bench-boost', label: 'Bench Boost', ... },
-            { id: 'wildcard', label: 'Wildcard', ... }
+              { id: 'triple-captain', label: 'Triple Captain', ... },
+              { id: 'bench-boost', label: 'Bench Boost', ... },
+              { id: 'wildcard', label: 'Wildcard', ... }
   ```
 
 - Create tab content components similar to existing tabs
@@ -339,9 +351,9 @@ pulp>=2.7.0             # Phase 2 & 3: MILP solver
 ### ❌ What We DON'T Have (Critical)
 
 - **LSTM Model**: ❌ Complete implementation missing (removed in revert)
-  - No model, no predictor, no training code
-  - Only empty checkpoints directory remains
-  - **This is a blocker for chips that need LSTM**
+- No model, no predictor, no training code
+- Only empty checkpoints directory remains
+- **This is a blocker for chips that need LSTM**
 
 ### ❌ What's Needed
 
@@ -355,20 +367,20 @@ pulp>=2.7.0             # Phase 2 & 3: MILP solver
 
 **Phase 2 (BB)**:
 
-- Multi-GW LSTM forecasting (3-GW)
-- Minutes predictor
-- MILP optimizer
-- Bench optimization logic
+- **LSTM Base Implementation**: Required prerequisite (see "Next Steps")
+- **Multi-GW LSTM Forecasting**: 3-GW rolling predictions via `predict_multi_gameweek(horizon=3)`
+- **Minutes Predictor**: Ensures bench players have >75% start probability
+- **MILP Optimizer**: Optimizes 15-man squad (2 GK, 5 DEF, 5 MID, 3 FWD) over 3-GW horizon
+- **Bench Optimization Logic**: Maximize total points for all 15 players
 
 **Phase 3 (WC)**:
 
-- **8-GW forecasting**: Implement using XGBoost/heuristic with fixture-based adjustments (LSTM not available)
-  - Use rolling predictions: `pred_gw_n = base_pred * product(fixture_factors_gw1_to_gwn)`
-- XGBoost static overlay integration (can use existing `PointsPredictor`)
-- FDR adjustment layer
-- Transfer decay constraint
-- 8-GW MILP optimizer
-- Elo ratings (optional for MVP)
+- **LSTM Base Implementation**: Required prerequisite (see "Next Steps")
+- **8-GW LSTM Forecasting**: Extended rolling predictions via `predict_multi_gameweek(horizon=8)`
+- **Hybrid Overlay**: `WildcardPredictor` combining LSTM (0.7) + XGBoost (0.3) with FDR adjustment
+- **Transfer Decay**: Multiplicative decay weights `[0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0, 1.0]` for GW1-8
+- **8-GW MILP Optimizer**: Optimize 15-man squad over 8-GW horizon with transfer decay
+- **Elo Ratings**: Optional for MVP (enables seasonality feature)
 
 **All Phases**:**All Phases**:
 
@@ -405,3 +417,58 @@ pulp>=2.7.0             # Phase 2 & 3: MILP solver
 **CRITICAL**: Implement the transfer decay as a multiplicative factor: `Weighted_xP = xP × Decay_Weight`. This should be applied to the objective function in the MILP solver.
 
 - Decay weights: `[0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0, 1.0]` for GW1-8
+- Decay weights: `[0.8, 0.85, 0.9, 0.95, 1.0, 1.0, 1.0, 1.0]` for GW1-8
+- Logic: GW1-4 have lower weights (can fix with transfers), GW5-8 have full weight (harder to fix)
+
+---
+
+## Next Steps: LSTM Base Implementation
+
+**CRITICAL PREREQUISITE**: Before implementing Phase 2 (Bench Boost) and Phase 3 (Wildcard), the base LSTM model must be implemented.
+
+### Required LSTM Components:
+
+1. **LSTM Model Architecture** (`backend/ml/lstm/model.py`)
+
+  - PyTorch LSTM layers
+  - Model training and checkpointing
+  - Model loading for inference
+
+2. **LSTM Predictor** (`backend/ml/lstm/predictor.py`)
+
+  - Single gameweek prediction: `predict_player(player_id, gameweek)`
+  - **Multi-gameweek prediction**: `predict_multi_gameweek(player_id, horizon=3)` or `horizon=8`
+  - Rolling prediction logic: Feed predicted output back into sequence for next gameweek
+
+3. **LSTM Data Processing** (`backend/ml/lstm/data_loader.py`, `backend/ml/lstm/features.py`)
+
+  - Sequence generation for training
+  - Feature extraction for inference
+
+4. **LSTM Training** (`backend/ml/lstm/train_lstm.py`)
+
+  - Training pipeline
+  - Model checkpointing
+
+### Multi-GW Prediction Method Signature:
+
+```python
+def predict_multi_gameweek(
+    self,
+    player_id: int,
+    horizon: int = 3,  # 3 for BB, 8 for WC
+    gameweek: Optional[int] = None
+) -> List[float]:
+    """
+    Predict points for multiple gameweeks using rolling predictions.
+    
+    Returns:
+        List of predicted points for each gameweek [GW1, GW2, ..., GWhorizon]
+    """
+    # 1. Get current sequence for player
+    # 2. Predict GW1 using current sequence
+    # 3. Append GW1 prediction to sequence
+    # 4. Predict GW2 using updated sequence
+    # 5. Repeat for all horizons
+    pass
+```
