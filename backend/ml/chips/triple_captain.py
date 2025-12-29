@@ -99,6 +99,13 @@ class TripleCaptainOptimizer:
                 if not features:
                     continue
                 
+                # CRITICAL FIX: xG and xA from FPL are SEASON TOTALS, not per-game
+                # Convert to per-game averages for the simulation
+                # Use minutes to estimate games played (90 minutes = 1 game)
+                games_played = max(1.0, player.minutes / 90.0)
+                xg_per_game = features.xG / games_played
+                xa_per_game = features.xA / games_played
+                
                 # Analyze each gameweek in range
                 player_recommendations = []
                 
@@ -126,10 +133,10 @@ class TripleCaptainOptimizer:
                         player.element_type, player.team, fixture, features
                     )
                     
-                    # Calculate haul probability
+                    # Calculate haul probability using PER-GAME xG/xA
                     haul_result = self.haul_calculator.calculate_haul_probability(
-                        xg=features.xG,
-                        xa=features.xA,
+                        xg=xg_per_game,  # Per-game xG, not season total!
+                        xa=xa_per_game,  # Per-game xA, not season total!
                         position=player.element_type,
                         fixture_difficulty=difficulty,
                         is_home=is_home,
