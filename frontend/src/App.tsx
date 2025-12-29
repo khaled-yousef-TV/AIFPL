@@ -809,9 +809,10 @@ function App() {
         tcAbortControllerRef.current.abort()
         tcAbortControllerRef.current = null
       }
-      if (tcCalculateAbortControllerRef.current) {
-        tcCalculateAbortControllerRef.current.abort()
-        tcCalculateAbortControllerRef.current = null
+      // Clear polling interval on unmount
+      if (tcPollingInterval) {
+        clearInterval(tcPollingInterval)
+        setTcPollingInterval(null)
       }
       // Reset loading states on unmount
       setLoadingTripleCaptain(false)
