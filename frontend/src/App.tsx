@@ -146,6 +146,8 @@ function App() {
   const [tripleCaptainRecs, setTripleCaptainRecs] = useState<any[]>([])
   const [tripleCaptainCalculatedAt, setTripleCaptainCalculatedAt] = useState<string | null>(null)
   const [loadingTripleCaptain, setLoadingTripleCaptain] = useState(false)
+  const [calculatingTripleCaptain, setCalculatingTripleCaptain] = useState(false)
+  const [tcCalculationMessage, setTcCalculationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
@@ -2747,18 +2749,44 @@ function App() {
                   <Crown className="w-5 h-5 text-purple-400" />
                   <span>Triple Captain Recommendations</span>
                 </div>
-                {tripleCaptainCalculatedAt && (
-                  <span className="text-xs text-gray-400">
-                    Calculated {new Date(tripleCaptainCalculatedAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  {tripleCaptainCalculatedAt && (
+                    <span className="text-xs text-gray-400 hidden sm:inline">
+                      Calculated {new Date(tripleCaptainCalculatedAt).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                  )}
+                  <button
+                    onClick={calculateTripleCaptain}
+                    disabled={calculatingTripleCaptain}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    title="Manually calculate Triple Captain recommendations (may take a few minutes)"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${calculatingTripleCaptain ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">{calculatingTripleCaptain ? 'Calculating...' : 'Calculate Now'}</span>
+                  </button>
+                </div>
               </div>
             </div>
+            {tcCalculationMessage && (
+              <div className={`mb-4 p-3 rounded-lg border ${
+                tcCalculationMessage.type === 'success' 
+                  ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+                  : 'bg-red-500/10 border-red-500/30 text-red-400'
+              }`}>
+                <div className="flex items-center gap-2 text-sm">
+                  {tcCalculationMessage.type === 'success' ? (
+                    <span>✓ {tcCalculationMessage.text}</span>
+                  ) : (
+                    <span>✗ {tcCalculationMessage.text}</span>
+                  )}
+                </div>
+              </div>
+            )}
             <p className="text-gray-400 text-sm mb-4">
               Find the optimal gameweek to use your Triple Captain chip. Players are ranked by peak haul probability (15+ points) across the next 5 gameweeks.
               {tripleCaptainCalculatedAt && (
