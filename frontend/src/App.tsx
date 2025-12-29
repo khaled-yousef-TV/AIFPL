@@ -411,7 +411,7 @@ function App() {
       if (res.success) {
         setTcCalculationMessage({ 
           type: 'success', 
-          text: 'Calculation started! It will run in the background. Check back in a few minutes or refresh the page.' 
+          text: 'Calculation started! It will run in the background (may take up to 20 minutes). The page will automatically update when complete.' 
         })
         // Reset loading state immediately - calculation is running in background
         setCalculatingTripleCaptain(false)
