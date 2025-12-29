@@ -5,7 +5,7 @@ Provides endpoints for Triple Captain, Bench Boost, and Wildcard chip optimizati
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -168,12 +168,14 @@ async def get_bench_boost_squad(
     )
 
 
+class WildcardRequest(BaseModel):
+    """Request model for Wildcard optimization."""
+    current_squad: Optional[List[Dict[str, Any]]] = None
+    budget: float = 100.0
+    horizon: int = 8
+
 @router.post("/wildcard")
-async def get_wildcard_squad(
-    current_squad: Optional[list] = None,
-    budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
-    horizon: int = Query(8, ge=1, le=10, description="Number of gameweeks to optimize for")
-):
+async def get_wildcard_squad(request: WildcardRequest):
     """
     Get optimized Wildcard squad.
     
