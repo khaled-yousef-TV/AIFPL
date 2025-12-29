@@ -2913,6 +2913,9 @@ function App() {
                 )}
                 <p className="text-gray-400 text-sm mb-4">
                   Find the optimal gameweek to use your Triple Captain chip. Players are ranked by peak haul probability (15+ points) across the next 5 gameweeks.
+                  <span className="block mt-2 text-xs text-gray-500">
+                    <strong className="text-gray-400">Haul Probability:</strong> The probability (0-100%) that a player will score 15+ points in a gameweek, calculated using Monte Carlo simulation based on expected goals (xG), expected assists (xA), clean sheet probability, and bonus points. Higher probability = better Triple Captain opportunity.
+                  </span>
                   <span className="block mt-1 text-xs">
                     Recommendations are calculated daily at midnight and cached for fast access.
                   </span>

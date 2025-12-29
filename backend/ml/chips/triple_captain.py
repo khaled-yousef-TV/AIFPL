@@ -167,7 +167,7 @@ class TripleCaptainOptimizer:
                     "full_name": player.full_name,
                     "team": self._get_team_name(player.team),
                     "position": self._get_position_name(player.element_type),
-                    "price": player.price / 10.0,
+                    "price": player.price,  # Already in millions (from Player.price property)
                     "form": float(player.form),
                     "peak_haul_probability": best_gw["haul_probability"],
                     "peak_gameweek": best_gw["gameweek"],
