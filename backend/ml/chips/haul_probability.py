@@ -162,21 +162,17 @@ class HaulProbabilityCalculator:
         difficulty_factor_2 = self._get_difficulty_factor(fixture_difficulty, not is_home)  # Assume away for second
         
         for _ in range(self.MONTE_CARLO_ITERATIONS):
-            total_points = 0
-            
             # Fixture 1
             adjusted_xg_1 = xg * difficulty_factor_1
             adjusted_xa_1 = xa * difficulty_factor_1
             goals_1 = poisson.rvs(adjusted_xg_1) if adjusted_xg_1 > 0 else 0
             assists_1 = poisson.rvs(adjusted_xa_1) if adjusted_xa_1 > 0 else 0
             cs_1 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_1 else 0
-            bonus_1 = self._calculate_bonus_points(goals_1, assists_1, bonus_points_base, position)
             
             points_1 = (
                 goals_1 * self.POINTS_PER_GOAL[position] +
                 assists_1 * self.POINTS_PER_ASSIST +
-                cs_1 * self.POINTS_PER_CLEAN_SHEET[position] +
-                bonus_1
+                cs_1 * self.POINTS_PER_CLEAN_SHEET[position]
             )
             
             # Fixture 2
@@ -185,16 +181,21 @@ class HaulProbabilityCalculator:
             goals_2 = poisson.rvs(adjusted_xg_2) if adjusted_xg_2 > 0 else 0
             assists_2 = poisson.rvs(adjusted_xa_2) if adjusted_xa_2 > 0 else 0
             cs_2 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_2 else 0
-            bonus_2 = self._calculate_bonus_points(goals_2, assists_2, bonus_points_base, position)
             
             points_2 = (
                 goals_2 * self.POINTS_PER_GOAL[position] +
                 assists_2 * self.POINTS_PER_ASSIST +
-                cs_2 * self.POINTS_PER_CLEAN_SHEET[position] +
-                bonus_2
+                cs_2 * self.POINTS_PER_CLEAN_SHEET[position]
             )
             
-            total_points = points_1 + points_2
+            # Bonus points are awarded per gameweek, not per match
+            # Calculate once for the entire gameweek based on total goals/assists
+            total_goals = goals_1 + goals_2
+            total_assists = assists_1 + assists_2
+            bonus_points = self._calculate_bonus_points(total_goals, total_assists, bonus_points_base, position)
+            
+            # Total points = sum of both fixtures + bonus (awarded once per gameweek)
+            total_points = points_1 + points_2 + bonus_points
             total_points_samples.append(total_points)
             
             if total_points >= self.MIN_HAUL_POINTS:
@@ -247,17 +248,31 @@ class HaulProbabilityCalculator:
         """
         Calculate bonus points based on goals, assists, and base BPS.
         
-        Simplified model: bonus points correlate with goals/assists and base BPS.
+        In FPL, bonus points (0-3) are awarded to top 3 players based on BPS.
+        This is a simplified model that estimates bonus based on performance.
         """
-        # Base bonus from BPS (scaled)
-        bonus = base_bonus * 0.3  # Rough scaling
+        # Base bonus from BPS (scaled down - most players get 0-1 bonus)
+        bonus = base_bonus * 0.2  # Reduced scaling
         
-        # Goals and assists contribute to bonus
-        if goals > 0:
-            bonus += min(goals * 0.5, 3.0)  # Cap at 3 bonus points
-        if assists > 0:
-            bonus += min(assists * 0.3, 2.0)  # Cap at 2 bonus points
+        # Goals and assists contribute to bonus, but not linearly
+        # In reality, bonus is competitive - only top performers get it
+        if goals >= 3:
+            bonus += 2.5  # Hat-trick almost guarantees 3 bonus
+        elif goals == 2:
+            bonus += 1.5  # Brace often gets 2-3 bonus
+        elif goals == 1:
+            bonus += 0.5  # Single goal might get 1 bonus if no one else performs
         
-        # Round to nearest integer (bonus points are integers)
+        if assists >= 3:
+            bonus += 1.5
+        elif assists == 2:
+            bonus += 0.8
+        elif assists == 1:
+            bonus += 0.3
+        
+        # Cap at 3 (maximum bonus points in FPL)
+        bonus = min(bonus, 3.0)
+        
+        # Round to nearest integer (bonus points are integers: 0, 1, 2, or 3)
         return round(bonus)
 
