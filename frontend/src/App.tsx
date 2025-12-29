@@ -2916,6 +2916,9 @@ function App() {
                   <span className="block mt-2 text-xs text-gray-500">
                     <strong className="text-gray-400">Haul Probability:</strong> The probability (0-100%) that a player will score 15+ points in a gameweek, calculated using Monte Carlo simulation based on expected goals (xG), expected assists (xA), clean sheet probability, and bonus points. Higher probability = better Triple Captain opportunity.
                   </span>
+                  <span className="block mt-2 text-xs text-gray-500">
+                    <strong className="text-gray-400">Expected Pts:</strong> The average (mean) points a player is expected to score in that gameweek, calculated from 10,000 Monte Carlo simulations. For Double Gameweeks (DGW), this is the sum of points from both fixtures. This gives you an idea of the player's point potential beyond just the haul probability.
+                  </span>
                   <span className="block mt-1 text-xs">
                     Recommendations are calculated daily at midnight and cached for fast access.
                   </span>
