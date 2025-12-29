@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
-    TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot, init_db
+    TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
+    TripleCaptainRecommendations, init_db
 )
 # Import SavedSquad - must be imported after other models to avoid circular imports
 try:
@@ -617,5 +618,75 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to delete saved squad ID {squad_id}: {e}")
             return False
+    
+    # ==================== Triple Captain Recommendations ====================
+    
+    def save_triple_captain_recommendations(
+        self,
+        gameweek: int,
+        recommendations: List[Dict[str, Any]],
+        gameweek_range: int = 5
+    ) -> bool:
+        """
+        Save Triple Captain recommendations for a gameweek.
+        Replaces any existing recommendations for this gameweek.
+        
+        Args:
+            gameweek: Gameweek number
+            recommendations: List of recommendation dictionaries
+            gameweek_range: Number of gameweeks analyzed
+            
+        Returns:
+            True if saved, False if error
+        """
+        try:
+            with self.get_session() as session:
+                # Delete existing recommendations for this gameweek
+                existing = session.query(TripleCaptainRecommendations).filter(
+                    TripleCaptainRecommendations.gameweek == gameweek
+                ).all()
+                for rec in existing:
+                    session.delete(rec)
+                
+                # Create new recommendations entry
+                tc_recs = TripleCaptainRecommendations(
+                    gameweek=gameweek,
+                    recommendations=recommendations,
+                    gameweek_range=gameweek_range,
+                    total_recommendations=len(recommendations),
+                    calculated_at=datetime.utcnow()
+                )
+                session.add(tc_recs)
+                session.commit()
+                logger.info(f"Saved Triple Captain recommendations for Gameweek {gameweek} ({len(recommendations)} recommendations)")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save Triple Captain recommendations for GW{gameweek}: {e}")
+            return False
+    
+    def get_triple_captain_recommendations(self, gameweek: int) -> Optional[Dict[str, Any]]:
+        """
+        Get Triple Captain recommendations for a gameweek.
+        
+        Args:
+            gameweek: Gameweek number
+            
+        Returns:
+            Dictionary with recommendations and metadata, or None if not found
+        """
+        with self.get_session() as session:
+            recs = session.query(TripleCaptainRecommendations).filter(
+                TripleCaptainRecommendations.gameweek == gameweek
+            ).order_by(TripleCaptainRecommendations.calculated_at.desc()).first()
+            
+            if recs:
+                return {
+                    "gameweek": recs.gameweek,
+                    "recommendations": recs.recommendations,
+                    "gameweek_range": recs.gameweek_range,
+                    "total_recommendations": recs.total_recommendations,
+                    "calculated_at": recs.calculated_at.isoformat() if recs.calculated_at else None
+                }
+            return None
 
 

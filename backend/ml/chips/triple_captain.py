@@ -56,17 +56,36 @@ class TripleCaptainOptimizer:
         logger.info(f"Analyzing Triple Captain options for GW{next_gw}-{end_gw}")
         
         # Get all players
-        players = self.client.get_players()
-        if not players:
+        all_players = self.client.get_players()
+        if not all_players:
             logger.error("Could not fetch players")
             return []
+        
+        # Filter players early to reduce computation:
+        # 1. Only available players
+        # 2. Minimum form threshold (>= 2.0) or minimum total points (>= 20)
+        # 3. Limit to top 200 by form/points to avoid processing all 700+ players
+        filtered_players = [
+            p for p in all_players
+            if p.status == "a" and (float(p.form) >= 2.0 or p.total_points >= 20)
+        ]
+        
+        # Sort by form (descending) and take top 200
+        filtered_players.sort(key=lambda p: float(p.form), reverse=True)
+        players = filtered_players[:200]
+        
+        logger.info(f"Processing {len(players)} players (filtered from {len(all_players)} total)")
         
         # Get fixtures for double gameweek detection
         fixtures_by_gw = self._get_fixtures_by_gameweek(next_gw, end_gw)
         
         recommendations = []
+        processed = 0
         
         for player in players:
+            processed += 1
+            if processed % 50 == 0:
+                logger.info(f"Processed {processed}/{len(players)} players...")
             try:
                 # Skip players with low availability
                 if player.status != "a":  # Only available players

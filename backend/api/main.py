@@ -239,6 +239,25 @@ async def _save_daily_snapshot_async():
         logger.info("Forcing FPL data refresh before daily snapshot generation")
         fpl_client.get_bootstrap(force_refresh=True)
         
+        # Calculate and save Triple Captain recommendations
+        try:
+            logger.info("Calculating Triple Captain recommendations...")
+            from ml.chips import TripleCaptainOptimizer
+            optimizer = TripleCaptainOptimizer(fpl_client, feature_eng)
+            tc_recommendations = optimizer.get_triple_captain_recommendations(
+                gameweek_range=5,
+                top_n=20
+            )
+            db_manager.save_triple_captain_recommendations(
+                gameweek=next_gw.id,
+                recommendations=tc_recommendations,
+                gameweek_range=5
+            )
+            logger.info(f"Saved Triple Captain recommendations for GW{next_gw.id}")
+        except Exception as tc_error:
+            logger.error(f"Error calculating Triple Captain recommendations: {tc_error}", exc_info=True)
+            # Don't fail the whole snapshot if TC calculation fails
+        
         # Get the current combined squad suggestion with refresh enabled
         squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
         
@@ -2229,12 +2248,13 @@ async def update_daily_snapshot():
     """
     Manually trigger an update of the daily snapshot for the current/next gameweek.
     This forces a refresh of FPL data and regenerates the squad with latest player status.
+    Also calculates and saves Triple Captain recommendations.
     """
     try:
         await _save_daily_snapshot_async()
         return {
             "success": True,
-            "message": "Daily snapshot updated successfully"
+            "message": "Daily snapshot and Triple Captain recommendations updated successfully"
         }
     except Exception as e:
         logger.error(f"Error updating daily snapshot: {e}")

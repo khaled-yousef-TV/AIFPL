@@ -220,6 +220,27 @@ class SavedSquad(Base):
         return f"<SavedSquad(id={self.id}, name='{self.name}', saved_at={self.saved_at})>"
 
 
+class TripleCaptainRecommendations(Base):
+    """Store Triple Captain recommendations calculated daily."""
+    __tablename__ = "triple_captain_recommendations"
+    
+    id = Column(Integer, primary_key=True)
+    gameweek = Column(Integer, nullable=False, index=True)  # Gameweek these recommendations are for
+    
+    # Recommendations data (stored as JSON)
+    recommendations = Column(JSON, nullable=False)  # List of recommendation dicts
+    
+    # Metadata
+    gameweek_range = Column(Integer, default=5)  # Number of gameweeks analyzed
+    total_recommendations = Column(Integer, default=0)  # Number of recommendations
+    
+    # Timestamps
+    calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<TripleCaptainRecommendations(gameweek={self.gameweek}, calculated_at={self.calculated_at})>"
+
+
 def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.
