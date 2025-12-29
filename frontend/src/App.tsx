@@ -395,6 +395,35 @@ function App() {
     }
   }
 
+  const calculateTripleCaptain = async () => {
+    setCalculatingTripleCaptain(true)
+    setTcCalculationMessage(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/chips/triple-captain/calculate`, {
+        method: 'POST',
+      }).then(r => r.json())
+      
+      if (res.success) {
+        setTcCalculationMessage({ type: 'success', text: `Triple Captain recommendations calculated successfully! (${res.total_recommendations} recommendations)` })
+        // Reload recommendations to show the newly calculated ones
+        setTripleCaptainRecs([])
+        setTripleCaptainCalculatedAt(null)
+        await ensureTripleCaptainLoaded()
+        // Clear message after 5 seconds
+        setTimeout(() => setTcCalculationMessage(null), 5000)
+      } else {
+        setTcCalculationMessage({ type: 'error', text: res.message || 'Failed to calculate recommendations' })
+        setTimeout(() => setTcCalculationMessage(null), 5000)
+      }
+    } catch (err) {
+      console.error('Error calculating Triple Captain:', err)
+      setTcCalculationMessage({ type: 'error', text: 'Failed to calculate recommendations. This may take a few minutes. Please try again.' })
+      setTimeout(() => setTcCalculationMessage(null), 5000)
+    } finally {
+      setCalculatingTripleCaptain(false)
+    }
+  }
+
   // Load selected teams when the tab is active
   useEffect(() => {
     if (activeTab === 'selected_teams') {
