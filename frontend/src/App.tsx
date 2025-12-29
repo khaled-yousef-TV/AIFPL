@@ -148,6 +148,10 @@ function App() {
   const [calculatingTripleCaptain, setCalculatingTripleCaptain] = useState(false)
   const [tcCalculationMessage, setTcCalculationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedTcGameweekTab, setSelectedTcGameweekTab] = useState<number | null>(null)
+  
+  // AbortController refs for cleanup
+  const tcAbortControllerRef = useRef<AbortController | null>(null)
+  const tcCalculateAbortControllerRef = useRef<AbortController | null>(null)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
@@ -396,12 +400,35 @@ function App() {
   }
 
   const calculateTripleCaptain = async () => {
+    // Cancel any existing calculation
+    if (tcCalculateAbortControllerRef.current) {
+      tcCalculateAbortControllerRef.current.abort()
+    }
+    
+    // Create new AbortController
+    const abortController = new AbortController()
+    tcCalculateAbortControllerRef.current = abortController
+    
     setCalculatingTripleCaptain(true)
     setTcCalculationMessage(null)
+    
     try {
+      // Add timeout (10 minutes max)
+      const timeoutId = setTimeout(() => {
+        abortController.abort()
+      }, 10 * 60 * 1000)
+      
       const res = await fetch(`${API_BASE}/api/chips/triple-captain/calculate`, {
         method: 'POST',
+        signal: abortController.signal,
       }).then(r => r.json())
+      
+      clearTimeout(timeoutId)
+      
+      // Check if aborted
+      if (abortController.signal.aborted) {
+        return
+      }
       
       if (res.success) {
         setTcCalculationMessage({ type: 'success', text: `Triple Captain recommendations calculated successfully! (${res.recommendations_count} recommendations)` })
@@ -415,12 +442,20 @@ function App() {
         setTcCalculationMessage({ type: 'error', text: res.message || 'Failed to calculate recommendations' })
         setTimeout(() => setTcCalculationMessage(null), 5000)
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Don't show error if it was aborted (user navigated away)
+      if (err.name === 'AbortError' || abortController.signal.aborted) {
+        return
+      }
       console.error('Error calculating Triple Captain:', err)
       setTcCalculationMessage({ type: 'error', text: 'Failed to calculate recommendations. This may take a few minutes. Please try again.' })
       setTimeout(() => setTcCalculationMessage(null), 5000)
     } finally {
-      setCalculatingTripleCaptain(false)
+      // Only reset if not aborted
+      if (!abortController.signal.aborted) {
+        setCalculatingTripleCaptain(false)
+      }
+      tcCalculateAbortControllerRef.current = null
     }
   }
 
@@ -671,10 +706,29 @@ function App() {
   }
 
   const ensureTripleCaptainLoaded = async () => {
+    // Cancel any existing load
+    if (tcAbortControllerRef.current) {
+      tcAbortControllerRef.current.abort()
+    }
+    
+    // Don't reload if we already have data and we're not forcing a refresh
     if (Object.keys(tripleCaptainRecs).length > 0 || loadingTripleCaptain) return
+    
+    // Create new AbortController
+    const abortController = new AbortController()
+    tcAbortControllerRef.current = abortController
+    
     setLoadingTripleCaptain(true)
     try {
-      const response = await fetch(`${API_BASE}/api/chips/triple-captain?top_n=20`)
+      const response = await fetch(`${API_BASE}/api/chips/triple-captain?top_n=20`, {
+        signal: abortController.signal,
+      })
+      
+      // Check if aborted
+      if (abortController.signal.aborted) {
+        return
+      }
+      
       if (!response.ok) {
         if (response.status === 404) {
           // No recommendations calculated yet
@@ -684,6 +738,11 @@ function App() {
         throw new Error(`HTTP ${response.status}`)
       }
       const tcRes = await response.json()
+      
+      // Check again if aborted after async operation
+      if (abortController.signal.aborted) {
+        return
+      }
       
       if (tcRes.recommendations_by_gameweek) {
         // Multiple gameweeks - store by gameweek
@@ -703,11 +762,19 @@ function App() {
           }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Don't show error if it was aborted (user navigated away)
+      if (err.name === 'AbortError' || abortController.signal.aborted) {
+        return
+      }
       console.error('Triple Captain load error:', err)
       setTripleCaptainRecs({})
     } finally {
-      setLoadingTripleCaptain(false)
+      // Only reset if not aborted
+      if (!abortController.signal.aborted) {
+        setLoadingTripleCaptain(false)
+      }
+      tcAbortControllerRef.current = null
     }
   }
 
@@ -739,18 +806,9 @@ function App() {
         const res = await fetch(`${API_BASE}/api/differentials`).then(r => r.json())
         setDifferentials(res.differentials || [])
       } else if (activeTab === 'triple-captain') {
-        setTripleCaptainRecs([])
-        setTripleCaptainCalculatedAt(null)
-        try {
-          const response = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`)
-          if (response.ok) {
-            const res = await response.json()
-            setTripleCaptainRecs(res.recommendations || [])
-            setTripleCaptainCalculatedAt(res.calculated_at || null)
-          }
-        } catch (err) {
-          console.error('Triple Captain refresh error:', err)
-        }
+        setTripleCaptainRecs({})
+        setSelectedTcGameweekTab(null)
+        await ensureTripleCaptainLoaded()
       }
     } catch (err) {
       console.error('Refresh error:', err)
