@@ -1,0 +1,111 @@
+"""
+Chip optimization API endpoints.
+
+Provides endpoints for Triple Captain, Bench Boost, and Wildcard chip optimization.
+"""
+
+import logging
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
+from fpl.client import FPLClient
+from ml.features import FeatureEngineer
+from ml.chips import TripleCaptainOptimizer
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# Initialize components (will be set by main.py)
+fpl_client: Optional[FPLClient] = None
+feature_engineer: Optional[FeatureEngineer] = None
+
+
+def initialize_chips_router(client: FPLClient, engineer: FeatureEngineer):
+    """Initialize the chips router with dependencies."""
+    global fpl_client, feature_engineer
+    fpl_client = client
+    feature_engineer = engineer
+
+
+@router.get("/triple-captain")
+async def get_triple_captain_recommendations(
+    gameweek_range: int = Query(5, ge=1, le=10, description="Number of gameweeks to analyze"),
+    top_n: int = Query(20, ge=1, le=50, description="Number of top recommendations to return")
+):
+    """
+    Get Triple Captain recommendations.
+    
+    Analyzes upcoming gameweeks to identify players with highest haul probability (15+ points).
+    Considers double gameweeks and fixture difficulty.
+    
+    Returns:
+        List of player recommendations sorted by peak haul probability
+    """
+    if not fpl_client or not feature_engineer:
+        raise HTTPException(
+            status_code=500,
+            detail="Chips router not initialized. Please ensure dependencies are set."
+        )
+    
+    try:
+        optimizer = TripleCaptainOptimizer(fpl_client, feature_engineer)
+        recommendations = optimizer.get_triple_captain_recommendations(
+            gameweek_range=gameweek_range,
+            top_n=top_n
+        )
+        
+        return {
+            "recommendations": recommendations,
+            "gameweek_range": gameweek_range,
+            "total_recommendations": len(recommendations)
+        }
+    except Exception as e:
+        logger.error(f"Error getting Triple Captain recommendations: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get Triple Captain recommendations: {str(e)}"
+        )
+
+
+@router.post("/bench-boost")
+async def get_bench_boost_squad(
+    budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
+    gameweek_range: int = Query(3, ge=1, le=5, description="Number of gameweeks to optimize for")
+):
+    """
+    Get optimized Bench Boost squad.
+    
+    Optimizes a 15-man squad (not just starting XI) using MILP over multiple gameweeks.
+    
+    Returns:
+        Optimized 15-man squad with starting XI and bench
+    """
+    # TODO: Implement Bench Boost optimization
+    raise HTTPException(
+        status_code=501,
+        detail="Bench Boost optimization not yet implemented"
+    )
+
+
+@router.post("/wildcard")
+async def get_wildcard_squad(
+    current_squad: Optional[list] = None,
+    budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
+    horizon: int = Query(8, ge=1, le=10, description="Number of gameweeks to optimize for")
+):
+    """
+    Get optimized Wildcard squad.
+    
+    Optimizes squad over 8 gameweeks using LSTM+XGBoost predictions with transfer decay.
+    
+    Returns:
+        Optimal squad path over specified horizon
+    """
+    # TODO: Implement Wildcard optimization
+    raise HTTPException(
+        status_code=501,
+        detail="Wildcard optimization not yet implemented"
+    )
+

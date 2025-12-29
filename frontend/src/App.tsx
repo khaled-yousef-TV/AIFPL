@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
-  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain
+  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain, Crown
 } from 'lucide-react'
 
 // FPL-themed logo component
@@ -143,6 +143,8 @@ function App() {
   const [statisticsMethod, setStatisticsMethod] = useState<'combined' | 'heuristic' | 'form' | 'fixture'>('combined')
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
+  const [tripleCaptainRecs, setTripleCaptainRecs] = useState<any[]>([])
+  const [loadingTripleCaptain, setLoadingTripleCaptain] = useState(false)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('home')
   const [error, setError] = useState<string | null>(null)
@@ -636,10 +638,24 @@ function App() {
     }
   }
 
+  const ensureTripleCaptainLoaded = async () => {
+    if (tripleCaptainRecs.length > 0 || loadingTripleCaptain) return
+    setLoadingTripleCaptain(true)
+    try {
+      const tcRes = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`).then(r => r.json())
+      setTripleCaptainRecs(tcRes.recommendations || [])
+    } catch (err) {
+      console.error('Triple Captain load error:', err)
+    } finally {
+      setLoadingTripleCaptain(false)
+    }
+  }
+
   useEffect(() => {
     // Lazy-load heavy tabs only when the user opens them
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
+    if (activeTab === 'triple-captain') ensureTripleCaptainLoaded()
   }, [activeTab])
 
   const refresh = async () => {
@@ -662,6 +678,10 @@ function App() {
         setDifferentials([])
         const res = await fetch(`${API_BASE}/api/differentials`).then(r => r.json())
         setDifferentials(res.differentials || [])
+      } else if (activeTab === 'triple-captain') {
+        setTripleCaptainRecs([])
+        const res = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`).then(r => r.json())
+        setTripleCaptainRecs(res.recommendations || [])
       }
     } catch (err) {
       console.error('Refresh error:', err)
@@ -1325,6 +1345,7 @@ function App() {
   const navigationTabs = [
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
+    { id: 'triple-captain', icon: Crown, label: 'Triple Captain', shortLabel: 'TC', color: 'text-purple-400', description: 'Find optimal gameweeks to use Triple Captain chip' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
     { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
   ]
@@ -2695,6 +2716,86 @@ function App() {
         )}
 
         {/* Differentials Tab */}
+        {activeTab === 'triple-captain' && (
+          <div className="card">
+            <div className="card-header">
+              <Crown className="w-5 h-5 text-purple-400" />
+              Triple Captain Recommendations
+            </div>
+            <p className="text-gray-400 text-sm mb-4">
+              Find the optimal gameweek to use your Triple Captain chip. Players are ranked by peak haul probability (15+ points) across the next 5 gameweeks.
+            </p>
+            {loadingTripleCaptain ? (
+              <div className="text-center py-8">
+                <RefreshCw className="w-8 h-8 animate-spin text-[#00ff87] mx-auto mb-4" />
+                <p className="text-gray-400">Loading Triple Captain recommendations...</p>
+              </div>
+            ) : tripleCaptainRecs.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                No recommendations available
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
+                      <th className="pb-3">#</th>
+                      <th className="pb-3">Player</th>
+                      <th className="pb-3">Peak GW</th>
+                      <th className="pb-3">Haul Prob</th>
+                      <th className="pb-3">Expected Pts</th>
+                      <th className="pb-3">DGW</th>
+                      <th className="pb-3">Form</th>
+                      <th className="pb-3 text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tripleCaptainRecs.map((rec: any, i: number) => (
+                      <tr key={rec.player_id} className="border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors">
+                        <td className="py-3 text-gray-500 font-mono">{i + 1}</td>
+                        <td className="py-3">
+                          <div>
+                            <div className="font-medium">{rec.player_name}</div>
+                            <div className="text-sm text-gray-400">{rec.team} • {rec.position}</div>
+                          </div>
+                        </td>
+                        <td className="py-3">
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                            GW{rec.peak_gameweek}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <span className="font-mono font-semibold text-purple-400">
+                            {(rec.peak_haul_probability * 100).toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <span className="font-mono text-[#00ff87]">
+                            {rec.peak_expected_points.toFixed(1)}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          {rec.is_double_gameweek ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                              DGW
+                            </span>
+                          ) : (
+                            <span className="text-gray-500 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="py-3">
+                          <span className="text-sm">{rec.form.toFixed(1)}</span>
+                        </td>
+                        <td className="py-3 text-right font-mono text-sm">£{rec.price.toFixed(1)}m</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'differentials' && (
           <div className="card">
             <div className="card-header">

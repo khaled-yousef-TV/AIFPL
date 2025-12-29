@@ -168,6 +168,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include chip optimization routes
+from api.routes import chips as chips_router
+chips_router.initialize_chips_router(fpl_client, feature_eng)
+app.include_router(chips_router.router, prefix="/api/chips", tags=["chips"])
+
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
 
