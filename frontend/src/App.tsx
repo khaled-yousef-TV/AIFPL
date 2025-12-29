@@ -782,7 +782,35 @@ function App() {
     // Lazy-load heavy tabs only when the user opens them
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-    if (activeTab === 'triple-captain') ensureTripleCaptainLoaded()
+    if (activeTab === 'triple-captain') {
+      ensureTripleCaptainLoaded()
+    } else {
+      // Cleanup when navigating away from Triple Captain tab
+      // Cancel any ongoing requests
+      if (tcAbortControllerRef.current) {
+        tcAbortControllerRef.current.abort()
+        tcAbortControllerRef.current = null
+      }
+      // Reset loading state if we're not on the tab
+      if (loadingTripleCaptain) {
+        setLoadingTripleCaptain(false)
+      }
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      if (tcAbortControllerRef.current) {
+        tcAbortControllerRef.current.abort()
+        tcAbortControllerRef.current = null
+      }
+      if (tcCalculateAbortControllerRef.current) {
+        tcCalculateAbortControllerRef.current.abort()
+        tcCalculateAbortControllerRef.current = null
+      }
+      // Reset loading states on unmount
+      setLoadingTripleCaptain(false)
+      setCalculatingTripleCaptain(false)
+    }
   }, [activeTab])
 
   const refresh = async () => {
