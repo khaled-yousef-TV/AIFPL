@@ -144,6 +144,7 @@ function App() {
   const [topPicks, setTopPicks] = useState<Record<string, Player[]>>({})
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [tripleCaptainRecs, setTripleCaptainRecs] = useState<any[]>([])
+  const [tripleCaptainCalculatedAt, setTripleCaptainCalculatedAt] = useState<string | null>(null)
   const [loadingTripleCaptain, setLoadingTripleCaptain] = useState(false)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
   const [activeTab, setActiveTab] = useState('home')
@@ -642,10 +643,23 @@ function App() {
     if (tripleCaptainRecs.length > 0 || loadingTripleCaptain) return
     setLoadingTripleCaptain(true)
     try {
-      const tcRes = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`).then(r => r.json())
+      const response = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`)
+      if (!response.ok) {
+        if (response.status === 404) {
+          // No recommendations calculated yet
+          setTripleCaptainRecs([])
+          setTripleCaptainCalculatedAt(null)
+          return
+        }
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const tcRes = await response.json()
       setTripleCaptainRecs(tcRes.recommendations || [])
+      setTripleCaptainCalculatedAt(tcRes.calculated_at || null)
     } catch (err) {
       console.error('Triple Captain load error:', err)
+      setTripleCaptainRecs([])
+      setTripleCaptainCalculatedAt(null)
     } finally {
       setLoadingTripleCaptain(false)
     }
@@ -680,8 +694,17 @@ function App() {
         setDifferentials(res.differentials || [])
       } else if (activeTab === 'triple-captain') {
         setTripleCaptainRecs([])
-        const res = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`).then(r => r.json())
-        setTripleCaptainRecs(res.recommendations || [])
+        setTripleCaptainCalculatedAt(null)
+        try {
+          const response = await fetch(`${API_BASE}/api/chips/triple-captain?gameweek_range=5&top_n=20`)
+          if (response.ok) {
+            const res = await response.json()
+            setTripleCaptainRecs(res.recommendations || [])
+            setTripleCaptainCalculatedAt(res.calculated_at || null)
+          }
+        } catch (err) {
+          console.error('Triple Captain refresh error:', err)
+        }
       }
     } catch (err) {
       console.error('Refresh error:', err)
@@ -2719,11 +2742,30 @@ function App() {
         {activeTab === 'triple-captain' && (
           <div className="card">
             <div className="card-header">
-              <Crown className="w-5 h-5 text-purple-400" />
-              Triple Captain Recommendations
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-purple-400" />
+                  <span>Triple Captain Recommendations</span>
+                </div>
+                {tripleCaptainCalculatedAt && (
+                  <span className="text-xs text-gray-400">
+                    Calculated {new Date(tripleCaptainCalculatedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                )}
+              </div>
             </div>
             <p className="text-gray-400 text-sm mb-4">
               Find the optimal gameweek to use your Triple Captain chip. Players are ranked by peak haul probability (15+ points) across the next 5 gameweeks.
+              {tripleCaptainCalculatedAt && (
+                <span className="block mt-1 text-xs">
+                  Recommendations are calculated daily at midnight and cached for fast access.
+                </span>
+              )}
             </p>
             {loadingTripleCaptain ? (
               <div className="text-center py-8">
@@ -2732,7 +2774,11 @@ function App() {
               </div>
             ) : tripleCaptainRecs.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
-                No recommendations available
+                <Crown className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No recommendations available</p>
+                <p className="text-xs mt-2">
+                  Recommendations are calculated daily at midnight. They will be available after the next calculation.
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
