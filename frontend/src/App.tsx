@@ -3282,18 +3282,6 @@ function App() {
                     </div>
                   </div>
                 )}
-                <p className="text-gray-400 text-sm mb-4">
-                  Find the optimal gameweek to use your Triple Captain chip. Players are ranked by peak haul probability (15+ points) across the next 5 gameweeks.
-                  <span className="block mt-2 text-xs text-gray-500">
-                    <strong className="text-gray-400">Haul Probability:</strong> The probability (0-100%) that a player will score 15+ points in a gameweek, calculated using Monte Carlo simulation based on expected goals (xG), expected assists (xA), clean sheet probability, and bonus points. Higher probability = better Triple Captain opportunity.
-                  </span>
-                  <span className="block mt-2 text-xs text-gray-500">
-                    <strong className="text-gray-400">Expected Pts:</strong> The average (mean) <strong>base points</strong> a player is expected to score in that gameweek (NOT tripled). With Triple Captain chip, these points are multiplied by 3. For Double Gameweeks (DGW), this is the sum of points from both fixtures. Example: 25 base points = 75 points with Triple Captain.
-                  </span>
-                  <span className="block mt-1 text-xs">
-                    Recommendations are calculated daily at midnight and cached for fast access.
-                  </span>
-                </p>
 
                 {loadingTripleCaptain ? (
                   <div className="text-center py-8">
@@ -3400,7 +3388,7 @@ function App() {
                                         GW{rec.peak_gameweek}
                                       </span>
                                       {rec.peak_opponent && (
-                                        <span className="text-xs text-gray-400">
+                                        <span className="text-xs text-gray-300">
                                           vs {rec.peak_opponent}
                                         </span>
                                       )}
