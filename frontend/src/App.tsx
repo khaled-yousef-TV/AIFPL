@@ -266,6 +266,61 @@ function App() {
   const [notifications, setNotifications] = useState<Array<{ id: string; type: 'success' | 'error'; title: string; message: string; timestamp: number }>>([])
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
+  const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
+
+  // Load tasks from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedTasks = localStorage.getItem(TASKS_KEY)
+      if (savedTasks) {
+        const parsed = JSON.parse(savedTasks) as Task[]
+        const now = Date.now()
+        // Process tasks: filter old ones and mark running tasks as interrupted
+        const processedTasks = parsed.map(task => {
+          // If task was running when page was refreshed, mark as interrupted
+          if (task.status === 'running') {
+            return {
+              ...task,
+              status: 'failed' as TaskStatus,
+              error: 'Task was interrupted by page refresh. Please check if it completed or try again.',
+              completedAt: Date.now()
+            }
+          }
+          return task
+        }).filter(task => {
+          // Keep pending tasks
+          if (task.status === 'pending') {
+            return true
+          }
+          // For completed/failed tasks, keep if less than 5 minutes old
+          if (task.completedAt) {
+            return (now - task.completedAt) < 5 * 60 * 1000
+          }
+          return false
+        })
+        setTasks(processedTasks)
+        // Persist the updated tasks (with interrupted status)
+        if (processedTasks.length !== parsed.length || processedTasks.some((t, i) => t.status !== parsed[i]?.status)) {
+          try {
+            localStorage.setItem(TASKS_KEY, JSON.stringify(processedTasks))
+          } catch (err) {
+            console.error('Failed to save processed tasks:', err)
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load tasks from localStorage:', err)
+    }
+  }, [])
+
+  // Persist tasks to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(TASKS_KEY, JSON.stringify(tasks))
+    } catch (err) {
+      console.error('Failed to save tasks to localStorage:', err)
+    }
+  }, [tasks])
 
   useEffect(() => {
     loadInitial()
@@ -402,14 +457,32 @@ function App() {
       progress: 0,
       createdAt: Date.now()
     }
-    setTasks(prev => [...prev, newTask])
+    setTasks(prev => {
+      const updated = [...prev, newTask]
+      // Persist to localStorage
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
+      } catch (err) {
+        console.error('Failed to save tasks:', err)
+      }
+      return updated
+    })
     return taskId
   }
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(task => 
-      task.id === taskId ? { ...task, ...updates } : task
-    ))
+    setTasks(prev => {
+      const updated = prev.map(task => 
+        task.id === taskId ? { ...task, ...updates } : task
+      )
+      // Persist to localStorage
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
+      } catch (err) {
+        console.error('Failed to save tasks:', err)
+      }
+      return updated
+    })
   }
 
   const completeTask = (taskId: string, success: boolean, error?: string) => {
@@ -438,8 +511,24 @@ function App() {
 
       // Auto-remove completed tasks after 5 minutes
       setTimeout(() => {
-        setTasks(current => current.filter(t => t.id !== taskId))
+        setTasks(current => {
+          const filtered = current.filter(t => t.id !== taskId)
+          // Persist to localStorage
+          try {
+            localStorage.setItem(TASKS_KEY, JSON.stringify(filtered))
+          } catch (err) {
+            console.error('Failed to save tasks:', err)
+          }
+          return filtered
+        })
       }, 5 * 60 * 1000)
+
+      // Persist updated tasks
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(updatedTasks))
+      } catch (err) {
+        console.error('Failed to save tasks:', err)
+      }
 
       return updatedTasks
     })
