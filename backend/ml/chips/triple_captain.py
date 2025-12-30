@@ -194,6 +194,7 @@ class TripleCaptainOptimizer:
                     "peak_haul_probability": best_gw["haul_probability"],
                     "peak_gameweek": best_gw["gameweek"],
                     "peak_expected_points": best_gw["expected_points"],
+                    "peak_opponent": best_gw.get("opponent", ""),
                     "is_double_gameweek": best_gw["is_double_gameweek"],
                     "all_gameweeks": player_recommendations,
                 })
