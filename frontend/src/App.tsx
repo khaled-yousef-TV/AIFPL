@@ -269,28 +269,46 @@ function App() {
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
 
-  // Load tasks from localStorage on mount
+  // Check if a running task actually completed by checking the backend
+  const checkTaskCompletion = async (task: Task): Promise<boolean> => {
+    try {
+      if (task.type === 'daily_snapshot') {
+        // Check if a new snapshot exists after task start
+        const res = await fetch(`${API_BASE}/api/selected-teams`).then(r => r.json())
+        if (res.teams && res.teams.length > 0) {
+          const latestTeam = res.teams[0]
+          const snapshotTime = new Date(latestTeam.saved_at).getTime()
+          return snapshotTime > task.createdAt
+        }
+      } else if (task.type === 'triple_captain') {
+        // Check if recommendations exist
+        const res = await fetch(`${API_BASE}/api/chips/triple-captain`).then(r => r.json())
+        if (res && typeof res === 'object') {
+          const hasRecs = (res.recommendations && Object.keys(res.recommendations).length > 0) || 
+                        (res.gameweeks && Array.isArray(res.gameweeks) && res.gameweeks.length > 0) ||
+                        (res.gameweek && typeof res.gameweek === 'object')
+          return !!hasRecs
+        }
+      }
+    } catch (err) {
+      console.error('Error checking task completion:', err)
+    }
+    return false
+  }
+
+  // Load tasks from localStorage on mount (non-blocking)
   useEffect(() => {
+    // First, quickly load tasks from localStorage without API calls
     try {
       const savedTasks = localStorage.getItem(TASKS_KEY)
       if (savedTasks) {
         const parsed = JSON.parse(savedTasks) as Task[]
         const now = Date.now()
-        // Process tasks: filter old ones and mark running tasks as interrupted
-        const processedTasks = parsed.map(task => {
-          // If task was running when page was refreshed, mark as interrupted
-          if (task.status === 'running') {
-            return {
-              ...task,
-              status: 'failed' as TaskStatus,
-              error: 'Task was interrupted by page refresh. Please check if it completed or try again.',
-              completedAt: Date.now()
-            }
-          }
-          return task
-        }).filter(task => {
-          // Keep pending tasks
-          if (task.status === 'pending') {
+        
+        // Filter out old completed tasks immediately
+        const filteredTasks = parsed.filter(task => {
+          // Keep pending and running tasks
+          if (task.status === 'pending' || task.status === 'running') {
             return true
           }
           // For completed/failed tasks, keep if less than 5 minutes old
@@ -299,15 +317,50 @@ function App() {
           }
           return false
         })
-        setTasks(processedTasks)
-        // Persist the updated tasks (with interrupted status)
-        if (processedTasks.length !== parsed.length || processedTasks.some((t, i) => t.status !== parsed[i]?.status)) {
+
+        // Set tasks immediately (non-blocking)
+        setTasks(filteredTasks)
+        
+        // Then verify running tasks in the background (don't block render)
+        setTimeout(async () => {
+          const verifiedTasks = await Promise.all(
+            filteredTasks.map(async (task) => {
+              if (task.status === 'running') {
+                // Check if task actually completed
+                const completed = await checkTaskCompletion(task)
+                if (completed) {
+                  return {
+                    ...task,
+                    status: 'completed' as TaskStatus,
+                    progress: 100,
+                    completedAt: Date.now()
+                  }
+                }
+                // If task started more than 10 minutes ago, mark as failed
+                if (now - task.createdAt > 10 * 60 * 1000) {
+                  return {
+                    ...task,
+                    status: 'failed' as TaskStatus,
+                    error: 'Task timed out. It may have completed - please check the results or try again.',
+                    completedAt: Date.now()
+                  }
+                }
+                // Otherwise, keep it as running
+                return task
+              }
+              return task
+            })
+          )
+
+          setTasks(verifiedTasks)
+          
+          // Persist verified tasks
           try {
-            localStorage.setItem(TASKS_KEY, JSON.stringify(processedTasks))
+            localStorage.setItem(TASKS_KEY, JSON.stringify(verifiedTasks))
           } catch (err) {
-            console.error('Failed to save processed tasks:', err)
+            console.error('Failed to save verified tasks:', err)
           }
-        }
+        }, 100) // Small delay to not block initial render
       }
     } catch (err) {
       console.error('Failed to load tasks from localStorage:', err)
