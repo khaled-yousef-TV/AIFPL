@@ -270,7 +270,7 @@ function App() {
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
 
   // Check if a running task actually completed by checking the backend
-  const checkTaskCompletion = async (task: Task): Promise<boolean> => {
+  const checkTaskCompletion = useCallback(async (task: Task): Promise<boolean> => {
     try {
       if (task.type === 'daily_snapshot') {
         // Check if a new snapshot exists after task start
@@ -294,18 +294,20 @@ function App() {
       console.error('Error checking task completion:', err)
     }
     return false
-  }
+  }, [])
 
   // Load tasks from localStorage (reusable function)
-  const loadTasksFromStorage = () => {
+  const loadTasksFromStorage = useCallback(async () => {
     try {
       const savedTasks = localStorage.getItem(TASKS_KEY)
+      let tasksToLoad: Task[] = []
+      
       if (savedTasks) {
         const parsed = JSON.parse(savedTasks) as Task[]
         const now = Date.now()
         
         // Filter out old completed tasks immediately
-        const filteredTasks = parsed.filter(task => {
+        tasksToLoad = parsed.filter(task => {
           // Keep pending and running tasks
           if (task.status === 'pending' || task.status === 'running') {
             return true
@@ -316,14 +318,17 @@ function App() {
           }
           return false
         })
+      }
 
-        // Set tasks immediately (non-blocking)
-        setTasks(filteredTasks)
-        
-        // Then verify running tasks in the background (don't block render)
+      // Set tasks immediately (non-blocking) - even if empty
+      setTasks(tasksToLoad)
+      
+      // Then verify running tasks in the background (don't block render)
+      if (tasksToLoad.length > 0) {
         setTimeout(async () => {
+          const now = Date.now()
           const verifiedTasks = await Promise.all(
-            filteredTasks.map(async (task) => {
+            tasksToLoad.map(async (task) => {
               if (task.status === 'running') {
                 // Check if task actually completed
                 const completed = await checkTaskCompletion(task)
@@ -360,14 +365,13 @@ function App() {
             console.error('Failed to save verified tasks:', err)
           }
         }, 100) // Small delay to not block initial render
-      } else {
-        // If no saved tasks, ensure tasks state is empty array
-        setTasks([])
       }
     } catch (err) {
       console.error('Failed to load tasks from localStorage:', err)
+      // Ensure tasks state is set even on error
+      setTasks([])
     }
-  }
+  }, [checkTaskCompletion])
 
   // Load tasks from localStorage on mount (non-blocking)
   useEffect(() => {
@@ -713,8 +717,20 @@ function App() {
               if (progressUpdater) {
                 progressUpdater(taskId, pollCount, maxPolls)
               } else {
-                // Default progress: 30% -> 90% over polling period
-                const progress = Math.min(30 + (pollCount / maxPolls) * 60, 90)
+                // More realistic progress: 30% -> 90% with smooth curve and variation
+                const ratio = pollCount / maxPolls
+                // Use ease-in-out curve for more natural progression
+                const easedRatio = ratio < 0.5 
+                  ? 2 * ratio * ratio 
+                  : 1 - Math.pow(-2 * ratio + 2, 2) / 2
+                // Base progress from 30% to 90%
+                const baseProgress = 30 + easedRatio * 60
+                // Add small random variation (±2%) to make it feel more dynamic
+                const variation = (Math.random() - 0.5) * 4
+                // Add slight acceleration based on time elapsed (makes it feel more realistic)
+                const timeElapsed = (Date.now() - taskStartTime) / 1000 // seconds
+                const timeBoost = Math.min(timeElapsed * 0.5, 3) // small boost up to 3%
+                const progress = Math.min(Math.max(baseProgress + variation + timeBoost, 30), 92)
                 updateTask(taskId, { progress })
               }
               
@@ -1243,7 +1259,7 @@ function App() {
       setLoadingTripleCaptain(false)
       setCalculatingTripleCaptain(false)
     }
-  }, [activeTab])
+  }, [activeTab, loadTasksFromStorage])
 
   const refresh = async () => {
     setRefreshing(true)
