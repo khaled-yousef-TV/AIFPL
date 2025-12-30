@@ -439,7 +439,7 @@ class DatabaseManager:
                 return {
                     "gameweek": team.gameweek,
                     "squad": team.squad_data,
-                    "saved_at": team.saved_at.isoformat() if team.saved_at else None
+                    "saved_at": (team.saved_at.isoformat() + 'Z') if team.saved_at else None
                 }
             return None
     
@@ -454,7 +454,7 @@ class DatabaseManager:
                 {
                     "gameweek": team.gameweek,
                     "squad": team.squad_data,
-                    "saved_at": team.saved_at.isoformat() if team.saved_at else None
+                    "saved_at": (team.saved_at.isoformat() + 'Z') if team.saved_at else None
                 }
                 for team in teams
             ]
@@ -500,7 +500,7 @@ class DatabaseManager:
                 return {
                     "gameweek": snapshot.gameweek,
                     "squad": snapshot.squad_data,
-                    "saved_at": snapshot.saved_at.isoformat() if snapshot.saved_at else None
+                    "saved_at": (snapshot.saved_at.isoformat() + 'Z') if snapshot.saved_at else None
                 }
             return None
     
@@ -556,8 +556,8 @@ class DatabaseManager:
                     "id": squad.id,
                     "name": squad.name,
                     "squad": squad.squad_data,
-                    "saved_at": squad.saved_at.isoformat() if squad.saved_at else None,
-                    "updated_at": squad.updated_at.isoformat() if squad.updated_at else None
+                    "saved_at": (squad.saved_at.isoformat() + 'Z') if squad.saved_at else None,
+                    "updated_at": (squad.updated_at.isoformat() + 'Z') if squad.updated_at else None
                 }
             return None
     
@@ -573,8 +573,8 @@ class DatabaseManager:
                     "id": squad.id,
                     "name": squad.name,
                     "squad": squad.squad_data,
-                    "saved_at": squad.saved_at.isoformat() if squad.saved_at else None,
-                    "updated_at": squad.updated_at.isoformat() if squad.updated_at else None
+                    "saved_at": (squad.saved_at.isoformat() + 'Z') if squad.saved_at else None,
+                    "updated_at": (squad.updated_at.isoformat() + 'Z') if squad.updated_at else None
                 }
                 for squad in squads
             ]
@@ -685,7 +685,7 @@ class DatabaseManager:
                     "recommendations": recs.recommendations,
                     "gameweek_range": recs.gameweek_range,
                     "total_recommendations": recs.total_recommendations,
-                    "calculated_at": recs.calculated_at.isoformat() if recs.calculated_at else None
+                    "calculated_at": (recs.calculated_at.isoformat() + 'Z') if recs.calculated_at else None
                 }
             return None
     
@@ -714,7 +714,7 @@ class DatabaseManager:
                         "recommendations": rec.recommendations,
                         "gameweek_range": rec.gameweek_range,
                         "total_recommendations": rec.total_recommendations,
-                        "calculated_at": rec.calculated_at.isoformat() if rec.calculated_at else None
+                        "calculated_at": (rec.calculated_at.isoformat() + 'Z') if rec.calculated_at else None
                     })
             
             return result
