@@ -2775,7 +2775,10 @@ function App() {
                           >
                             <span className="text-sm font-medium">GW{team.gameweek}</span>
                             <span className="text-xs text-gray-500 ml-2">
-                              {new Date(team.saved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {new Date(team.saved_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric'
+                              })}
                             </span>
                           </button>
                         ))}
@@ -2789,7 +2792,7 @@ function App() {
                           <div>
                             <h3 className="text-xl font-semibold text-[#00ff87] mb-1">Gameweek {currentTeam.gameweek}</h3>
                             <p className="text-xs text-gray-400">
-                              Saved {new Date(currentTeam.saved_at).toLocaleDateString('en-US', {
+                              Saved {new Date(currentTeam.saved_at).toLocaleString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
@@ -2994,7 +2997,10 @@ function App() {
                             <span className="text-sm font-medium">GW{gw}</span>
                             {tripleCaptainRecs[gw]?.calculated_at && (
                               <span className="text-xs text-gray-500 ml-2">
-                                {new Date(tripleCaptainRecs[gw].calculated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                {new Date(tripleCaptainRecs[gw].calculated_at).toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric'
+                                })}
                               </span>
                             )}
                           </button>
@@ -3010,7 +3016,7 @@ function App() {
                             <h3 className="text-xl font-semibold text-purple-400 mb-1">Gameweek {selectedGameweek}</h3>
                             {currentRecs.calculated_at && (
                               <p className="text-xs text-gray-400">
-                                Calculated {new Date(currentRecs.calculated_at).toLocaleDateString('en-US', {
+                                Calculated {new Date(currentRecs.calculated_at).toLocaleString('en-US', {
                                   month: 'short',
                                   day: 'numeric',
                                   hour: '2-digit',
