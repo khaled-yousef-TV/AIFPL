@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   Users, TrendingUp, RefreshCw, Zap, Award, 
   ChevronRight, ChevronDown, ChevronUp, Star, Target, Flame, AlertTriangle, Plane,
-  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain, Crown
+  ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain, Crown, CheckCircle2, Clock, AlertCircle, Loader2
 } from 'lucide-react'
 
 // FPL-themed logo component
@@ -133,6 +133,21 @@ type SavedSquad = {
   freeTransfers: number
 }
 
+type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
+type TaskType = 'daily_snapshot' | 'triple_captain' | 'refresh_picks' | 'refresh_differentials' | 'refresh_transfers' | 'refresh_wildcard'
+
+interface Task {
+  id: string
+  type: TaskType
+  title: string
+  description: string
+  status: TaskStatus
+  progress: number // 0-100
+  createdAt: number
+  completedAt?: number
+  error?: string
+}
+
 function App() {
   const [loading, setLoading] = useState(true)
   const [squad, setSquad] = useState<SuggestedSquad | null>(null)
@@ -148,7 +163,7 @@ function App() {
   const [calculatingTripleCaptain, setCalculatingTripleCaptain] = useState(false)
   const [tcCalculationMessage, setTcCalculationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedTcGameweekTab, setSelectedTcGameweekTab] = useState<number | null>(null)
-  const [tcPollingInterval, setTcPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [tcPollingInterval, setTcPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
   
   // AbortController refs for cleanup
   const tcAbortControllerRef = useRef<AbortController | null>(null)
@@ -245,6 +260,10 @@ function App() {
   const [updatingSnapshot, setUpdatingSnapshot] = useState(false)
   const [snapshotUpdateMessage, setSnapshotUpdateMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
+
+  // Task management
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; type: 'success' | 'error'; title: string; message: string; timestamp: number }>>([])
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
 
@@ -371,130 +390,343 @@ function App() {
     }
   }
 
+  // Task management helpers
+  const createTask = (type: TaskType, title: string, description: string): string => {
+    const taskId = `${type}_${Date.now()}`
+    const newTask: Task = {
+      id: taskId,
+      type,
+      title,
+      description,
+      status: 'pending',
+      progress: 0,
+      createdAt: Date.now()
+    }
+    setTasks(prev => [...prev, newTask])
+    return taskId
+  }
+
+  const updateTask = (taskId: string, updates: Partial<Task>) => {
+    setTasks(prev => prev.map(task => 
+      task.id === taskId ? { ...task, ...updates } : task
+    ))
+  }
+
+  const completeTask = (taskId: string, success: boolean, error?: string) => {
+    // Get task info before updating (to avoid stale closure)
+    setTasks(prev => {
+      const task = prev.find(t => t.id === taskId)
+      if (!task) return prev
+
+      // Update task status
+      const updatedTasks = prev.map(t => 
+        t.id === taskId 
+          ? { ...t, status: success ? 'completed' : 'failed', progress: 100, completedAt: Date.now(), error }
+          : t
+      )
+
+      // Show notification
+      addNotification(
+        success ? 'success' : 'error',
+        task.title,
+        success 
+          ? task.type === 'daily_snapshot' 
+            ? 'Free hit squad updated successfully!' 
+            : 'Triple Captain calculation completed!'
+          : error || 'Task failed'
+      )
+
+      // Auto-remove completed tasks after 5 minutes
+      setTimeout(() => {
+        setTasks(current => current.filter(t => t.id !== taskId))
+      }, 5 * 60 * 1000)
+
+      return updatedTasks
+    })
+  }
+
+  const addNotification = (type: 'success' | 'error', title: string, message: string) => {
+    const notificationId = `notif_${Date.now()}`
+    setNotifications(prev => [...prev, { id: notificationId, type, title, message, timestamp: Date.now() }])
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== notificationId))
+    }, 5000)
+  }
+
+  // Helper to check if a task type is currently running
+  const isTaskRunning = (taskType: TaskType): boolean => {
+    return tasks.some(task => task.type === taskType && task.status === 'running')
+  }
+
+  /**
+   * Generic helper for creating background refresh tasks
+   * 
+   * Usage example for adding a new refresh button:
+   * 
+   * const refreshPicks = () => {
+   *   if (isTaskRunning('refresh_picks')) return
+   *   
+   *   createRefreshTask(
+   *     'refresh_picks',                    // Task type (add to TaskType)
+   *     'Refresh Top Picks',                // Task title
+   *     'Updating player predictions...',    // Task description
+   *     '/api/picks/refresh',                // API endpoint
+   *     'POST',                              // HTTP method
+   *     {
+   *       onSuccess: () => {
+   *         // Reload data
+   *         loadPicks()
+   *       },
+   *       onError: (error) => {
+   *         // Handle error
+   *         console.error(error)
+   *       },
+   *       // Optional: custom progress updater
+   *       progressUpdater: (taskId, pollCount, maxPolls) => {
+   *         const progress = Math.min(30 + (pollCount / maxPolls) * 60, 90)
+   *         updateTask(taskId, { progress })
+   *       },
+   *       // Optional: completion checker (for polling)
+   *       completionChecker: (data, startTime) => {
+   *         return data.updated && new Date(data.updated).getTime() > startTime
+   *       },
+   *       checkEndpoint: '/api/picks',      // Endpoint to poll for completion
+   *       maxPolls: 30,                      // Max polling attempts (default 30)
+   *       pollInterval: 10000               // Poll interval in ms (default 10000)
+   *     }
+   *   )
+   * }
+   * 
+   * Then in your button:
+   * <button 
+   *   onClick={refreshPicks}
+   *   disabled={isTaskRunning('refresh_picks')}
+   * >
+   *   <RefreshCw className={isTaskRunning('refresh_picks') ? 'animate-spin' : ''} />
+   *   {isTaskRunning('refresh_picks') ? 'Refreshing...' : 'Refresh'}
+   * </button>
+   */
+  const createRefreshTask = (
+    taskType: TaskType,
+    title: string,
+    description: string,
+    apiEndpoint: string,
+    method: 'GET' | 'POST' = 'POST',
+    options?: {
+      onSuccess?: (data: any) => void
+      onError?: (error: string) => void
+      progressUpdater?: (taskId: string, pollCount: number, maxPolls: number) => void
+      completionChecker?: (data: any, taskStartTime: number) => boolean
+      checkEndpoint?: string // Endpoint to poll for completion
+      maxPolls?: number // Max polling attempts (default 30 = 5 minutes)
+      pollInterval?: number // Polling interval in ms (default 10000 = 10 seconds)
+    }
+  ): string => {
+    const taskId = createTask(taskType, title, description)
+    const taskStartTime = Date.now()
+    const {
+      onSuccess,
+      onError,
+      progressUpdater,
+      completionChecker,
+      checkEndpoint,
+      maxPolls = 30,
+      pollInterval = 10000
+    } = options || {}
+    
+    // Start the task
+    updateTask(taskId, { status: 'running', progress: 10 })
+    
+    // Make API call
+    fetch(`${API_BASE}${apiEndpoint}`, { method })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          updateTask(taskId, { progress: 30 })
+          
+          // If there's a completion checker, use polling
+          if (completionChecker && checkEndpoint) {
+            let pollCount = 0
+            
+            const pollingInterval = setInterval(async () => {
+              pollCount++
+              
+              // Update progress
+              if (progressUpdater) {
+                progressUpdater(taskId, pollCount, maxPolls)
+              } else {
+                // Default progress: 30% -> 90% over polling period
+                const progress = Math.min(30 + (pollCount / maxPolls) * 60, 90)
+                updateTask(taskId, { progress })
+              }
+              
+              // Check for completion
+              try {
+                const checkData = await fetch(`${API_BASE}${checkEndpoint}`)
+                  .then(r => r.json())
+                  .catch(() => null)
+                
+                // Handle async completion checker
+                const isComplete = await Promise.resolve(completionChecker(checkData, taskStartTime))
+                
+                if (checkData && isComplete) {
+                  clearInterval(pollingInterval)
+                  updateTask(taskId, { progress: 100 })
+                  completeTask(taskId, true)
+                  if (onSuccess) onSuccess(checkData)
+                  return
+                }
+              } catch (err) {
+                // Continue polling on error
+                console.debug('Polling error (continuing):', err)
+              }
+              
+              // Check if we reached max polls
+              if (pollCount >= maxPolls) {
+                clearInterval(pollingInterval)
+                const errorMsg = 'Task is taking longer than expected. Please refresh the page in a few minutes.'
+                completeTask(taskId, false, errorMsg)
+                if (onError) onError(errorMsg)
+              }
+            }, pollInterval)
+          } else {
+            // No polling needed, complete immediately
+            updateTask(taskId, { progress: 100 })
+            completeTask(taskId, true)
+            if (onSuccess) onSuccess(res)
+          }
+        } else {
+          const errorMsg = res.message || 'Task failed'
+          completeTask(taskId, false, errorMsg)
+          if (onError) onError(errorMsg)
+        }
+      })
+      .catch(err => {
+        console.error(`Task ${taskType} failed:`, err)
+        const errorMsg = 'Failed to start task. Please try again.'
+        completeTask(taskId, false, errorMsg)
+        if (onError) onError(errorMsg)
+      })
+    
+    return taskId
+  }
+
   // Update daily snapshot manually
   const updateDailySnapshot = async () => {
+    // Check if already running
+    if (isTaskRunning('daily_snapshot')) {
+      return
+    }
+    
     setUpdatingSnapshot(true)
     setSnapshotUpdateMessage(null)
-    try {
-      const res = await fetch(`${API_BASE}/api/daily-snapshot/update`, {
-        method: 'POST',
-      }).then(r => r.json())
-      
-      if (res.success) {
-        setSnapshotUpdateMessage({ 
-          type: 'success', 
-          text: 'Update started in the background! This may take a few minutes. The page will refresh automatically when complete.' 
-        })
-        // Reset loading state immediately - update is running in background
-        setUpdatingSnapshot(false)
-        
-        // Start polling for updated teams (check every 10 seconds, max 5 minutes)
-        let pollCount = 0
-        const maxPolls = 30 // 30 * 10 seconds = 5 minutes
-        
-        const pollingInterval = setInterval(async () => {
-          pollCount++
-          
-          // Reload teams to check for updates
-          await loadSelectedTeams()
-          
-          // Check if we reached max polls
-          if (pollCount >= maxPolls) {
-            clearInterval(pollingInterval)
-            setSnapshotUpdateMessage({ 
-              type: 'error', 
-              text: 'Update is taking longer than expected. Please refresh the page in a few minutes.' 
-            })
-            setTimeout(() => setSnapshotUpdateMessage(null), 10000)
+    
+    createRefreshTask(
+      'daily_snapshot',
+      'Update Free Hit Squad',
+      'Refreshing squad with latest player availability...',
+      '/api/daily-snapshot/update',
+      'POST',
+      {
+        onSuccess: () => {
+          setUpdatingSnapshot(false)
+          setSnapshotUpdateMessage({ 
+            type: 'success', 
+            text: 'Free hit squad updated successfully!' 
+          })
+          setTimeout(() => setSnapshotUpdateMessage(null), 5000)
+          loadSelectedTeams()
+        },
+        onError: (error) => {
+          setUpdatingSnapshot(false)
+          setSnapshotUpdateMessage({ type: 'error', text: error })
+          setTimeout(() => setSnapshotUpdateMessage(null), 5000)
+        },
+        progressUpdater: (taskId, pollCount, maxPolls) => {
+          // Custom progress updater: 30% -> 90% over polling period
+          const progress = Math.min(30 + (pollCount / maxPolls) * 60, 90)
+          updateTask(taskId, { progress })
+        },
+        completionChecker: (data, startTime) => {
+          // Completion checker: check if new snapshot exists
+          if (data.teams && data.teams.length > 0) {
+            const latestTeam = data.teams[0]
+            const snapshotTime = new Date(latestTeam.saved_at).getTime()
+            return snapshotTime > startTime
           }
-        }, 10000) // Poll every 10 seconds
-        
-        // Clear message after showing it for a bit
-        setTimeout(() => {
-          if (pollCount < maxPolls) {
-            setSnapshotUpdateMessage(null)
-          }
-        }, 8000)
-      } else {
-        setSnapshotUpdateMessage({ type: 'error', text: res.message || 'Failed to start update' })
-        setTimeout(() => setSnapshotUpdateMessage(null), 5000)
-        setUpdatingSnapshot(false)
+          return false
+        },
+        checkEndpoint: '/api/selected-teams',
+        maxPolls: 30, // 5 minutes
+        pollInterval: 10000 // 10 seconds
       }
-    } catch (err) {
-      console.error('Failed to update daily snapshot:', err)
-      setSnapshotUpdateMessage({ type: 'error', text: 'Failed to start update. Please try again.' })
-      setTimeout(() => setSnapshotUpdateMessage(null), 5000)
-      setUpdatingSnapshot(false)
-    }
+    )
   }
 
   const calculateTripleCaptain = async () => {
+    // Check if already running
+    if (isTaskRunning('triple_captain')) {
+      return
+    }
+    
     setCalculatingTripleCaptain(true)
     setTcCalculationMessage(null)
     
-    try {
-      const res = await fetch(`${API_BASE}/api/chips/triple-captain/calculate`, {
-        method: 'POST',
-      }).then(r => r.json())
-      
-      if (res.success) {
-        setTcCalculationMessage({ 
-          type: 'success', 
-          text: 'Calculation started! It will run in the background (may take up to 20 minutes). The page will automatically update when complete.' 
-        })
-        // Reset loading state immediately - calculation is running in background
-        setCalculatingTripleCaptain(false)
-        
-        // Start polling for results (check every 10 seconds, max 1 hour)
-        let pollCount = 0
-        const maxPolls = 360 // 360 * 10 seconds = 60 minutes (1 hour) max
-        
-        const interval = setInterval(async () => {
-          pollCount++
-          
-          // Force reload recommendations
+    createRefreshTask(
+      'triple_captain',
+      'Calculate Triple Captain',
+      'Analyzing optimal gameweeks for Triple Captain chip...',
+      '/api/chips/triple-captain/calculate',
+      'POST',
+      {
+        onSuccess: () => {
+          setCalculatingTripleCaptain(false)
+          setTcCalculationMessage({ 
+            type: 'success', 
+            text: 'Calculation complete! Recommendations are now available.' 
+          })
+          setTimeout(() => setTcCalculationMessage(null), 10000)
+          // Reload recommendations
           setTripleCaptainRecs({})
           setSelectedTcGameweekTab(null)
-          await ensureTripleCaptainLoaded()
-          
-          // Check if we got results
-          if (Object.keys(tripleCaptainRecs).length > 0 || pollCount >= maxPolls) {
-            clearInterval(interval)
-            setTcPollingInterval(null)
-            if (Object.keys(tripleCaptainRecs).length > 0) {
-              setTcCalculationMessage({ 
-                type: 'success', 
-                text: 'Calculation complete! Recommendations are now available.' 
-              })
-            } else {
-              setTcCalculationMessage({ 
-                type: 'error', 
-                text: 'Calculation is taking longer than expected. Please refresh the page in a few minutes.' 
-              })
+          ensureTripleCaptainLoaded()
+        },
+        onError: (error) => {
+          setCalculatingTripleCaptain(false)
+          setTcCalculationMessage({ type: 'error', text: error })
+          setTimeout(() => setTcCalculationMessage(null), 5000)
+        },
+        progressUpdater: (taskId, pollCount, maxPolls) => {
+          // Custom progress updater: 20% -> 95% over polling period
+          const progress = Math.min(20 + (pollCount / maxPolls) * 75, 95)
+          updateTask(taskId, { progress })
+        },
+        completionChecker: async (data, startTime) => {
+          // Check if we got results from API response
+          // The API should return recommendations or gameweeks
+          if (data && typeof data === 'object') {
+            // Check if it has recommendations or gameweeks with actual data
+            const hasRecs = (data.recommendations && Object.keys(data.recommendations).length > 0) || 
+                          (data.gameweeks && Array.isArray(data.gameweeks) && data.gameweeks.length > 0) ||
+                          (data.gameweek && typeof data.gameweek === 'object')
+            
+            if (hasRecs) {
+              // Reload recommendations in UI (fire and forget)
+              setTripleCaptainRecs({})
+              setSelectedTcGameweekTab(null)
+              ensureTripleCaptainLoaded()
             }
-            setTimeout(() => setTcCalculationMessage(null), 10000)
+            return !!hasRecs
           }
-        }, 10000) // Poll every 10 seconds
-        
-        setTcPollingInterval(interval)
-        
-        // Clear message after showing it for a bit
-        setTimeout(() => {
-          if (pollCount < maxPolls) {
-            setTcCalculationMessage(null)
-          }
-        }, 8000)
-      } else {
-        setTcCalculationMessage({ type: 'error', text: res.message || 'Failed to start calculation' })
-        setCalculatingTripleCaptain(false)
-        setTimeout(() => setTcCalculationMessage(null), 5000)
+          return false
+        },
+        checkEndpoint: '/api/chips/triple-captain',
+        maxPolls: 360, // 60 minutes (1 hour)
+        pollInterval: 10000 // 10 seconds
       }
-    } catch (err: any) {
-      console.error('Error starting Triple Captain calculation:', err)
-      setTcCalculationMessage({ type: 'error', text: 'Failed to start calculation. Please try again.' })
-      setCalculatingTripleCaptain(false)
-      setTimeout(() => setTcCalculationMessage(null), 5000)
-    }
+    )
   }
 
   // Load selected teams when the tab is active
@@ -1542,6 +1774,7 @@ function App() {
     { id: 'triple-captain', icon: Crown, label: 'Triple Captain', shortLabel: 'TC', color: 'text-purple-400', description: 'Find optimal gameweeks to use Triple Captain chip' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
     { id: 'differentials', icon: Target, label: 'Differentials', shortLabel: 'Diffs', color: 'text-pink-400', description: 'Low ownership, high potential players' },
+    { id: 'tasks', icon: Clock, label: 'Tasks', shortLabel: 'Tasks', color: 'text-cyan-400', description: 'Track background tasks and their progress' },
   ]
 
 
@@ -2724,12 +2957,12 @@ function App() {
                     </div>
                     <button
                       onClick={updateDailySnapshot}
-                      disabled={updatingSnapshot}
+                      disabled={isTaskRunning('daily_snapshot')}
                       className="flex items-center gap-2 px-3 py-1.5 bg-[#00ff87]/10 hover:bg-[#00ff87]/20 text-[#00ff87] rounded-lg border border-[#00ff87]/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
                       title="Refresh free hit team with latest player status"
                     >
-                      <RefreshCw className={`w-4 h-4 ${updatingSnapshot ? 'animate-spin' : ''}`} />
-                      <span className="hidden sm:inline">{updatingSnapshot ? 'Updating...' : 'Refresh Now'}</span>
+                      <RefreshCw className={`w-4 h-4 ${isTaskRunning('daily_snapshot') ? 'animate-spin' : ''}`} />
+                      <span className="hidden sm:inline">{isTaskRunning('daily_snapshot') ? 'Updating...' : 'Refresh Now'}</span>
                     </button>
                   </div>
                 </div>
@@ -3170,7 +3403,151 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Tasks Tab */}
+        {activeTab === 'tasks' && (
+          <div className="space-y-6">
+            <div className="card">
+              <div className="card-header">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-cyan-400" />
+                  <span>Background Tasks</span>
+                </div>
+              </div>
+              <p className="text-gray-400 text-sm mb-4">
+                Track the progress of background tasks like squad updates and Triple Captain calculations.
+              </p>
+
+              {tasks.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No active tasks</p>
+                  <p className="text-xs mt-2">Tasks will appear here when you trigger background operations.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            {task.status === 'running' && (
+                              <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                            )}
+                            {task.status === 'completed' && (
+                              <CheckCircle2 className="w-4 h-4 text-green-400" />
+                            )}
+                            {task.status === 'failed' && (
+                              <AlertCircle className="w-4 h-4 text-red-400" />
+                            )}
+                            {task.status === 'pending' && (
+                              <Clock className="w-4 h-4 text-gray-400" />
+                            )}
+                            <h3 className="font-medium text-white">{task.title}</h3>
+                          </div>
+                          <p className="text-sm text-gray-400">{task.description}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className={`text-xs font-medium px-2 py-1 rounded ${
+                            task.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
+                            task.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                            task.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {task.status === 'running' ? 'Running' :
+                             task.status === 'completed' ? 'Completed' :
+                             task.status === 'failed' ? 'Failed' :
+                             'Pending'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      {(task.status === 'running' || task.status === 'pending') && (
+                        <div className="mb-2">
+                          <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+                            <span>Progress</span>
+                            <span>{Math.round(task.progress)}%</span>
+                          </div>
+                          <div className="w-full bg-[#1a1a2e] rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-300 ease-out"
+                              style={{ width: `${task.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {task.status === 'completed' && task.completedAt && (
+                        <div className="text-xs text-gray-500 mt-2">
+                          Completed {new Date(task.completedAt).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
+                      )}
+
+                      {task.status === 'failed' && task.error && (
+                        <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400">
+                          {task.error}
+                        </div>
+                      )}
+
+                      {task.status === 'completed' && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          Started {new Date(task.createdAt).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Notification Container - Bottom Right */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
+        {notifications.map((notification) => (
+          <div
+            key={notification.id}
+            className={`p-4 rounded-lg border shadow-lg animate-in slide-in-from-right ${
+              notification.type === 'success'
+                ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              {notification.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm mb-1">{notification.title}</div>
+                <div className="text-xs opacity-90">{notification.message}</div>
+              </div>
+              <button
+                onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
+                className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* Footer */}
       <footer className="border-t border-[#2a2a4a] py-6 mt-12">
