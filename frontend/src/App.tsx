@@ -296,28 +296,113 @@ function App() {
     return false
   }, [])
 
-  // Load tasks from localStorage (reusable function)
+  // Check backend for recent operations and create tasks for them
+  const checkBackendForRecentTasks = async (): Promise<Task[]> => {
+    const recentTasks: Task[] = []
+    const now = Date.now()
+    const fiveMinutesAgo = now - 5 * 60 * 1000
+
+    try {
+      // Check for recent daily snapshot
+      const selectedTeamsRes = await fetch(`${API_BASE}/api/selected-teams`).then(r => r.json()).catch(() => null)
+      if (selectedTeamsRes?.teams && selectedTeamsRes.teams.length > 0) {
+        const latestTeam = selectedTeamsRes.teams[0]
+        const snapshotTime = new Date(latestTeam.saved_at).getTime()
+        if (snapshotTime > fiveMinutesAgo) {
+          recentTasks.push({
+            id: `daily_snapshot_${snapshotTime}`,
+            type: 'daily_snapshot',
+            title: 'Update Free Hit Squad',
+            description: 'Refreshing squad with latest player availability...',
+            status: 'completed',
+            progress: 100,
+            createdAt: snapshotTime - 60000, // Assume it took 1 minute
+            completedAt: snapshotTime
+          })
+        }
+      }
+
+      // Check for recent triple captain calculation
+      const tcRes = await fetch(`${API_BASE}/api/chips/triple-captain`).then(r => r.json()).catch(() => null)
+      if (tcRes && typeof tcRes === 'object') {
+        const hasRecs = (tcRes.recommendations && Object.keys(tcRes.recommendations).length > 0) || 
+                      (tcRes.gameweeks && Array.isArray(tcRes.gameweeks) && tcRes.gameweeks.length > 0) ||
+                      (tcRes.gameweek && typeof tcRes.gameweek === 'object')
+        if (hasRecs) {
+          // We can't know exactly when it was calculated, so we'll show it as recently completed
+          // if recommendations exist (they're only created after calculation completes)
+          const estimatedTime = now - 2 * 60 * 1000 // Assume 2 minutes ago
+          recentTasks.push({
+            id: `triple_captain_${estimatedTime}`,
+            type: 'triple_captain',
+            title: 'Calculate Triple Captain',
+            description: 'Analyzing optimal gameweeks for Triple Captain chip...',
+            status: 'completed',
+            progress: 100,
+            createdAt: estimatedTime - 5 * 60 * 1000, // Assume it took 5 minutes
+            completedAt: estimatedTime
+          })
+        }
+      }
+    } catch (err) {
+      // Silently fail - this is just for showing recent tasks
+      console.debug('Error checking backend for recent tasks:', err)
+    }
+
+    return recentTasks
+  }
+
+  // Load tasks from backend (with localStorage fallback)
   const loadTasksFromStorage = useCallback(async () => {
     try {
-      const savedTasks = localStorage.getItem(TASKS_KEY)
+      // Try to fetch from backend first
       let tasksToLoad: Task[] = []
-      
-      if (savedTasks) {
-        const parsed = JSON.parse(savedTasks) as Task[]
-        const now = Date.now()
-        
-        // Filter out old completed tasks immediately
-        tasksToLoad = parsed.filter(task => {
-          // Keep pending and running tasks
-          if (task.status === 'pending' || task.status === 'running') {
-            return true
+      try {
+        const res = await fetch(`${API_BASE}/api/tasks?include_old=false`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.tasks && Array.isArray(data.tasks)) {
+            // Convert backend format to frontend format
+            tasksToLoad = data.tasks.map((t: any) => ({
+              id: t.id,
+              type: t.type as TaskType,
+              title: t.title,
+              description: t.description || '',
+              status: t.status as TaskStatus,
+              progress: t.progress || 0,
+              createdAt: t.createdAt || Date.now(),
+              completedAt: t.completedAt,
+              error: t.error
+            }))
           }
-          // For completed/failed tasks, keep if less than 5 minutes old
-          if (task.completedAt) {
-            return (now - task.completedAt) < 5 * 60 * 1000
-          }
-          return false
-        })
+        }
+      } catch (err) {
+        console.debug('Failed to fetch tasks from backend, falling back to localStorage:', err)
+        // Fall back to localStorage
+        const savedTasks = localStorage.getItem(TASKS_KEY)
+        if (savedTasks) {
+          const parsed = JSON.parse(savedTasks) as Task[]
+          const now = Date.now()
+          
+          // Filter out old completed tasks immediately
+          tasksToLoad = parsed.filter(task => {
+            // Keep pending and running tasks
+            if (task.status === 'pending' || task.status === 'running') {
+              return true
+            }
+            // For completed/failed tasks, keep if less than 5 minutes old
+            if (task.completedAt) {
+              return (now - task.completedAt) < 5 * 60 * 1000
+            }
+            return false
+          })
+        }
+      }
+
+      // If still empty (e.g., incognito mode with no backend), check backend for recent operations
+      if (tasksToLoad.length === 0) {
+        const recentTasks = await checkBackendForRecentTasks()
+        tasksToLoad = recentTasks
       }
 
       // Set tasks immediately (non-blocking) - even if empty
@@ -333,21 +418,31 @@ function App() {
                 // Check if task actually completed
                 const completed = await checkTaskCompletion(task)
                 if (completed) {
-                  return {
+                  const updated = {
                     ...task,
                     status: 'completed' as TaskStatus,
                     progress: 100,
                     completedAt: Date.now()
                   }
+                  // Update backend
+                  await updateTask(task.id, { status: 'completed', progress: 100 })
+                  return updated
                 }
                 // If task started more than 10 minutes ago, mark as failed
                 if (now - task.createdAt > 10 * 60 * 1000) {
-                  return {
+                  const updated = {
                     ...task,
                     status: 'failed' as TaskStatus,
                     error: 'Task timed out. It may have completed - please check the results or try again.',
                     completedAt: Date.now()
                   }
+                  // Update backend
+                  await updateTask(task.id, { 
+                    status: 'failed', 
+                    progress: 100,
+                    error: updated.error 
+                  })
+                  return updated
                 }
                 // Otherwise, keep it as running
                 return task
@@ -358,16 +453,17 @@ function App() {
 
           setTasks(verifiedTasks)
           
-          // Persist verified tasks
+          // Persist verified tasks to localStorage as backup (if not in incognito mode)
           try {
             localStorage.setItem(TASKS_KEY, JSON.stringify(verifiedTasks))
           } catch (err) {
-            console.error('Failed to save verified tasks:', err)
+            // Silently fail in incognito mode or if storage is disabled
+            console.debug('Could not save tasks to localStorage (may be incognito mode):', err)
           }
         }, 100) // Small delay to not block initial render
       }
     } catch (err) {
-      console.error('Failed to load tasks from localStorage:', err)
+      console.error('Failed to load tasks:', err)
       // Ensure tasks state is set even on error
       setTasks([])
     }
@@ -511,7 +607,7 @@ function App() {
   }
 
   // Task management helpers
-  const createTask = (type: TaskType, title: string, description: string, showModal: boolean = true): string => {
+  const createTask = async (type: TaskType, title: string, description: string, showModal: boolean = true): Promise<string> => {
     const taskId = `${type}_${Date.now()}`
     const newTask: Task = {
       id: taskId,
@@ -522,13 +618,33 @@ function App() {
       progress: 0,
       createdAt: Date.now()
     }
+    
+    // Save to backend first
+    try {
+      await fetch(`${API_BASE}/api/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          task_type: type,
+          title,
+          description,
+          status: 'pending',
+          progress: 0
+        })
+      })
+    } catch (err) {
+      console.error('Failed to save task to backend:', err)
+      // Continue anyway - will fall back to localStorage
+    }
+    
     setTasks(prev => {
       const updated = [...prev, newTask]
-      // Persist to localStorage
+      // Also persist to localStorage as backup
       try {
         localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
       } catch (err) {
-        console.error('Failed to save tasks:', err)
+        console.error('Failed to save tasks to localStorage:', err)
       }
       return updated
     })
@@ -541,22 +657,54 @@ function App() {
     return taskId
   }
 
-  const updateTask = (taskId: string, updates: Partial<Task>) => {
+  const updateTask = async (taskId: string, updates: Partial<Task>) => {
+    // Update backend first
+    try {
+      await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: updates.status,
+          progress: updates.progress,
+          error: updates.error
+        })
+      })
+    } catch (err) {
+      console.error('Failed to update task on backend:', err)
+      // Continue anyway - will fall back to localStorage
+    }
+    
     setTasks(prev => {
       const updated = prev.map(task => 
         task.id === taskId ? { ...task, ...updates } : task
       )
-      // Persist to localStorage
+      // Also persist to localStorage as backup
       try {
         localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
       } catch (err) {
-        console.error('Failed to save tasks:', err)
+        console.error('Failed to save tasks to localStorage:', err)
       }
       return updated
     })
   }
 
-  const completeTask = (taskId: string, success: boolean, error?: string) => {
+  const completeTask = async (taskId: string, success: boolean, error?: string) => {
+    // Update backend first
+    try {
+      await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: success ? 'completed' : 'failed',
+          progress: 100,
+          error: error
+        })
+      })
+    } catch (err) {
+      console.error('Failed to update task on backend:', err)
+      // Continue anyway
+    }
+
     // Get task info before updating (to avoid stale closure)
     setTasks(prev => {
       const task = prev.find(t => t.id === taskId)
@@ -581,10 +729,17 @@ function App() {
       )
 
       // Auto-remove completed tasks after 5 minutes
-      setTimeout(() => {
+      setTimeout(async () => {
+        // Delete from backend
+        try {
+          await fetch(`${API_BASE}/api/tasks/${taskId}`, { method: 'DELETE' })
+        } catch (err) {
+          console.debug('Failed to delete task from backend:', err)
+        }
+
         setTasks(current => {
           const filtered = current.filter(t => t.id !== taskId)
-          // Persist to localStorage
+          // Also persist to localStorage as backup
           try {
             localStorage.setItem(TASKS_KEY, JSON.stringify(filtered))
           } catch (err) {
@@ -594,7 +749,7 @@ function App() {
         })
       }, 5 * 60 * 1000)
 
-      // Persist updated tasks
+      // Persist updated tasks to localStorage as backup
       try {
         localStorage.setItem(TASKS_KEY, JSON.stringify(updatedTasks))
       } catch (err) {
@@ -668,7 +823,7 @@ function App() {
    *   {isTaskRunning('refresh_picks') ? 'Refreshing...' : 'Refresh'}
    * </button>
    */
-  const createRefreshTask = (
+  const createRefreshTask = async (
     taskType: TaskType,
     title: string,
     description: string,
@@ -683,8 +838,8 @@ function App() {
       maxPolls?: number // Max polling attempts (default 30 = 5 minutes)
       pollInterval?: number // Polling interval in ms (default 10000 = 10 seconds)
     }
-  ): string => {
-    const taskId = createTask(taskType, title, description)
+  ): Promise<string> => {
+    const taskId = await createTask(taskType, title, description)
     const taskStartTime = Date.now()
     const {
       onSuccess,
@@ -795,7 +950,7 @@ function App() {
     setUpdatingSnapshot(true)
     setSnapshotUpdateMessage(null)
     
-    createRefreshTask(
+    await createRefreshTask(
       'daily_snapshot',
       'Update Free Hit Squad',
       'Refreshing squad with latest player availability...',
@@ -846,7 +1001,7 @@ function App() {
     setCalculatingTripleCaptain(true)
     setTcCalculationMessage(null)
     
-    createRefreshTask(
+    await createRefreshTask(
       'triple_captain',
       'Calculate Triple Captain',
       'Analyzing optimal gameweeks for Triple Captain chip...',

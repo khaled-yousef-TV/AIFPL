@@ -2605,6 +2605,148 @@ async def delete_saved_squad(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== Tasks API ====================
+
+@app.get("/api/tasks")
+async def get_tasks(include_old: bool = False):
+    """
+    Get all tasks.
+    
+    Args:
+        include_old: If True, include old completed tasks. If False, only return tasks from last 5 minutes or running/pending tasks.
+    
+    Returns:
+        List of tasks
+    """
+    try:
+        tasks = db_manager.get_all_tasks(include_old=include_old)
+        return {"tasks": tasks}
+    except Exception as e:
+        logger.error(f"Error fetching tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str):
+    """
+    Get a specific task by ID.
+    
+    Args:
+        task_id: Unique task identifier
+    
+    Returns:
+        Task data
+    """
+    try:
+        task = db_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tasks")
+async def create_task(request: dict):
+    """
+    Create a new task.
+    
+    Request body:
+        - task_id: Unique task identifier (required)
+        - task_type: Type of task (required)
+        - title: Task title (required)
+        - description: Task description (optional)
+        - status: Task status (default: "pending")
+        - progress: Progress percentage 0-100 (default: 0)
+    
+    Returns:
+        Created task data
+    """
+    try:
+        task_id = request.get("task_id") or request.get("id")
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id is required")
+        
+        task_type = request.get("task_type") or request.get("type")
+        if not task_type:
+            raise HTTPException(status_code=400, detail="task_type is required")
+        
+        title = request.get("title")
+        if not title:
+            raise HTTPException(status_code=400, detail="title is required")
+        
+        task = db_manager.create_task(
+            task_id=task_id,
+            task_type=task_type,
+            title=title,
+            description=request.get("description"),
+            status=request.get("status", "pending"),
+            progress=request.get("progress", 0)
+        )
+        return task
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/tasks/{task_id}")
+async def update_task(task_id: str, request: dict):
+    """
+    Update an existing task.
+    
+    Request body (all optional):
+        - status: New status
+        - progress: New progress (0-100)
+        - error: Error message if failed
+    
+    Returns:
+        Updated task data
+    """
+    try:
+        task = db_manager.update_task(
+            task_id=task_id,
+            status=request.get("status"),
+            progress=request.get("progress"),
+            error=request.get("error")
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return task
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str):
+    """
+    Delete a task.
+    
+    Args:
+        task_id: Unique task identifier
+    
+    Returns:
+        Success message
+    """
+    try:
+        deleted = db_manager.delete_task(task_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        return {"success": True, "message": f"Task '{task_id}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== Wake-up Endpoint for Render Free Tier ====================
 
 @app.post("/api/wake-up", response_model=HealthResponse)

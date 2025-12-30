@@ -241,6 +241,27 @@ class TripleCaptainRecommendations(Base):
         return f"<TripleCaptainRecommendations(gameweek={self.gameweek}, calculated_at={self.calculated_at})>"
 
 
+class Task(Base):
+    """Store background task status and progress."""
+    __tablename__ = "tasks"
+    
+    id = Column(Integer, primary_key=True)
+    task_id = Column(String(100), nullable=False, unique=True, index=True)  # Client-generated unique ID
+    task_type = Column(String(50), nullable=False, index=True)  # daily_snapshot, triple_captain, etc.
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, index=True)  # pending, running, completed, failed
+    progress = Column(Integer, default=0)  # 0-100
+    error = Column(Text, nullable=True)  # Error message if failed
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = Column(DateTime, nullable=True, index=True)
+    
+    def __repr__(self):
+        return f"<Task(task_id='{self.task_id}', type='{self.task_type}', status='{self.status}')>"
+
+
 def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.

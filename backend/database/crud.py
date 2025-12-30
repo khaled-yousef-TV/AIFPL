@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
-    TripleCaptainRecommendations, init_db
+    TripleCaptainRecommendations, Task, init_db
 )
 # Import SavedSquad - must be imported after other models to avoid circular imports
 try:
@@ -718,5 +718,233 @@ class DatabaseManager:
                     })
             
             return result
+
+    # ==================== Tasks ====================
+    
+    def create_task(
+        self,
+        task_id: str,
+        task_type: str,
+        title: str,
+        description: str = None,
+        status: str = "pending",
+        progress: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Create a new task.
+        
+        Args:
+            task_id: Unique task identifier
+            task_type: Type of task (daily_snapshot, triple_captain, etc.)
+            title: Task title
+            description: Task description
+            status: Task status (pending, running, completed, failed)
+            progress: Progress percentage (0-100)
+            
+        Returns:
+            Dictionary with task data
+        """
+        try:
+            with self.get_session() as session:
+                task = Task(
+                    task_id=task_id,
+                    task_type=task_type,
+                    title=title,
+                    description=description,
+                    status=status,
+                    progress=progress
+                )
+                session.add(task)
+                session.commit()
+                session.refresh(task)
+                
+                return {
+                    "id": task.task_id,
+                    "type": task.task_type,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
+                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
+                    "error": task.error
+                }
+        except Exception as e:
+            logger.error(f"Failed to create task {task_id}: {e}")
+            raise
+    
+    def update_task(
+        self,
+        task_id: str,
+        status: str = None,
+        progress: int = None,
+        error: str = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Update an existing task.
+        
+        Args:
+            task_id: Unique task identifier
+            status: New status (optional)
+            progress: New progress (optional)
+            error: Error message if failed (optional)
+            
+        Returns:
+            Updated task dictionary or None if not found
+        """
+        try:
+            with self.get_session() as session:
+                task = session.query(Task).filter(Task.task_id == task_id).first()
+                if not task:
+                    return None
+                
+                if status is not None:
+                    task.status = status
+                if progress is not None:
+                    task.progress = progress
+                if error is not None:
+                    task.error = error
+                if status in ("completed", "failed"):
+                    task.completed_at = datetime.utcnow()
+                
+                session.commit()
+                session.refresh(task)
+                
+                return {
+                    "id": task.task_id,
+                    "type": task.task_type,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
+                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
+                    "error": task.error
+                }
+        except Exception as e:
+            logger.error(f"Failed to update task {task_id}: {e}")
+            raise
+    
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a task by ID.
+        
+        Args:
+            task_id: Unique task identifier
+            
+        Returns:
+            Task dictionary or None if not found
+        """
+        try:
+            with self.get_session() as session:
+                task = session.query(Task).filter(Task.task_id == task_id).first()
+                if not task:
+                    return None
+                
+                return {
+                    "id": task.task_id,
+                    "type": task.task_type,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
+                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
+                    "error": task.error
+                }
+        except Exception as e:
+            logger.error(f"Failed to get task {task_id}: {e}")
+            return None
+    
+    def get_all_tasks(self, include_old: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get all tasks, optionally filtering out old completed tasks.
+        
+        Args:
+            include_old: If False, only return tasks from last 5 minutes or running/pending tasks
+            
+        Returns:
+            List of task dictionaries
+        """
+        try:
+            with self.get_session() as session:
+                query = session.query(Task)
+                
+                if not include_old:
+                    # Only get recent tasks (last 5 minutes) or running/pending tasks
+                    from datetime import timedelta
+                    cutoff = datetime.utcnow() - timedelta(minutes=5)
+                    query = query.filter(
+                        (Task.status.in_(["pending", "running"])) |
+                        ((Task.status.in_(["completed", "failed"])) & (Task.completed_at >= cutoff))
+                    )
+                
+                tasks = query.order_by(Task.created_at.desc()).all()
+                
+                return [
+                    {
+                        "id": task.task_id,
+                        "type": task.task_type,
+                        "title": task.title,
+                        "description": task.description,
+                        "status": task.status,
+                        "progress": task.progress,
+                        "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
+                        "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
+                        "error": task.error
+                    }
+                    for task in tasks
+                ]
+        except Exception as e:
+            logger.error(f"Failed to get tasks: {e}")
+            return []
+    
+    def delete_task(self, task_id: str) -> bool:
+        """
+        Delete a task.
+        
+        Args:
+            task_id: Unique task identifier
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        try:
+            with self.get_session() as session:
+                task = session.query(Task).filter(Task.task_id == task_id).first()
+                if not task:
+                    return False
+                session.delete(task)
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete task {task_id}: {e}")
+            return False
+    
+    def cleanup_old_tasks(self, minutes: int = 5) -> int:
+        """
+        Delete tasks older than specified minutes (except running/pending).
+        
+        Args:
+            minutes: Age threshold in minutes
+            
+        Returns:
+            Number of tasks deleted
+        """
+        try:
+            with self.get_session() as session:
+                from datetime import timedelta
+                cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+                
+                deleted = session.query(Task).filter(
+                    Task.status.in_(["completed", "failed"]),
+                    Task.completed_at < cutoff
+                ).delete()
+                
+                session.commit()
+                return deleted
+        except Exception as e:
+            logger.error(f"Failed to cleanup old tasks: {e}")
+            return 0
 
 
