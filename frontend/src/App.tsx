@@ -264,6 +264,7 @@ function App() {
   // Task management
   const [tasks, setTasks] = useState<Task[]>([])
   const [notifications, setNotifications] = useState<Array<{ id: string; type: 'success' | 'error'; title: string; message: string; timestamp: number }>>([])
+  const [taskStartedModal, setTaskStartedModal] = useState<{ taskId: string; title: string } | null>(null)
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
@@ -446,7 +447,7 @@ function App() {
   }
 
   // Task management helpers
-  const createTask = (type: TaskType, title: string, description: string): string => {
+  const createTask = (type: TaskType, title: string, description: string, showModal: boolean = true): string => {
     const taskId = `${type}_${Date.now()}`
     const newTask: Task = {
       id: taskId,
@@ -467,6 +468,12 @@ function App() {
       }
       return updated
     })
+    
+    // Show modal if requested
+    if (showModal) {
+      setTaskStartedModal({ taskId, title })
+    }
+    
     return taskId
   }
 
@@ -3605,6 +3612,55 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Task Started Modal */}
+      {taskStartedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0">
+                <div className="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 text-cyan-400 animate-spin" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  Task Started
+                </h3>
+                <p className="text-gray-300 text-sm mb-1">
+                  <span className="font-medium">{taskStartedModal.title}</span> is now running in the background.
+                </p>
+                <p className="text-gray-400 text-xs mb-4">
+                  You can track its progress in the <span className="text-cyan-400 font-medium">Tasks</span> tab.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setActiveTab('tasks')
+                      setTaskStartedModal(null)
+                    }}
+                    className="flex-1 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded-lg border border-cyan-500/30 transition-colors text-sm font-medium"
+                  >
+                    View Tasks Tab
+                  </button>
+                  <button
+                    onClick={() => setTaskStartedModal(null)}
+                    className="px-4 py-2 bg-[#2a2a4a] hover:bg-[#3a3a5a] text-gray-300 rounded-lg transition-colors text-sm font-medium"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={() => setTaskStartedModal(null)}
+                className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Container - Bottom Right */}
       <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
