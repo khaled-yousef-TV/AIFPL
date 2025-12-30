@@ -296,9 +296,8 @@ function App() {
     return false
   }
 
-  // Load tasks from localStorage on mount (non-blocking)
-  useEffect(() => {
-    // First, quickly load tasks from localStorage without API calls
+  // Load tasks from localStorage (reusable function)
+  const loadTasksFromStorage = () => {
     try {
       const savedTasks = localStorage.getItem(TASKS_KEY)
       if (savedTasks) {
@@ -361,10 +360,18 @@ function App() {
             console.error('Failed to save verified tasks:', err)
           }
         }, 100) // Small delay to not block initial render
+      } else {
+        // If no saved tasks, ensure tasks state is empty array
+        setTasks([])
       }
     } catch (err) {
       console.error('Failed to load tasks from localStorage:', err)
     }
+  }
+
+  // Load tasks from localStorage on mount (non-blocking)
+  useEffect(() => {
+    loadTasksFromStorage()
   }, [])
 
   // Persist tasks to localStorage whenever they change
@@ -1214,6 +1221,11 @@ function App() {
       if (loadingTripleCaptain) {
         setLoadingTripleCaptain(false)
       }
+    }
+    // Reload tasks from localStorage when tasks tab becomes active
+    // This ensures tasks are always up-to-date when viewing the tab
+    if (activeTab === 'tasks') {
+      loadTasksFromStorage()
     }
     
     // Cleanup on unmount
