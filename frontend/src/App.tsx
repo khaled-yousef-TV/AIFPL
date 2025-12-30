@@ -3060,9 +3060,16 @@ function App() {
                                     </div>
                                   </td>
                                   <td className="py-3">
-                                    <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                                      GW{rec.peak_gameweek}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                                        GW{rec.peak_gameweek}
+                                      </span>
+                                      {rec.peak_opponent && (
+                                        <span className="text-xs text-gray-400">
+                                          vs {rec.peak_opponent}
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="py-3">
                                     <span className="font-mono font-semibold text-purple-400">

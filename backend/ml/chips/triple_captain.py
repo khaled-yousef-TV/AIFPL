@@ -128,6 +128,19 @@ class TripleCaptainOptimizer:
                         else fixture.team_a_difficulty
                     )
                     
+                    # Get opponent team
+                    opponent_team_id = fixture.team_a if is_home else fixture.team_h
+                    opponent_team_name = self._get_team_name(opponent_team_id)
+                    
+                    # For DGW, get both opponents
+                    opponents = [opponent_team_name]
+                    if is_dgw and len(player_fixtures) > 1:
+                        fixture2 = player_fixtures[1]
+                        is_home2 = fixture2.team_h == player.team
+                        opponent_team_id2 = fixture2.team_a if is_home2 else fixture2.team_h
+                        opponent_team_name2 = self._get_team_name(opponent_team_id2)
+                        opponents.append(opponent_team_name2)
+                    
                     # Get clean sheet probability (for DEF/GK)
                     clean_sheet_prob = self._get_clean_sheet_probability(
                         player.element_type, player.team, fixture, features
@@ -152,6 +165,8 @@ class TripleCaptainOptimizer:
                         "is_double_gameweek": is_dgw,
                         "fixture_difficulty": difficulty,
                         "is_home": is_home,
+                        "opponent": opponent_team_name if not is_dgw else " / ".join(opponents),
+                        "opponents": opponents,  # Array for DGW
                         "statistics": {
                             "median_points": haul_result["median_points"],
                             "p75_points": haul_result["p75_points"],
