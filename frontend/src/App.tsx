@@ -1957,6 +1957,9 @@ function App() {
       <aside className="hidden md:flex flex-col w-64 bg-[#1a1a2e] border-r border-[#2a2a4a] sticky top-0 h-screen overflow-y-auto">
         <div className="px-6 py-4 border-b border-[#2a2a4a]">
           <div className="flex items-center gap-3 h-10">
+            {tasks.some(task => task.status === 'running') && (
+              <Loader2 className="w-5 h-5 text-[#00ff87] animate-spin flex-shrink-0" />
+            )}
             <div className="w-10 h-10 bg-gradient-to-br from-[#38003c] to-[#00ff87] rounded-lg flex items-center justify-center shadow-lg border border-[#00ff87]/20 flex-shrink-0">
               <FPLLogo className="w-6 h-6" />
             </div>
