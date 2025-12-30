@@ -13,7 +13,7 @@ from time import time
 from threading import Lock
 import requests
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -238,25 +238,6 @@ async def _save_daily_snapshot_async():
         # Force refresh FPL data to get latest player status before generating squad
         logger.info("Forcing FPL data refresh before daily snapshot generation")
         fpl_client.get_bootstrap(force_refresh=True)
-        
-        # Calculate and save Triple Captain recommendations
-        try:
-            logger.info("Calculating Triple Captain recommendations...")
-            from ml.chips import TripleCaptainOptimizer
-            optimizer = TripleCaptainOptimizer(fpl_client, feature_eng)
-            tc_recommendations = optimizer.get_triple_captain_recommendations(
-                gameweek_range=5,
-                top_n=20
-            )
-            db_manager.save_triple_captain_recommendations(
-                gameweek=next_gw.id,
-                recommendations=tc_recommendations,
-                gameweek_range=5
-            )
-            logger.info(f"Saved Triple Captain recommendations for GW{next_gw.id}")
-        except Exception as tc_error:
-            logger.error(f"Error calculating Triple Captain recommendations: {tc_error}", exc_info=True)
-            # Don't fail the whole snapshot if TC calculation fails
         
         # Get the current combined squad suggestion with refresh enabled
         squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
@@ -2244,20 +2225,21 @@ async def get_selected_team(gameweek: int):
 
 
 @app.post("/api/daily-snapshot/update")
-async def update_daily_snapshot():
+async def update_daily_snapshot(background_tasks: BackgroundTasks):
     """
     Manually trigger an update of the daily snapshot for the current/next gameweek.
     This forces a refresh of FPL data and regenerates the squad with latest player status.
-    Also calculates and saves Triple Captain recommendations.
+    Also calculates and saves Triple Captain recommendations in the background.
     """
     try:
-        await _save_daily_snapshot_async()
+        # Run the snapshot update in the background to avoid blocking
+        background_tasks.add_task(_save_daily_snapshot_async)
         return {
             "success": True,
-            "message": "Daily snapshot and Triple Captain recommendations updated successfully"
+            "message": "Daily snapshot update started in the background. This may take a few minutes."
         }
     except Exception as e:
-        logger.error(f"Error updating daily snapshot: {e}")
+        logger.error(f"Error scheduling daily snapshot update: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

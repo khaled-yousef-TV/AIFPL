@@ -381,20 +381,49 @@ function App() {
       }).then(r => r.json())
       
       if (res.success) {
-        setSnapshotUpdateMessage({ type: 'success', text: 'Free hit team updated successfully!' })
-        // Reload teams to show the updated snapshot
-        await loadSelectedTeams()
-        // Clear message after 3 seconds
-        setTimeout(() => setSnapshotUpdateMessage(null), 3000)
+        setSnapshotUpdateMessage({ 
+          type: 'success', 
+          text: 'Update started in the background! This may take a few minutes. The page will refresh automatically when complete.' 
+        })
+        // Reset loading state immediately - update is running in background
+        setUpdatingSnapshot(false)
+        
+        // Start polling for updated teams (check every 10 seconds, max 5 minutes)
+        let pollCount = 0
+        const maxPolls = 30 // 30 * 10 seconds = 5 minutes
+        
+        const pollingInterval = setInterval(async () => {
+          pollCount++
+          
+          // Reload teams to check for updates
+          await loadSelectedTeams()
+          
+          // Check if we reached max polls
+          if (pollCount >= maxPolls) {
+            clearInterval(pollingInterval)
+            setSnapshotUpdateMessage({ 
+              type: 'error', 
+              text: 'Update is taking longer than expected. Please refresh the page in a few minutes.' 
+            })
+            setTimeout(() => setSnapshotUpdateMessage(null), 10000)
+          }
+        }, 10000) // Poll every 10 seconds
+        
+        // Clear message after showing it for a bit
+        setTimeout(() => {
+          if (pollCount < maxPolls) {
+            setSnapshotUpdateMessage(null)
+          }
+        }, 8000)
       } else {
-        setSnapshotUpdateMessage({ type: 'error', text: res.message || 'Failed to update snapshot' })
+        setSnapshotUpdateMessage({ type: 'error', text: res.message || 'Failed to start update' })
         setTimeout(() => setSnapshotUpdateMessage(null), 5000)
+        setUpdatingSnapshot(false)
       }
     } catch (err) {
       console.error('Failed to update daily snapshot:', err)
-      setSnapshotUpdateMessage({ type: 'error', text: 'Failed to update snapshot. Please try again.' })
+      setSnapshotUpdateMessage({ type: 'error', text: 'Failed to start update. Please try again.' })
       setTimeout(() => setSnapshotUpdateMessage(null), 5000)
-    } finally {
       setUpdatingSnapshot(false)
     }
   }
