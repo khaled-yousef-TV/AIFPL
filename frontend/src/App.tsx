@@ -247,6 +247,15 @@ function App() {
   const [fplTeamId, setFplTeamId] = useState<string>('')
   const [importingFplTeam, setImportingFplTeam] = useState(false)
   
+  // Saved FPL team IDs (mapping of team name to team ID)
+  type SavedFplTeam = {
+    teamId: number
+    teamName: string
+    lastImported: number // timestamp
+  }
+  const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
+  const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
+  
   // Removed: selectedSavedId (old localStorage-based code)
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
@@ -268,6 +277,7 @@ function App() {
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
+  const FPL_TEAMS_KEY = 'fpl_imported_teams_v1' // Store imported FPL team IDs
 
   // Check if a running task actually completed by checking the backend
   const checkTaskCompletion = useCallback(async (task: Task): Promise<boolean> => {
@@ -565,6 +575,7 @@ function App() {
   // Load saved squads and draft on mount
   useEffect(() => {
     loadSavedSquads()
+    loadSavedFplTeams()
 
     // Load draft squad from localStorage (still local, not synced)
     try {
@@ -1201,6 +1212,110 @@ function App() {
     }
   }
 
+  // Load saved FPL team IDs from localStorage
+  const loadSavedFplTeams = () => {
+    try {
+      const saved = localStorage.getItem(FPL_TEAMS_KEY)
+      if (saved) {
+        const teams = JSON.parse(saved) as SavedFplTeam[]
+        setSavedFplTeams(teams)
+      }
+    } catch (err) {
+      console.error('Failed to load saved FPL teams:', err)
+      setSavedFplTeams([])
+    }
+  }
+
+  // Save FPL team ID to localStorage
+  const saveFplTeamId = (teamId: number, teamName: string) => {
+    try {
+      const existing = savedFplTeams.find(t => t.teamId === teamId)
+      const updated: SavedFplTeam = {
+        teamId,
+        teamName,
+        lastImported: Date.now()
+      }
+
+      let updatedTeams: SavedFplTeam[]
+      if (existing) {
+        // Update existing team
+        updatedTeams = savedFplTeams.map(t => t.teamId === teamId ? updated : t)
+      } else {
+        // Add new team
+        updatedTeams = [...savedFplTeams, updated]
+      }
+
+      setSavedFplTeams(updatedTeams)
+      localStorage.setItem(FPL_TEAMS_KEY, JSON.stringify(updatedTeams))
+    } catch (err) {
+      console.error('Failed to save FPL team ID:', err)
+    }
+  }
+
+  // Import squad from saved FPL team ID
+  const importFromSavedFplTeam = async (teamId: number) => {
+    setImportingFplTeam(true)
+    try {
+      // Import team from FPL
+      const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
+        throw new Error(error.detail || 'Failed to import FPL team')
+      }
+      
+      const data = await res.json()
+      const squad = data.squad || []
+      const bank = data.bank || 0
+      const teamName = data.team_name || `FPL Team ${teamId}`
+      
+      // Update saved team info
+      saveFplTeamId(teamId, teamName)
+      
+      // Load the squad into the UI
+      setMySquad(squad)
+      setBank(bank)
+      setBankInput(String(bank))
+      setSaveName(teamName)
+      
+      // Save to database
+      const squadData = {
+        squad: squad,
+        bank: bank,
+        freeTransfers: freeTransfers
+      }
+      
+      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName, squad: squadData })
+      })
+      
+      if (!saveRes.ok) {
+        // If save fails, still keep the imported squad loaded
+        console.warn('Failed to save imported team to database, but squad is loaded')
+      } else {
+        // Reload saved squads and select the newly imported one
+        await loadSavedSquads()
+        setSelectedSavedName(teamName)
+      }
+      
+      // Reset view when importing a new squad
+      setWildcardPlan(null)
+      setTransferSuggestions([])
+      setSquadAnalysis([])
+      
+      // Reset dropdown selection so it can be used again
+      setSelectedSavedFplTeamId('')
+      
+      alert(`Successfully imported ${teamName}!`)
+    } catch (err: any) {
+      console.error('Failed to import FPL team:', err)
+      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
+    } finally {
+      setImportingFplTeam(false)
+    }
+  }
+
   const importFplTeam = async () => {
     const teamId = parseInt(fplTeamId.trim())
     if (!teamId || isNaN(teamId) || teamId <= 0) {
@@ -1221,6 +1336,9 @@ function App() {
       const squad = data.squad || []
       const bank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
+      
+      // Save team ID for future use
+      saveFplTeamId(teamId, teamName)
       
       // Load the squad into the UI
       setMySquad(squad)
@@ -2474,6 +2592,35 @@ function App() {
 
                   {/* FPL Team Import */}
                   <div className="pt-3 border-t border-[#2a2a4a]">
+                    {savedFplTeams.length > 0 && (
+                      <div className="mb-2">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
+                          <select
+                            value={selectedSavedFplTeamId}
+                            onChange={(e) => {
+                              const teamId = e.target.value ? parseInt(e.target.value) : ''
+                              setSelectedSavedFplTeamId(teamId)
+                              if (teamId && typeof teamId === 'number') {
+                                importFromSavedFplTeam(teamId)
+                              }
+                            }}
+                            disabled={importingFplTeam}
+                            className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <option value="">— Select saved team —</option>
+                            {savedFplTeams.map((team) => (
+                              <option key={team.teamId} value={team.teamId}>
+                                {team.teamName} (ID: {team.teamId})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-1.5">
+                          Select a saved team to import the latest squad
+                        </div>
+                      </div>
+                    )}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
                       <input
@@ -3654,11 +3801,16 @@ function App() {
                                       <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                         GW{rec.peak_gameweek}
                                       </span>
-                                      {rec.peak_opponent && (
-                                        <span className="text-xs text-gray-300">
-                                          vs {rec.peak_opponent}
-                                        </span>
-                                      )}
+                                      {(() => {
+                                        // Get opponent from peak_opponent or fallback to all_gameweeks data
+                                        const opponent = rec.peak_opponent || 
+                                          (rec.all_gameweeks?.find((gw: any) => gw.gameweek === rec.peak_gameweek)?.opponent);
+                                        return opponent && (
+                                          <span className="text-xs text-gray-300">
+                                            vs {opponent}
+                                          </span>
+                                        );
+                                      })()}
                                     </div>
                                   </td>
                                   <td className="py-3">
