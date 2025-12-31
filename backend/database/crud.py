@@ -14,9 +14,9 @@ from .models import (
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
     TripleCaptainRecommendations, Task, init_db
 )
-# Import SavedSquad - must be imported after other models to avoid circular imports
+# Import SavedSquad and FplTeam - must be imported after other models to avoid circular imports
 try:
-    from .models import SavedSquad
+    from .models import SavedSquad, FplTeam
 except ImportError:
     # Fallback: try absolute import
     import sys
@@ -24,11 +24,13 @@ except ImportError:
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
-    from database.models import SavedSquad
+    from database.models import SavedSquad, FplTeam
 
-# Verify SavedSquad is available
+# Verify SavedSquad and FplTeam are available
 if 'SavedSquad' not in globals():
     raise ImportError("Failed to import SavedSquad from database.models")
+if 'FplTeam' not in globals():
+    raise ImportError("Failed to import FplTeam from database.models")
 
 logger = logging.getLogger(__name__)
 
@@ -618,6 +620,68 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to delete saved squad ID {squad_id}: {e}")
             return False
+    
+    # ==================== FPL Teams (Saved team IDs for quick imports) ====================
+    
+    def save_fpl_team(self, team_id: int, team_name: str) -> bool:
+        """
+        Save or update an FPL team ID.
+        
+        Args:
+            team_id: FPL team ID
+            team_name: Team name from FPL API
+            
+        Returns:
+            True if saved, False if error
+        """
+        try:
+            with self.get_session() as session:
+                existing = session.query(FplTeam).filter(
+                    FplTeam.team_id == team_id
+                ).first()
+                
+                if existing:
+                    # Update existing
+                    existing.team_name = team_name
+                    existing.last_imported = datetime.utcnow()
+                else:
+                    # Create new
+                    fpl_team = FplTeam(
+                        team_id=team_id,
+                        team_name=team_name,
+                        saved_at=datetime.utcnow(),
+                        last_imported=datetime.utcnow()
+                    )
+                    session.add(fpl_team)
+                
+                session.commit()
+                logger.info(f"Saved FPL team: ID {team_id}, name '{team_name}'")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save FPL team ID {team_id}: {e}")
+            return False
+    
+    def get_all_fpl_teams(self) -> List[Dict[str, Any]]:
+        """Get all saved FPL teams, sorted by most recently imported first."""
+        try:
+            with self.get_session() as session:
+                teams = session.query(FplTeam).order_by(
+                    FplTeam.last_imported.desc()
+                ).all()
+                
+                return [
+                    {
+                        "id": team.id,
+                        "teamId": team.team_id,
+                        "teamName": team.team_name,
+                        "savedAt": (team.saved_at.isoformat() + 'Z') if team.saved_at else None,
+                        "lastImported": (team.last_imported.isoformat() + 'Z') if team.last_imported else None
+                    }
+                    for team in teams
+                ]
+        except Exception as e:
+            logger.error(f"Failed to get all FPL teams: {e}")
+            return []
     
     # ==================== Triple Captain Recommendations ====================
     

@@ -220,6 +220,22 @@ class SavedSquad(Base):
         return f"<SavedSquad(id={self.id}, name='{self.name}', saved_at={self.saved_at})>"
 
 
+class FplTeam(Base):
+    """Store FPL team IDs imported by users for quick squad imports."""
+    __tablename__ = "fpl_teams"
+    
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, nullable=False, unique=True, index=True)  # FPL team ID
+    team_name = Column(String(200), nullable=False)  # Team name from FPL API
+    
+    # Timestamps
+    saved_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    last_imported = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<FplTeam(id={self.id}, team_id={self.team_id}, team_name='{self.team_name}', last_imported={self.last_imported})>"
+
+
 class TripleCaptainRecommendations(Base):
     """Store Triple Captain recommendations calculated daily."""
     __tablename__ = "triple_captain_recommendations"

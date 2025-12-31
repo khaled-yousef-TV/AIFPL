@@ -99,6 +99,28 @@ class DeleteSquadResponse(BaseModel):
     message: str
 
 
+class FplTeamInfo(BaseModel):
+    """FPL team information."""
+    id: int
+    teamId: int
+    teamName: str
+    savedAt: str
+    lastImported: str
+
+
+class FplTeamsResponse(BaseModel):
+    """Response for FPL teams list endpoint."""
+    teams: List[FplTeamInfo]
+
+
+class SaveFplTeamResponse(BaseModel):
+    """Response for save/update FPL team endpoint."""
+    success: bool
+    teamId: int
+    teamName: str
+    message: str
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
