@@ -3418,16 +3418,44 @@ function App() {
                               ))}
                             </div>
                             <div className="mt-4 pt-4 border-t border-[#2a2a4a]">
-                              <div className="flex items-center gap-2 text-sm mb-2">
-                                <span className="text-gray-400">Captain:</span>
-                                <span className="font-semibold text-[#00ff87]">{currentTeam.squad.captain.name}</span>
-                                <span className="text-[#00ff87] font-mono">({(currentTeam.squad.captain.predicted ?? 0).toFixed(1)} × 2)</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm">
-                                <span className="text-gray-400">Vice-Captain:</span>
-                                <span className="font-semibold text-purple-400">{currentTeam.squad.vice_captain.name}</span>
-                                <span className="text-purple-400 font-mono">({(currentTeam.squad.vice_captain.predicted ?? 0).toFixed(1)})</span>
-                              </div>
+                              {(() => {
+                                // Look up captain and vice-captain from starting_xi to get opponent info
+                                const captainPlayer = currentTeam.squad.starting_xi.find((p: any) => p.id === currentTeam.squad.captain.id)
+                                const viceCaptainPlayer = currentTeam.squad.starting_xi.find((p: any) => p.id === currentTeam.squad.vice_captain.id)
+                                
+                                return (
+                                  <>
+                                    <div className="flex items-center gap-2 text-sm mb-2">
+                                      <span className="text-gray-400">Captain:</span>
+                                      <span className="font-semibold text-[#00ff87]">{currentTeam.squad.captain.name}</span>
+                                      <span className="text-[#00ff87] font-mono">({(currentTeam.squad.captain.predicted ?? 0).toFixed(1)} × 2)</span>
+                                      {captainPlayer?.opponent && (
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                          captainPlayer.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                                          captainPlayer.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                                          'bg-red-500/20 text-red-400'
+                                        }`}>
+                                          {captainPlayer.is_home ? 'vs' : '@'} {captainPlayer.opponent}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <span className="text-gray-400">Vice-Captain:</span>
+                                      <span className="font-semibold text-purple-400">{currentTeam.squad.vice_captain.name}</span>
+                                      <span className="text-purple-400 font-mono">({(currentTeam.squad.vice_captain.predicted ?? 0).toFixed(1)})</span>
+                                      {viceCaptainPlayer?.opponent && (
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                          viceCaptainPlayer.difficulty <= 2 ? 'bg-green-500/20 text-green-400' :
+                                          viceCaptainPlayer.difficulty <= 3 ? 'bg-yellow-500/20 text-yellow-400' :
+                                          'bg-red-500/20 text-red-400'
+                                        }`}>
+                                          {viceCaptainPlayer.is_home ? 'vs' : '@'} {viceCaptainPlayer.opponent}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </>
+                                )
+                              })()}
                             </div>
                           </div>
                         </div>
