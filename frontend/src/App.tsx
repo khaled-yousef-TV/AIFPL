@@ -124,6 +124,15 @@ interface TransferSuggestion {
   best_alternative?: any
 }
 
+type SavedSquad = {
+  id: string
+  name: string
+  updatedAt: number
+  squad: SquadPlayer[]
+  bank: number
+  freeTransfers: number
+}
+
 type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
 type TaskType = 'daily_snapshot' | 'triple_captain' | 'refresh_picks' | 'refresh_differentials' | 'refresh_transfers' | 'refresh_wildcard'
 
@@ -163,6 +172,10 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
+  const [savingSquad, setSavingSquad] = useState(false)
+  const [loadingSquad, setLoadingSquad] = useState(false)
+  const [updatingSquad, setUpdatingSquad] = useState(false)
+  const [deletingSquad, setDeletingSquad] = useState(false)
   
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
@@ -224,22 +237,24 @@ function App() {
     return { holdSuggestions, sortedGroups }
   }, [transferSuggestions, freeTransfers])
 
+  // Saved squads (persist between weeks) - now server-side
+  const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
+  const [selectedSavedName, setSelectedSavedName] = useState<string>('')
+  const [saveName, setSaveName] = useState<string>('My Squad')
+  const [loadingSavedSquads, setLoadingSavedSquads] = useState(false)
   
   // FPL team import
   const [fplTeamId, setFplTeamId] = useState<string>('')
   const [importingFplTeam, setImportingFplTeam] = useState(false)
   
-  // Saved FPL team IDs (from database)
+  // Saved FPL team IDs (mapping of team name to team ID)
   type SavedFplTeam = {
-    id: number
     teamId: number
     teamName: string
-    savedAt: string
-    lastImported: string
+    lastImported: number // timestamp
   }
   const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
   const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
-  const [loadingFplTeams, setLoadingFplTeams] = useState(false)
   
   // Removed: selectedSavedId (old localStorage-based code)
 
@@ -262,6 +277,7 @@ function App() {
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
+  const FPL_TEAMS_KEY = 'fpl_imported_teams_v1' // Store imported FPL team IDs
 
   // Check if a running task actually completed by checking the backend
   const checkTaskCompletion = useCallback(async (task: Task): Promise<boolean> => {
@@ -516,8 +532,49 @@ function App() {
     return () => clearInterval(interval)
   }, [gameweek?.next?.deadline])
 
-  // Load draft on mount
+  // Load saved squads from API on mount
+  const loadSavedSquads = useCallback(async () => {
+    setLoadingSavedSquads(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/saved-squads`)
+      if (!response.ok) {
+        console.error(`Failed to load saved squads: HTTP ${response.status}`, await response.text().catch(() => ''))
+        setSavedSquads([])
+        return
+      }
+      const res = await response.json()
+      if (res.squads && Array.isArray(res.squads)) {
+        // Map API response to frontend format
+        const mapped = res.squads.map((s: any) => {
+          // API squad_data contains { squad, bank, freeTransfers }
+          const squadData = s.squad || {}
+          return {
+            id: s.name, // Use name as id for API compatibility
+            name: s.name,
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : new Date(s.saved_at).getTime(),
+            squad: squadData.squad || [],
+            bank: squadData.bank || 0,
+            bankInput: String(squadData.bank || 0),
+            freeTransfers: squadData.freeTransfers || 1,
+          }
+        })
+        setSavedSquads(mapped)
+        console.log(`Loaded ${mapped.length} saved squad(s)`)
+      } else {
+        console.warn('Unexpected response format from saved-squads endpoint:', res)
+        setSavedSquads([])
+      }
+    } catch (err) {
+      console.error('Failed to load saved squads:', err)
+      setSavedSquads([])
+    } finally {
+      setLoadingSavedSquads(false)
+    }
+  }, [])
+
+  // Load saved squads and draft on mount
   useEffect(() => {
+    loadSavedSquads()
     loadSavedFplTeams()
 
     // Load draft squad from localStorage (still local, not synced)
@@ -1025,53 +1082,173 @@ function App() {
     } catch {}
   }, [mySquad, bank, freeTransfers])
 
-// Load saved FPL team IDs from API
-  const loadSavedFplTeams = async () => {
-    setLoadingFplTeams(true)
+  const loadSavedSquad = useCallback(async () => {
+    if (!selectedSavedName) return
+    
+    setLoadingSquad(true)
     try {
-      const response = await fetch(`${API_BASE}/api/fpl-teams`)
-      if (!response.ok) {
-        console.error(`Failed to load FPL teams: HTTP ${response.status}`)
-        setSavedFplTeams([])
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`)
+      if (!res.ok) {
+        throw new Error('Failed to load saved squad')
+      }
+      const data = await res.json()
+      const squadData = data.squad || {}
+      
+      setMySquad(squadData.squad || [])
+      setBank(squadData.bank ?? 0)
+      setBankInput(String(squadData.bank ?? 0))
+      setFreeTransfers(squadData.freeTransfers ?? 1)
+      setSaveName(data.name || 'My Squad')
+      
+      // Reset view when loading a new squad
+      setWildcardPlan(null)
+      setTransferSuggestions([])
+      setSquadAnalysis([])
+    } catch (err) {
+      console.error('Failed to load saved squad:', err)
+      alert('Failed to load saved squad. Please try again.')
+    } finally {
+      setLoadingSquad(false)
+    }
+  }, [selectedSavedName])
+
+  const saveOrUpdateSquad = useCallback(async (mode: 'update' | 'new') => {
+    const name = (saveName || 'My Squad').trim()
+    if (!name) {
+      alert('Please enter a squad name')
+      return
+    }
+    
+    // Prepare squad data to save
+    const squadData = {
+      squad: mySquad,
+      bank: bank,
+      freeTransfers: freeTransfers
+    }
+
+    if (mode === 'update' && selectedSavedName) {
+      if (selectedSavedName !== name) {
+        alert('Cannot change squad name. Please create a new squad with a different name.')
         return
       }
-      const res = await response.json()
-      if (res.teams && Array.isArray(res.teams)) {
-        setSavedFplTeams(res.teams)
-        console.log(`Loaded ${res.teams.length} saved FPL team(s)`)
-      } else {
-        console.warn('Unexpected response format from fpl-teams endpoint:', res)
-        setSavedFplTeams([])
+      
+      setUpdatingSquad(true)
+      try {
+        const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, squad: squadData })
+        })
+        
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({ detail: 'Failed to update squad' }))
+          throw new Error(error.detail || 'Failed to update squad')
+        }
+        
+        // Reload saved squads to get updated data
+        await loadSavedSquads()
+      } catch (err: any) {
+        console.error('Failed to update squad:', err)
+        alert(err.message || 'Failed to update squad. Please try again.')
+      } finally {
+        setUpdatingSquad(false)
+      }
+      return
+    }
+
+    // Create new squad
+    setSavingSquad(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, squad: squadData })
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to save squad' }))
+        throw new Error(error.detail || 'Failed to save squad')
+      }
+      
+      // Reload saved squads and select the newly created one
+      await loadSavedSquads()
+      setSelectedSavedName(name)
+      setSaveName(name)
+    } catch (err: any) {
+      console.error('Failed to save squad:', err)
+      alert(err.message || 'Failed to save squad. Please try again.')
+    } finally {
+      setSavingSquad(false)
+    }
+  }, [saveName, mySquad, bank, freeTransfers, selectedSavedName, loadSavedSquads])
+
+  const deleteSavedSquad = useCallback(async () => {
+    if (!selectedSavedName) return
+    
+    if (!confirm(`Are you sure you want to delete "${selectedSavedName}"?`)) {
+      return
+    }
+    
+    setDeletingSquad(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`, {
+        method: 'DELETE'
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to delete squad' }))
+        throw new Error(error.detail || 'Failed to delete squad')
+      }
+      
+      // Reload saved squads and clear selection
+      await loadSavedSquads()
+      setSelectedSavedName('')
+      setSaveName('My Squad')
+    } catch (err: any) {
+      console.error('Failed to delete squad:', err)
+      alert(err.message || 'Failed to delete squad. Please try again.')
+    } finally {
+      setDeletingSquad(false)
+    }
+  }, [selectedSavedName, loadSavedSquads])
+
+  // Load saved FPL team IDs from localStorage
+  const loadSavedFplTeams = () => {
+    try {
+      const saved = localStorage.getItem(FPL_TEAMS_KEY)
+      if (saved) {
+        const teams = JSON.parse(saved) as SavedFplTeam[]
+        setSavedFplTeams(teams)
       }
     } catch (err) {
       console.error('Failed to load saved FPL teams:', err)
       setSavedFplTeams([])
-    } finally {
-      setLoadingFplTeams(false)
     }
   }
 
-  // Save FPL team ID to database
-  const saveFplTeamId = async (teamId: number, teamName: string) => {
+  // Save FPL team ID to localStorage
+  const saveFplTeamId = (teamId: number, teamName: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/fpl-teams`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ team_id: teamId, team_name: teamName })
-      })
-      
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Failed to save FPL team' }))
-        console.error('Failed to save FPL team:', error.detail || 'Unknown error')
-        return false
+      const existing = savedFplTeams.find(t => t.teamId === teamId)
+      const updated: SavedFplTeam = {
+        teamId,
+        teamName,
+        lastImported: Date.now()
       }
-      
-      // Reload teams to get updated list
-      await loadSavedFplTeams()
-      return true
+
+      let updatedTeams: SavedFplTeam[]
+      if (existing) {
+        // Update existing team
+        updatedTeams = savedFplTeams.map(t => t.teamId === teamId ? updated : t)
+      } else {
+        // Add new team
+        updatedTeams = [...savedFplTeams, updated]
+      }
+
+      setSavedFplTeams(updatedTeams)
+      localStorage.setItem(FPL_TEAMS_KEY, JSON.stringify(updatedTeams))
     } catch (err) {
       console.error('Failed to save FPL team ID:', err)
-      return false
     }
   }
 
@@ -1091,8 +1268,8 @@ function App() {
       const bank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
-      // Update saved team info (await to ensure it completes)
-      await saveFplTeamId(teamId, teamName)
+      // Update saved team info
+      saveFplTeamId(teamId, teamName)
       
       // Load the squad into the UI
       setMySquad(squad)
@@ -1160,8 +1337,8 @@ function App() {
       const bank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
-      // Save team ID for future use (await to ensure it completes)
-      await saveFplTeamId(teamId, teamName)
+      // Save team ID for future use
+      saveFplTeamId(teamId, teamName)
       
       // Load the squad into the UI
       setMySquad(squad)
@@ -1243,34 +1420,6 @@ function App() {
     }
   }
 
-  // Normalize opponent data for triple captain recommendations
-  // Ensures peak_opponent is always populated from all_gameweeks if missing
-  const normalizeTripleCaptainOpponents = (recsByGameweek: Record<number, any>): Record<number, any> => {
-    const normalized: Record<number, any> = {}
-    
-    for (const [gw, recs] of Object.entries(recsByGameweek)) {
-      const gameweek = Number(gw)
-      normalized[gameweek] = {
-        ...recs,
-        recommendations: (recs.recommendations || []).map((rec: any) => {
-          // If peak_opponent is missing or empty, get it from all_gameweeks
-          if (!rec.peak_opponent && rec.all_gameweeks) {
-            const peakGwData = rec.all_gameweeks.find((gwData: any) => gwData.gameweek === rec.peak_gameweek)
-            if (peakGwData?.opponent) {
-              return {
-                ...rec,
-                peak_opponent: peakGwData.opponent
-              }
-            }
-          }
-          return rec
-        })
-      }
-    }
-    
-    return normalized
-  }
-
   const ensureTripleCaptainLoaded = async () => {
     // Cancel any existing load
     if (tcAbortControllerRef.current) {
@@ -1311,11 +1460,10 @@ function App() {
       }
       
       if (tcRes.recommendations_by_gameweek) {
-        // Multiple gameweeks - normalize opponent data and store by gameweek
-        const normalized = normalizeTripleCaptainOpponents(tcRes.recommendations_by_gameweek)
-        setTripleCaptainRecs(normalized)
+        // Multiple gameweeks - store by gameweek
+        setTripleCaptainRecs(tcRes.recommendations_by_gameweek)
         // Set first gameweek as selected tab if none selected
-        const gameweeks = Object.keys(normalized).map(Number).sort((a, b) => b - a)
+        const gameweeks = Object.keys(tcRes.recommendations_by_gameweek).map(Number).sort((a, b) => b - a)
         if (gameweeks.length > 0 && !selectedTcGameweekTab) {
           setSelectedTcGameweekTab(gameweeks[0])
         }
@@ -1323,8 +1471,7 @@ function App() {
         // Single gameweek response (backward compatibility)
         const gw = tcRes.gameweek || gameweek?.next?.id
         if (gw) {
-          const normalized = normalizeTripleCaptainOpponents({ [gw]: tcRes })
-          setTripleCaptainRecs(normalized)
+          setTripleCaptainRecs({ [gw]: tcRes })
           if (!selectedTcGameweekTab) {
             setSelectedTcGameweekTab(gw)
           }
@@ -2458,12 +2605,12 @@ function App() {
                                 importFromSavedFplTeam(teamId)
                               }
                             }}
-                            disabled={importingFplTeam || loadingFplTeams}
+                            disabled={importingFplTeam}
                             className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <option value="">— Select saved team —</option>
                             {savedFplTeams.map((team) => (
-                              <option key={team.id} value={team.teamId}>
+                              <option key={team.teamId} value={team.teamId}>
                                 {team.teamName} (ID: {team.teamId})
                               </option>
                             ))}
@@ -3654,11 +3801,16 @@ function App() {
                                       <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
                                         GW{rec.peak_gameweek}
                                       </span>
-                                      {rec.peak_opponent && (
-                                        <span className="text-xs text-gray-300">
-                                          vs {rec.peak_opponent}
-                                        </span>
-                                      )}
+                                      {(() => {
+                                        // Get opponent from peak_opponent or fallback to all_gameweeks data
+                                        const opponent = rec.peak_opponent || 
+                                          (rec.all_gameweeks?.find((gw: any) => gw.gameweek === rec.peak_gameweek)?.opponent);
+                                        return opponent && (
+                                          <span className="text-xs text-gray-300">
+                                            vs {opponent}
+                                          </span>
+                                        );
+                                      })()}
                                     </div>
                                   </td>
                                   <td className="py-3">
