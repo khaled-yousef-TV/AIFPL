@@ -592,7 +592,7 @@ function App() {
         }
       }
     } catch {}
-  }, [])
+  }, [loadSavedSquads, loadSavedFplTeams])
 
   // Load selected teams from API
   const loadSelectedTeams = async () => {
@@ -1212,51 +1212,40 @@ function App() {
     }
   }, [selectedSavedName, loadSavedSquads])
 
-  // Load saved FPL team IDs from localStorage
-  const loadSavedFplTeams = () => {
+  // Load saved FPL team IDs from database
+  const loadSavedFplTeams = useCallback(async () => {
     try {
-      const saved = localStorage.getItem(FPL_TEAMS_KEY)
-      if (saved) {
-        const teams = JSON.parse(saved) as SavedFplTeam[]
-        setSavedFplTeams(teams)
+      const res = await fetch(`${API_BASE}/api/fpl-teams`)
+      if (!res.ok) {
+        console.error(`Failed to load saved FPL teams: HTTP ${res.status}`)
+        setSavedFplTeams([])
+        return
+      }
+      const data = await res.json()
+      if (data.teams && Array.isArray(data.teams)) {
+        // Map API response to frontend format
+        const mapped: SavedFplTeam[] = data.teams.map((t: any) => ({
+          teamId: t.teamId,
+          teamName: t.teamName,
+          lastImported: t.lastImported ? new Date(t.lastImported).getTime() : Date.now()
+        }))
+        setSavedFplTeams(mapped)
+        console.log(`Loaded ${mapped.length} saved FPL team(s) from database`)
+      } else {
+        console.warn('Unexpected response format from fpl-teams endpoint:', data)
+        setSavedFplTeams([])
       }
     } catch (err) {
       console.error('Failed to load saved FPL teams:', err)
       setSavedFplTeams([])
     }
-  }
+  }, [])
 
-  // Save FPL team ID to localStorage
-  const saveFplTeamId = (teamId: number, teamName: string) => {
-    try {
-      const existing = savedFplTeams.find(t => t.teamId === teamId)
-      const updated: SavedFplTeam = {
-        teamId,
-        teamName,
-        lastImported: Date.now()
-      }
-
-      let updatedTeams: SavedFplTeam[]
-      if (existing) {
-        // Update existing team
-        updatedTeams = savedFplTeams.map(t => t.teamId === teamId ? updated : t)
-      } else {
-        // Add new team
-        updatedTeams = [...savedFplTeams, updated]
-      }
-
-      setSavedFplTeams(updatedTeams)
-      localStorage.setItem(FPL_TEAMS_KEY, JSON.stringify(updatedTeams))
-    } catch (err) {
-      console.error('Failed to save FPL team ID:', err)
-    }
-  }
-
-  // Import squad from saved FPL team ID
-  const importFromSavedFplTeam = async (teamId: number) => {
+  // Import squad from saved FPL team ID (always fetches latest from FPL)
+  const importFromSavedFplTeam = useCallback(async (teamId: number) => {
     setImportingFplTeam(true)
     try {
-      // Import team from FPL
+      // Always fetch latest team data from FPL API
       const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
@@ -1268,8 +1257,8 @@ function App() {
       const bank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
-      // Update saved team info
-      saveFplTeamId(teamId, teamName)
+      // Backend automatically saves/updates FPL team in database, so reload the list
+      await loadSavedFplTeams()
       
       // Load the squad into the UI
       setMySquad(squad)
@@ -1277,7 +1266,7 @@ function App() {
       setBankInput(String(bank))
       setSaveName(teamName)
       
-      // Save to database
+      // Save to database as a saved squad
       const squadData = {
         squad: squad,
         bank: bank,
@@ -1314,9 +1303,9 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }
+  }, [freeTransfers, loadSavedFplTeams, loadSavedSquads])
 
-  const importFplTeam = async () => {
+  const importFplTeam = useCallback(async () => {
     const teamId = parseInt(fplTeamId.trim())
     if (!teamId || isNaN(teamId) || teamId <= 0) {
       alert('Please enter a valid FPL Team ID')
@@ -1325,7 +1314,7 @@ function App() {
     
     setImportingFplTeam(true)
     try {
-      // Import team from FPL
+      // Import team from FPL (backend automatically saves to database)
       const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
@@ -1337,8 +1326,8 @@ function App() {
       const bank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
-      // Save team ID for future use
-      saveFplTeamId(teamId, teamName)
+      // Backend automatically saves/updates FPL team in database, so reload the list
+      await loadSavedFplTeams()
       
       // Load the squad into the UI
       setMySquad(squad)
@@ -1346,7 +1335,7 @@ function App() {
       setBankInput(String(bank))
       setSaveName(teamName)
       
-      // Save to database
+      // Save to database as a saved squad
       const squadData = {
         squad: squad,
         bank: bank,
@@ -1375,6 +1364,7 @@ function App() {
       
       // Clear the input
       setFplTeamId('')
+      setSelectedSavedFplTeamId('')
       
       alert(`Successfully imported ${teamName}!`)
     } catch (err: any) {
@@ -1383,7 +1373,7 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }
+  }, [fplTeamId, freeTransfers, loadSavedFplTeams, loadSavedSquads])
 
   const loadInitial = async () => {
     // Only load lightweight header data on boot (keeps Quick Transfers instant).

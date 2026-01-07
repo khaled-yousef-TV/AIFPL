@@ -2444,6 +2444,14 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None):
             bank = (entry_data.get("last_deadline_bank", 0) or 0) / 10.0
             team_name = entry_data.get("name", team_name)
         
+        # Save FPL team to database (automatically saves or updates)
+        try:
+            db_manager.save_fpl_team(team_id, team_name)
+            logger.info(f"Saved FPL team {team_id} ({team_name}) to database")
+        except Exception as e:
+            logger.warning(f"Failed to save FPL team to database: {e}")
+            # Don't fail the import if database save fails
+        
         return {
             "squad": squad,
             "bank": bank,
