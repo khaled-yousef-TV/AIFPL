@@ -48,7 +48,8 @@ class HaulProbabilityCalculator:
         is_home: bool,
         clean_sheet_prob: float = 0.0,
         bonus_points_base: float = 0.0,
-        is_double_gameweek: bool = False
+        is_double_gameweek: bool = False,
+        start_probability: float = 1.0
     ) -> Dict[str, Any]:
         """
         Calculate haul probability for a single gameweek.
@@ -62,6 +63,8 @@ class HaulProbabilityCalculator:
             clean_sheet_prob: Probability of clean sheet (for DEF/GK)
             bonus_points_base: Base bonus points expectation
             is_double_gameweek: Whether player has two fixtures this gameweek
+            start_probability: Probability of starting (0.0 to 1.0). If < 1.0, 
+                              player may come off bench for 1 point.
             
         Returns:
             Dictionary with haul probability and statistics
@@ -70,12 +73,12 @@ class HaulProbabilityCalculator:
             # For DGW, simulate both fixtures and sum points
             return self._calculate_dgw_haul_probability(
                 xg, xa, position, fixture_difficulty, is_home,
-                clean_sheet_prob, bonus_points_base
+                clean_sheet_prob, bonus_points_base, start_probability
             )
         else:
             return self._calculate_single_fixture_haul_probability(
                 xg, xa, position, fixture_difficulty, is_home,
-                clean_sheet_prob, bonus_points_base
+                clean_sheet_prob, bonus_points_base, start_probability
             )
     
     def _calculate_single_fixture_haul_probability(
@@ -86,9 +89,15 @@ class HaulProbabilityCalculator:
         fixture_difficulty: int,
         is_home: bool,
         clean_sheet_prob: float,
-        bonus_points_base: float
+        bonus_points_base: float,
+        start_probability: float = 1.0
     ) -> Dict[str, Any]:
-        """Calculate haul probability for a single fixture."""
+        """
+        Calculate haul probability for a single fixture.
+        
+        PHASE 1 FIX: Accounts for start probability. If player doesn't start,
+        they may come off bench for 1 point (30% chance if start_prob < 1.0).
+        """
         haul_count = 0
         total_points_samples = []
         
@@ -101,29 +110,42 @@ class HaulProbabilityCalculator:
         adjusted_cs_prob = clean_sheet_prob * difficulty_factor
         
         for _ in range(self.MONTE_CARLO_ITERATIONS):
-            # Sample goals from Poisson distribution
-            goals = poisson.rvs(adjusted_xg) if adjusted_xg > 0 else 0
+            # PHASE 1 FIX: Check if player starts
+            starts = np.random.random() < start_probability
             
-            # Sample assists from Poisson distribution
-            assists = poisson.rvs(adjusted_xa) if adjusted_xa > 0 else 0
-            
-            # Sample clean sheet (for DEF/GK)
-            clean_sheet = 0
-            if position in [1, 2]:  # GK or DEF
-                clean_sheet = 1 if np.random.random() < adjusted_cs_prob else 0
-            
-            # Calculate bonus points (simplified: based on goals, assists, and base)
-            bonus_points = self._calculate_bonus_points(
-                goals, assists, bonus_points_base, position
-            )
-            
-            # Calculate total points
-            points = (
-                goals * self.POINTS_PER_GOAL[position] +
-                assists * self.POINTS_PER_ASSIST +
-                clean_sheet * self.POINTS_PER_CLEAN_SHEET[position] +
-                bonus_points
-            )
+            if not starts:
+                # Player doesn't start - may come off bench
+                # 30% chance of bench appearance (1 point) if start_prob < 1.0
+                bench_appearance_prob = 0.3 if start_probability < 1.0 else 0.0
+                if np.random.random() < bench_appearance_prob:
+                    points = 1  # Bench appearance = 1 point
+                else:
+                    points = 0  # Didn't play
+            else:
+                # Player starts - normal simulation
+                # Sample goals from Poisson distribution
+                goals = poisson.rvs(adjusted_xg) if adjusted_xg > 0 else 0
+                
+                # Sample assists from Poisson distribution
+                assists = poisson.rvs(adjusted_xa) if adjusted_xa > 0 else 0
+                
+                # Sample clean sheet (for DEF/GK)
+                clean_sheet = 0
+                if position in [1, 2]:  # GK or DEF
+                    clean_sheet = 1 if np.random.random() < adjusted_cs_prob else 0
+                
+                # Calculate bonus points (simplified: based on goals, assists, and base)
+                bonus_points = self._calculate_bonus_points(
+                    goals, assists, bonus_points_base, position
+                )
+                
+                # Calculate total points
+                points = (
+                    goals * self.POINTS_PER_GOAL[position] +
+                    assists * self.POINTS_PER_ASSIST +
+                    clean_sheet * self.POINTS_PER_CLEAN_SHEET[position] +
+                    bonus_points
+                )
             
             total_points_samples.append(points)
             
@@ -150,9 +172,14 @@ class HaulProbabilityCalculator:
         fixture_difficulty: int,
         is_home: bool,
         clean_sheet_prob: float,
-        bonus_points_base: float
+        bonus_points_base: float,
+        start_probability: float = 1.0
     ) -> Dict[str, Any]:
-        """Calculate haul probability for a double gameweek (two fixtures)."""
+        """
+        Calculate haul probability for a double gameweek (two fixtures).
+        
+        PHASE 1 FIX: Accounts for start probability in both fixtures.
+        """
         haul_count = 0
         total_points_samples = []
         
@@ -162,31 +189,55 @@ class HaulProbabilityCalculator:
         difficulty_factor_2 = self._get_difficulty_factor(fixture_difficulty, not is_home)  # Assume away for second
         
         for _ in range(self.MONTE_CARLO_ITERATIONS):
-            # Fixture 1
-            adjusted_xg_1 = xg * difficulty_factor_1
-            adjusted_xa_1 = xa * difficulty_factor_1
-            goals_1 = poisson.rvs(adjusted_xg_1) if adjusted_xg_1 > 0 else 0
-            assists_1 = poisson.rvs(adjusted_xa_1) if adjusted_xa_1 > 0 else 0
-            cs_1 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_1 else 0
+            # PHASE 1 FIX: Check if player starts in fixture 1
+            starts_1 = np.random.random() < start_probability
             
-            points_1 = (
-                goals_1 * self.POINTS_PER_GOAL[position] +
-                assists_1 * self.POINTS_PER_ASSIST +
-                cs_1 * self.POINTS_PER_CLEAN_SHEET[position]
-            )
+            if not starts_1:
+                # Player doesn't start fixture 1 - may come off bench
+                bench_appearance_prob = 0.3 if start_probability < 1.0 else 0.0
+                if np.random.random() < bench_appearance_prob:
+                    points_1 = 1  # Bench appearance
+                else:
+                    points_1 = 0  # Didn't play
+                goals_1 = assists_1 = 0
+            else:
+                # Player starts fixture 1
+                adjusted_xg_1 = xg * difficulty_factor_1
+                adjusted_xa_1 = xa * difficulty_factor_1
+                goals_1 = poisson.rvs(adjusted_xg_1) if adjusted_xg_1 > 0 else 0
+                assists_1 = poisson.rvs(adjusted_xa_1) if adjusted_xa_1 > 0 else 0
+                cs_1 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_1 else 0
+                
+                points_1 = (
+                    goals_1 * self.POINTS_PER_GOAL[position] +
+                    assists_1 * self.POINTS_PER_ASSIST +
+                    cs_1 * self.POINTS_PER_CLEAN_SHEET[position]
+                )
             
-            # Fixture 2
-            adjusted_xg_2 = xg * difficulty_factor_2
-            adjusted_xa_2 = xa * difficulty_factor_2
-            goals_2 = poisson.rvs(adjusted_xg_2) if adjusted_xg_2 > 0 else 0
-            assists_2 = poisson.rvs(adjusted_xa_2) if adjusted_xa_2 > 0 else 0
-            cs_2 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_2 else 0
+            # PHASE 1 FIX: Check if player starts in fixture 2
+            starts_2 = np.random.random() < start_probability
             
-            points_2 = (
-                goals_2 * self.POINTS_PER_GOAL[position] +
-                assists_2 * self.POINTS_PER_ASSIST +
-                cs_2 * self.POINTS_PER_CLEAN_SHEET[position]
-            )
+            if not starts_2:
+                # Player doesn't start fixture 2 - may come off bench
+                bench_appearance_prob = 0.3 if start_probability < 1.0 else 0.0
+                if np.random.random() < bench_appearance_prob:
+                    points_2 = 1  # Bench appearance
+                else:
+                    points_2 = 0  # Didn't play
+                goals_2 = assists_2 = 0
+            else:
+                # Player starts fixture 2
+                adjusted_xg_2 = xg * difficulty_factor_2
+                adjusted_xa_2 = xa * difficulty_factor_2
+                goals_2 = poisson.rvs(adjusted_xg_2) if adjusted_xg_2 > 0 else 0
+                assists_2 = poisson.rvs(adjusted_xa_2) if adjusted_xa_2 > 0 else 0
+                cs_2 = 1 if position in [1, 2] and np.random.random() < clean_sheet_prob * difficulty_factor_2 else 0
+                
+                points_2 = (
+                    goals_2 * self.POINTS_PER_GOAL[position] +
+                    assists_2 * self.POINTS_PER_ASSIST +
+                    cs_2 * self.POINTS_PER_CLEAN_SHEET[position]
+                )
             
             # Bonus points are awarded per gameweek, not per match
             # Calculate once for the entire gameweek based on total goals/assists

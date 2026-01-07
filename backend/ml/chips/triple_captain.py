@@ -8,6 +8,7 @@ haul probability (15+ points) for players across upcoming gameweeks.
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+import numpy as np
 
 from ..features import FeatureEngineer, PlayerFeatures
 from .haul_probability import HaulProbabilityCalculator
@@ -99,12 +100,18 @@ class TripleCaptainOptimizer:
                 if not features:
                     continue
                 
-                # CRITICAL FIX: xG and xA from FPL are SEASON TOTALS, not per-game
-                # Convert to per-game averages for the simulation
-                # Use minutes to estimate games played (90 minutes = 1 game)
-                games_played = max(1.0, player.minutes / 90.0)
-                xg_per_game = features.xG / games_played
-                xa_per_game = features.xA / games_played
+                # PHASE 1 FIX: Use 4-6 week rolling window (EWMA) instead of season totals
+                # This ensures recent poor form (like Malen) is properly reflected
+                recent_xg, recent_xa = self._calculate_recent_xg_xa(player.id, current_gw)
+                
+                # Fallback to season average if no recent data
+                if recent_xg == 0.0 and recent_xa == 0.0:
+                    games_played = max(1.0, player.minutes / 90.0)
+                    recent_xg = features.xG / games_played if games_played > 0 else 0.0
+                    recent_xa = features.xA / games_played if games_played > 0 else 0.0
+                
+                # PHASE 1 FIX: Calculate probability of starting based on recent starts
+                start_probability = self._calculate_start_probability(player.id, current_gw)
                 
                 # Analyze each gameweek in range
                 player_recommendations = []
@@ -146,16 +153,17 @@ class TripleCaptainOptimizer:
                         player.element_type, player.team, fixture, features
                     )
                     
-                    # Calculate haul probability using PER-GAME xG/xA
+                    # Calculate haul probability using RECENT xG/xA (4-6 week window)
                     haul_result = self.haul_calculator.calculate_haul_probability(
-                        xg=xg_per_game,  # Per-game xG, not season total!
-                        xa=xa_per_game,  # Per-game xA, not season total!
+                        xg=recent_xg,  # Recent per-game xG from 4-6 week window
+                        xa=recent_xa,  # Recent per-game xA from 4-6 week window
                         position=player.element_type,
                         fixture_difficulty=difficulty,
                         is_home=is_home,
                         clean_sheet_prob=clean_sheet_prob,
                         bonus_points_base=features.ict_index / 10.0,  # Rough BPS proxy
-                        is_double_gameweek=is_dgw
+                        is_double_gameweek=is_dgw,
+                        start_probability=start_probability  # Probability of starting
                     )
                     
                     player_recommendations.append({
@@ -298,4 +306,152 @@ class TripleCaptainOptimizer:
             4: "FWD"
         }
         return positions.get(position_id, "UNK")
+    
+    def _calculate_recent_xg_xa(
+        self,
+        player_id: int,
+        current_gw: int,
+        window_weeks: int = 6,
+        use_ewma: bool = True
+    ) -> Tuple[float, float]:
+        """
+        Calculate recent xG/xA using 4-6 week rolling window with EWMA.
+        
+        Args:
+            player_id: Player ID
+            current_gw: Current gameweek
+            window_weeks: Number of weeks to look back (default: 6)
+            use_ewma: Whether to use exponential weighted moving average (default: True)
+            
+        Returns:
+            Tuple of (recent_xg_per_game, recent_xa_per_game)
+        """
+        try:
+            # Get player history
+            details = self.client.get_player_details(player_id)
+            history = details.get("history", [])
+            
+            if not history:
+                return (0.0, 0.0)
+            
+            # Filter to recent gameweeks (last window_weeks gameweeks before current)
+            recent_history = [
+                h for h in history
+                if h.get("round") and h.get("round") < current_gw
+            ]
+            
+            # Sort by gameweek (ascending)
+            recent_history.sort(key=lambda x: x.get("round", 0))
+            
+            # Take last window_weeks gameweeks
+            recent_history = recent_history[-window_weeks:]
+            
+            if not recent_history:
+                return (0.0, 0.0)
+            
+            # Extract xG and xA from history
+            # FPL history has "expected_goals" and "expected_assists" per gameweek
+            xg_values = []
+            xa_values = []
+            
+            for game in recent_history:
+                xg = game.get("expected_goals", 0.0)
+                xa = game.get("expected_assists", 0.0)
+                minutes = game.get("minutes", 0)
+                
+                # Only include games where player actually played (minutes > 0)
+                if minutes > 0:
+                    xg_values.append(xg)
+                    xa_values.append(xa)
+            
+            if not xg_values:
+                return (0.0, 0.0)
+            
+            if use_ewma:
+                # Exponential Weighted Moving Average (more weight to recent games)
+                # Alpha = 0.3 means recent games have ~70% weight, older games ~30%
+                alpha = 0.3
+                weights = [alpha * ((1 - alpha) ** i) for i in range(len(xg_values) - 1, -1, -1)]
+                # Normalize weights
+                weight_sum = sum(weights)
+                if weight_sum > 0:
+                    weights = [w / weight_sum for w in weights]
+                
+                recent_xg = sum(xg * w for xg, w in zip(xg_values, weights))
+                recent_xa = sum(xa * w for xa, w in zip(xa_values, weights))
+            else:
+                # Simple rolling average
+                recent_xg = np.mean(xg_values)
+                recent_xa = np.mean(xa_values)
+            
+            return (recent_xg, recent_xa)
+            
+        except Exception as e:
+            logger.warning(f"Error calculating recent xG/xA for player {player_id}: {e}")
+            return (0.0, 0.0)
+    
+    def _calculate_start_probability(
+        self,
+        player_id: int,
+        current_gw: int,
+        lookback_games: int = 3
+    ) -> float:
+        """
+        Calculate probability of starting based on recent starts.
+        
+        If player has started < 2 of last 3 games, they have lower start probability.
+        This will be used in Monte Carlo to simulate bench appearances (1 point).
+        
+        Args:
+            player_id: Player ID
+            current_gw: Current gameweek
+            lookback_games: Number of recent games to check (default: 3)
+            
+        Returns:
+            Probability of starting (0.0 to 1.0)
+        """
+        try:
+            # Get player history
+            details = self.client.get_player_details(player_id)
+            history = details.get("history", [])
+            
+            if not history:
+                # No history = assume starter (100% probability)
+                return 1.0
+            
+            # Filter to recent gameweeks before current
+            recent_history = [
+                h for h in history
+                if h.get("round") and h.get("round") < current_gw
+            ]
+            
+            # Sort by gameweek (ascending)
+            recent_history.sort(key=lambda x: x.get("round", 0))
+            
+            # Take last lookback_games gameweeks
+            recent_history = recent_history[-lookback_games:]
+            
+            if not recent_history:
+                return 1.0  # No recent data = assume starter
+            
+            # Count starts (minutes >= 60 is considered a start)
+            starts = sum(1 for game in recent_history if game.get("minutes", 0) >= 60)
+            
+            # If started < 2 of last 3, reduce start probability
+            if starts < 2:
+                # Linear interpolation: 0 starts = 0.3, 1 start = 0.5, 2+ starts = 1.0
+                if starts == 0:
+                    return 0.3
+                elif starts == 1:
+                    return 0.5
+                else:
+                    return 1.0
+            else:
+                # Started 2+ of last 3 = regular starter
+                return 1.0
+                
+        except Exception as e:
+            logger.warning(f"Error calculating start probability for player {player_id}: {e}")
+            # Default to starter if we can't determine
+            return 1.0
 
