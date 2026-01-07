@@ -739,6 +739,36 @@ async def _build_squad_with_predictor(
         if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
             continue
         
+        # For free hit: Check recent playing time to exclude players who haven't played recently
+        # This catches cases like backup goalkeepers who played early season but not recently
+        try:
+            player_details = fpl_client.get_player_details(player.id)
+            history = player_details.get("history", [])
+            if history:
+                # Get last 3 gameweeks of history (most recent first)
+                # Filter to only finished gameweeks (round > 0 and has been played)
+                finished_gws = [gw for gw in history if gw.get("round", 0) > 0]
+                if finished_gws:
+                    # Sort by round descending (most recent first)
+                    finished_gws.sort(key=lambda x: x.get("round", 0), reverse=True)
+                    recent_gws = finished_gws[:3]
+                    # Calculate average minutes in last 3 gameweeks
+                    recent_minutes = [gw.get("minutes", 0) for gw in recent_gws]
+                    if recent_minutes:
+                        avg_recent_minutes = sum(recent_minutes) / len(recent_minutes)
+                        # Filter out players who average less than 30 minutes in recent gameweeks
+                        # This excludes backup players who haven't been playing
+                        if avg_recent_minutes < 30:
+                            # Exception: Allow if they played in the most recent gameweek (might be returning from injury/rotation)
+                            most_recent_minutes = recent_minutes[0] if recent_minutes else 0
+                            if most_recent_minutes < 1:
+                                logger.debug(f"Filtering {player.web_name} (avg recent minutes: {avg_recent_minutes:.1f}, most recent: {most_recent_minutes})")
+                                continue
+        except Exception as e:
+            # If we can't get history, log but don't block (might be rate limiting or API issue)
+            logger.debug(f"Could not check recent minutes for player {player.id} ({player.web_name}): {e}")
+            # In this case, we'll be more lenient and allow the player through
+        
         try:
             features = feature_eng.extract_features(player.id, include_history=False)
             pred = predictor.predict_player(features)
