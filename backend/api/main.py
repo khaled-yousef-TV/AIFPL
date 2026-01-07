@@ -296,6 +296,15 @@ async def _save_daily_snapshot_async():
             logger.info(f"Successfully saved daily snapshot for Gameweek {next_gw.id} at midnight")
         else:
             logger.error(f"Failed to save daily snapshot for Gameweek {next_gw.id}")
+        
+        # Calculate Triple Captain recommendations (runs in background)
+        try:
+            logger.info(f"Starting Triple Captain calculation for GW{next_gw.id} as part of daily snapshot job")
+            chips_router._calculate_triple_captain_background(next_gw.id)
+            logger.info(f"Triple Captain calculation queued for GW{next_gw.id}")
+        except Exception as tc_error:
+            logger.error(f"Error calculating Triple Captain recommendations in daily snapshot job: {tc_error}")
+            # Don't fail the entire job if triple captain calculation fails
     except Exception as e:
         logger.error(f"Error in _save_daily_snapshot_async: {e}")
 
