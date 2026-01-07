@@ -572,6 +572,35 @@ function App() {
     }
   }, [])
 
+  // Load saved FPL team IDs from database
+  const loadSavedFplTeams = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/fpl-teams`)
+      if (!res.ok) {
+        console.error(`Failed to load saved FPL teams: HTTP ${res.status}`)
+        setSavedFplTeams([])
+        return
+      }
+      const data = await res.json()
+      if (data.teams && Array.isArray(data.teams)) {
+        // Map API response to frontend format
+        const mapped: SavedFplTeam[] = data.teams.map((t: any) => ({
+          teamId: t.teamId,
+          teamName: t.teamName,
+          lastImported: t.lastImported ? new Date(t.lastImported).getTime() : Date.now()
+        }))
+        setSavedFplTeams(mapped)
+        console.log(`Loaded ${mapped.length} saved FPL team(s) from database`)
+      } else {
+        console.warn('Unexpected response format from fpl-teams endpoint:', data)
+        setSavedFplTeams([])
+      }
+    } catch (err) {
+      console.error('Failed to load saved FPL teams:', err)
+      setSavedFplTeams([])
+    }
+  }, [])
+
   // Load saved squads and draft on mount
   useEffect(() => {
     loadSavedSquads()
@@ -1211,35 +1240,6 @@ function App() {
       setDeletingSquad(false)
     }
   }, [selectedSavedName, loadSavedSquads])
-
-  // Load saved FPL team IDs from database
-  const loadSavedFplTeams = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/fpl-teams`)
-      if (!res.ok) {
-        console.error(`Failed to load saved FPL teams: HTTP ${res.status}`)
-        setSavedFplTeams([])
-        return
-      }
-      const data = await res.json()
-      if (data.teams && Array.isArray(data.teams)) {
-        // Map API response to frontend format
-        const mapped: SavedFplTeam[] = data.teams.map((t: any) => ({
-          teamId: t.teamId,
-          teamName: t.teamName,
-          lastImported: t.lastImported ? new Date(t.lastImported).getTime() : Date.now()
-        }))
-        setSavedFplTeams(mapped)
-        console.log(`Loaded ${mapped.length} saved FPL team(s) from database`)
-      } else {
-        console.warn('Unexpected response format from fpl-teams endpoint:', data)
-        setSavedFplTeams([])
-      }
-    } catch (err) {
-      console.error('Failed to load saved FPL teams:', err)
-      setSavedFplTeams([])
-    }
-  }, [])
 
   // Import squad from saved FPL team ID (always fetches latest from FPL)
   const importFromSavedFplTeam = useCallback(async (teamId: number) => {
