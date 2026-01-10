@@ -2259,73 +2259,72 @@ function App() {
               </p>
               
               {/* FPL Team Import */}
-                  <div className="pt-3 border-t border-[#2a2a4a]">
-                    {savedFplTeams.length > 0 && (
-                      <div className="mb-2">
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
-                          <select
-                            value={selectedSavedFplTeamId}
-                            onChange={(e) => {
-                              const teamId = e.target.value ? parseInt(e.target.value) : ''
-                              setSelectedSavedFplTeamId(teamId)
-                              if (teamId && typeof teamId === 'number') {
-                                importFromSavedFplTeam(teamId)
-                              }
-                            }}
-                            disabled={importingFplTeam}
-                            className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">— Select saved team —</option>
-                            {savedFplTeams.map((team) => (
-                              <option key={team.teamId} value={team.teamId}>
-                                {team.teamName} (ID: {team.teamId})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="text-[10px] text-gray-500 mt-1.5">
-                          Select a saved team to import the latest squad
-                        </div>
-                      </div>
-                    )}
+              <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                {savedFplTeams.length > 0 && (
+                  <div className="mb-3">
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
-                      <input
-                        type="number"
-                        value={fplTeamId}
-                        onChange={(e) => setFplTeamId(e.target.value)}
+                      <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
+                      <select
+                        value={selectedSavedFplTeamId}
+                        onChange={(e) => {
+                          const teamId = e.target.value ? parseInt(e.target.value) : ''
+                          setSelectedSavedFplTeamId(teamId)
+                          if (teamId && typeof teamId === 'number') {
+                            importFromSavedFplTeam(teamId)
+                          }
+                        }}
                         disabled={importingFplTeam}
                         className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                        placeholder="FPL Team ID"
-                      />
-                      <button
-                        onClick={importFplTeam}
-                        disabled={!fplTeamId.trim() || importingFplTeam}
-                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
-                        {importingFplTeam ? (
-                          <>
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            <span className="hidden sm:inline">Importing...</span>
-                          </>
-                        ) : (
-                          'Import'
-                        )}
-                      </button>
+                        <option value="">— Select saved team —</option>
+                        {savedFplTeams.map((team) => (
+                          <option key={team.teamId} value={team.teamId}>
+                            {team.teamName} (ID: {team.teamId})
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="text-[10px] text-gray-500 mt-1.5">
-                      Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
+                      Select a saved team to import the latest squad
                     </div>
                   </div>
+                )}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
+                  <input
+                    type="number"
+                    value={fplTeamId}
+                    onChange={(e) => setFplTeamId(e.target.value)}
+                    disabled={importingFplTeam}
+                    className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="FPL Team ID"
+                  />
+                  <button
+                    onClick={importFplTeam}
+                    disabled={!fplTeamId.trim() || importingFplTeam}
+                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    {importingFplTeam ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <span className="hidden sm:inline">Importing...</span>
+                      </>
+                    ) : (
+                      'Import'
+                    )}
+                  </button>
+                </div>
+                <div className="text-[10px] text-gray-500 mt-1.5">
+                  Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
                   Your current squad is auto-saved locally.
                 </div>
               </div>
+            </div>
 
-              {/* Squad Input */}
-              <div className="space-y-6">
+            {/* Squad Input */}
+            <div className="space-y-6">
                 {/* Search & Add */}
                 <div>
                   <h3 className="font-medium mb-3">Add Players to Squad</h3>
