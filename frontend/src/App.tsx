@@ -5,6 +5,20 @@ import {
   ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain, Crown, CheckCircle2, Clock, AlertCircle, Loader2
 } from 'lucide-react'
 
+// Type imports
+import type { 
+  Player, 
+  SuggestedSquad, 
+  SquadPlayer, 
+  SelectedTeam,
+  TransferSuggestion, 
+  Task, 
+  TaskStatus, 
+  TaskType,
+  GameWeekInfo, 
+  SavedFplTeam 
+} from './types'
+
 // FPL-themed logo component
 const FPLLogo = ({ className }: { className?: string }) => (
   <svg 
@@ -49,96 +63,7 @@ const FPLLogo = ({ className }: { className?: string }) => (
 // In local dev it defaults to http://localhost:8001
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
-// Types
-interface Player {
-  id: number
-  name: string
-  full_name?: string
-  team: string
-  position: string
-  position_id?: number
-  price: number
-  predicted?: number
-  predicted_points?: number
-  form?: number
-  total_points?: number
-  ownership?: number
-  is_captain?: boolean
-  is_vice_captain?: boolean
-  rotation_risk?: string
-  european_comp?: string
-  opponent?: string
-  difficulty?: number
-  is_home?: boolean
-  reason?: string
-}
-
-interface SuggestedSquad {
-  gameweek: number
-  formation: string
-  starting_xi: Player[]
-  bench: Player[]
-  captain: { id: number; name: string; predicted: number }
-  vice_captain: { id: number; name: string; predicted: number }
-  total_cost: number
-  remaining_budget: number
-  predicted_points: number
-}
-
-interface GameWeekInfo {
-  current?: { id: number; name: string }
-  next?: { id: number; name: string; deadline: string }
-}
-
-interface SquadPlayer {
-  id: number
-  name: string
-  position: string
-  // IMPORTANT: For "Quick Transfers" this should be the user's SELLING price.
-  // Search results provide current price, which may differ from selling price.
-  price: number
-  team?: string
-  rotation_risk?: string
-  european_comp?: string
-}
-
-interface TransferSuggestion {
-  out: any
-  in: any
-  cost: number
-  points_gain: number
-  priority_score: number
-  reason: string
-  all_reasons: string[]
-  teammate_comparison?: {
-    team?: string
-    position?: string
-    why?: string
-    chosen?: any
-    alternatives?: any[]
-  }
-  type?: 'hold' | 'transfer'
-  why?: string[]
-  best_net_gain?: number | null
-  hit_cost?: number
-  best_alternative?: any
-}
-
-
-type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
-type TaskType = 'daily_snapshot' | 'triple_captain' | 'refresh_picks' | 'refresh_differentials' | 'refresh_transfers' | 'refresh_wildcard'
-
-interface Task {
-  id: string
-  type: TaskType
-  title: string
-  description: string
-  status: TaskStatus
-  progress: number // 0-100
-  createdAt: number
-  completedAt?: number
-  error?: string
-}
+// Types are now imported from ./types
 
 function App() {
   const [loading, setLoading] = useState(true)
@@ -231,22 +156,12 @@ function App() {
   const [importingFplTeam, setImportingFplTeam] = useState(false)
   
   // Saved FPL team IDs (mapping of team name to team ID)
-  type SavedFplTeam = {
-    teamId: number
-    teamName: string
-    lastImported: number // timestamp
-  }
   const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
   const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
   
   // Removed: selectedSavedId (old localStorage-based code)
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
-  type SelectedTeam = {
-    gameweek: number
-    squad: SuggestedSquad
-    saved_at: string
-  }
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
   const [loadingSelectedTeams, setLoadingSelectedTeams] = useState(false)
   const [updatingSnapshot, setUpdatingSnapshot] = useState(false)
