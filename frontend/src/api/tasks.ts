@@ -2,7 +2,7 @@
  * Background Tasks API
  */
 
-import { apiRequest, apiFetch, API_BASE } from './client'
+import { apiRequest, apiFetch } from './client'
 import type { Task } from '../types'
 
 export interface TasksResponse {

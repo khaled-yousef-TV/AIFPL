@@ -2,7 +2,7 @@
  * Chips API (Triple Captain, etc.)
  */
 
-import { apiRequest, apiFetch, API_BASE } from './client'
+import { apiRequest, apiFetch } from './client'
 
 export interface TripleCaptainCandidate {
   id: number

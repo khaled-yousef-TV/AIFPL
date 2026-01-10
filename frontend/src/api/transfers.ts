@@ -2,7 +2,7 @@
  * Transfer Suggestions and Wildcard API
  */
 
-import { apiRequest, apiFetch, API_BASE } from './client'
+import { apiRequest } from './client'
 import type { SquadPlayer, TransferSuggestion } from '../types'
 
 export interface TransferRequest {
