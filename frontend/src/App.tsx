@@ -2319,7 +2319,7 @@ function App() {
                   </div>
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
-                  Your current squad is auto-saved locally and saved squads are synced across devices.
+                  Your current squad is auto-saved locally.
                 </div>
               </div>
 
