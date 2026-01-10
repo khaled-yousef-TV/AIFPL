@@ -476,9 +476,25 @@ function App() {
     }
   }, [tasks])
 
+  // Load initial data (gameweek info)
+  const loadInitial = useCallback(async () => {
+    // Only load lightweight header data on boot (keeps Quick Transfers instant).
+    setLoading(true)
+    setError(null)
+    try {
+      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
+      setGameweek(gwRes)
+    } catch (err: any) {
+      setError(err.message || 'Failed to load data')
+      console.error('Load error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadInitial()
-  }, [])
+  }, [loadInitial])
 
   // Countdown timer for gameweek deadline
   useEffect(() => {
@@ -1142,21 +1158,6 @@ function App() {
       setImportingFplTeam(false)
     }
   }, [fplTeamId, freeTransfers, loadSavedFplTeams])
-
-  const loadInitial = async () => {
-    // Only load lightweight header data on boot (keeps Quick Transfers instant).
-    setLoading(true)
-    setError(null)
-    try {
-      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
-      setGameweek(gwRes)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data')
-      console.error('Load error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const ensurePicksLoaded = async () => {
     if (Object.keys(topPicks).length > 0) return
