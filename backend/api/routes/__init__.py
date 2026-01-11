@@ -11,6 +11,7 @@ from .players import router as players_router
 from .tasks import router as tasks_router
 from .fpl_teams import router as fpl_teams_router
 from .squads import router as squads_router
+from .selected_teams import router as selected_teams_router
 
 __all__ = [
     # Health
@@ -29,4 +30,6 @@ __all__ = [
     'fpl_teams_router',
     # Squads
     'squads_router',
+    # Selected Teams
+    'selected_teams_router',
 ]
