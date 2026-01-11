@@ -603,17 +603,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       {!trajectory && !loading && (
         <div className="bg-slate-800/30 rounded-xl p-12 border border-slate-700/50 text-center">
           <Sparkles className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-white mb-2">Plan Your Wildcard</h3>
-          <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
-            Generate an optimal 8-gameweek squad trajectory using our hybrid 
-            LSTM-XGBoost model. Prioritizes long-term fixture blocks over single-week peaks.
-          </p>
-          <div className="text-slate-500 text-xs space-y-1">
-            <p>• Hybrid model: 0.7×LSTM + 0.3×XGBoost</p>
-            <p>• FDR-adjusted predictions</p>
-            <p>• Transfer decay for uncertainty</p>
-            <p>• MILP optimizer for squad selection</p>
-          </div>
+          <h3 className="text-lg font-semibold text-white">Plan Your Wildcard</h3>
         </div>
       )}
     </div>
