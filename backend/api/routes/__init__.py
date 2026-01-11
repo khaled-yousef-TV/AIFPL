@@ -13,6 +13,7 @@ from .fpl_teams import router as fpl_teams_router
 from .squads import router as squads_router
 from .selected_teams import router as selected_teams_router
 from .predictions import router as predictions_router
+from .suggested_squad import router as suggested_squad_router
 
 __all__ = [
     # Health
@@ -35,4 +36,6 @@ __all__ = [
     'selected_teams_router',
     # Predictions
     'predictions_router',
+    # Suggested Squad
+    'suggested_squad_router',
 ]
