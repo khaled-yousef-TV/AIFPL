@@ -169,10 +169,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include chip optimization routes
+# Include modular routes
 from api.routes import chips as chips_router
+from api.routes import health as health_router
+
+# Initialize routers with dependencies
 chips_router.initialize_chips_router(fpl_client, feature_eng)
+health_router.initialize_health_router(betting_odds_client)
+
+# Register routers
 app.include_router(chips_router.router, prefix="/api/chips", tags=["chips"])
+app.include_router(health_router.router, prefix="/api", tags=["health"])
 
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
@@ -463,28 +470,7 @@ async def shutdown_event():
 
 
 # ==================== Health Check ====================
-
-@app.get("/api/health", response_model=HealthResponse)
-async def health_check():
-    """
-    Health check endpoint.
-    Can also be used to wake up the server on Render free tier.
-    """
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-@app.get("/api/betting-odds-status")
-async def get_betting_odds_status():
-    """Debug endpoint to check betting odds configuration."""
-    return {
-        "enabled": betting_odds_client.enabled,
-        "has_api_key": bool(betting_odds_client.api_key),
-        "weight": betting_odds_client.weight,
-        "api_key_set": bool(os.getenv("THE_ODDS_API_KEY")),
-        "enabled_env": os.getenv("BETTING_ODDS_ENABLED", "false"),
-    }
+# NOTE: /api/health and /api/betting-odds-status moved to api/routes/health.py
 
 
 # ==================== Gameweek Info ====================
