@@ -11,6 +11,8 @@ interface WildcardTabProps {
   gameweek: number | null
 }
 
+const WILDCARD_TRAJECTORY_KEY = 'fpl_wildcard_trajectory_v1'
+
 const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
   const [loading, setLoading] = useState(false)
   const [trajectory, setTrajectory] = useState<WildcardTrajectory | null>(null)
@@ -30,6 +32,33 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       return next
     })
   }
+
+  // Load saved trajectory from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(WILDCARD_TRAJECTORY_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved) as WildcardTrajectory
+        setTrajectory(parsed)
+        // Set first gameweek as selected
+        const gws = Object.keys(parsed.gameweek_predictions).map(Number).sort((a, b) => a - b)
+        if (gws.length > 0) setSelectedGw(gws[0])
+      }
+    } catch (err) {
+      console.debug('Could not load saved wildcard trajectory:', err)
+    }
+  }, [])
+
+  // Save trajectory to localStorage whenever it changes
+  useEffect(() => {
+    if (trajectory) {
+      try {
+        localStorage.setItem(WILDCARD_TRAJECTORY_KEY, JSON.stringify(trajectory))
+      } catch (err) {
+        console.debug('Could not save wildcard trajectory to localStorage:', err)
+      }
+    }
+  }, [trajectory])
 
   // Cleanup polling on unmount
   useEffect(() => {
