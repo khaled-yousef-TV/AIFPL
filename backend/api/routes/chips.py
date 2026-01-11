@@ -180,6 +180,45 @@ async def calculate_triple_captain_recommendations(background_tasks: BackgroundT
         )
 
 
+@router.delete("/triple-captain/{gameweek}")
+async def delete_triple_captain_recommendations(gameweek: int):
+    """
+    Delete Triple Captain recommendations for a specific gameweek.
+    Used to remove stale or incorrect data.
+    """
+    from database.crud import DatabaseManager
+    from database.models import TripleCaptainRecommendations
+    
+    try:
+        db_manager = DatabaseManager()
+        with db_manager.get_session() as session:
+            recs = session.query(TripleCaptainRecommendations).filter(
+                TripleCaptainRecommendations.gameweek == gameweek
+            ).all()
+            
+            if not recs:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No Triple Captain recommendations found for GW{gameweek}"
+                )
+            
+            count = len(recs)
+            for rec in recs:
+                session.delete(rec)
+            session.commit()
+            
+            logger.info(f"Deleted {count} Triple Captain recommendation(s) for GW{gameweek}")
+            return {"success": True, "message": f"Deleted {count} recommendation(s) for GW{gameweek}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting Triple Captain recommendations for GW{gameweek}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete recommendations: {str(e)}"
+        )
+
+
 @router.post("/bench-boost")
 async def get_bench_boost_squad(
     budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
