@@ -175,9 +175,9 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
   // Track previous searchPosition to detect changes
   const prevSearchPositionRef = useRef<string>(searchPosition)
   
-  // Auto-scroll to search results when position filter changes
+  // Auto-scroll to search section when position filter changes
   useEffect(() => {
-    if (searchPosition !== prevSearchPositionRef.current && searchResults.length > 0) {
+    if (searchPosition !== prevSearchPositionRef.current) {
       setTimeout(() => {
         if (searchResultsRef.current) {
           searchResultsRef.current.scrollIntoView({ 
@@ -185,10 +185,10 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             block: 'start'
           })
         }
-      }, 100)
+      }, 50)
     }
     prevSearchPositionRef.current = searchPosition
-  }, [searchPosition, searchResults.length])
+  }, [searchPosition])
 
   const handleGenerateSuggestions = async () => {
     if (mySquad.length < 15) {
@@ -335,7 +335,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
           {/* Squad Input */}
           <div className="space-y-6">
             {/* Search & Add */}
-            <div>
+            <div ref={searchResultsRef} className="scroll-mt-4">
               <h3 className="font-medium mb-3">Add Players to Squad</h3>
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -384,10 +384,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
               
               {/* Search Results */}
               {searchResults.length > 0 && (
-                <div 
-                  ref={searchResultsRef}
-                  className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto scroll-mt-4"
-                >
+                <div className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto">
                   {searchResults.map(player => {
                     const alreadyInSquad = mySquad.find(p => p.id === player.id) !== undefined
                     const positionFull = isPositionFull(player.position)
