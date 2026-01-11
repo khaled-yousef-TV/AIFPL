@@ -1,5 +1,14 @@
 # Cursor AI Rules for AIFPL Project
 
+## Architecture Documentation
+- **ALWAYS read `ARCHITECTURE.md`** before making changes
+- **UPDATE `ARCHITECTURE.md`** when adding new:
+  - API endpoints
+  - Services
+  - Route files
+  - Frontend components or tabs
+  - TypeScript types
+
 ## Git Workflow
 - **ALWAYS commit and push changes immediately** - This is a hobby project, no production concerns
 - **Never leave uncommitted changes** - If you modify a file, commit and push it
@@ -13,24 +22,52 @@
   4. `git commit -m "descriptive message"`
   5. `git push origin main`
 
-## File Modifications
-- If you read a file and see it has content that differs from git, check:
-  1. `git diff HEAD <file>` to see uncommitted changes
-  2. `git show HEAD:<file>` to see committed version
-  3. If local has changes, commit them immediately
+## Backend Architecture (IMPORTANT)
 
-## Database/Backend Changes
-- When adding new API endpoints, ensure:
-  1. Backend route is in `backend/api/main.py`
-  2. Database methods are in `backend/database/crud.py`
-  3. Models are in `backend/database/models.py`
-  4. ALL changes are committed and pushed
+### Adding New API Endpoints
+1. **Create service first** in `backend/services/` with business logic
+2. **Create route** in `backend/api/routes/` that calls the service
+3. **Register route** in `backend/api/routes/__init__.py`
+4. **Include router** in `backend/api/main.py`
+5. **Update ARCHITECTURE.md** with new endpoint
 
-## Frontend Changes
-- When modifying frontend:
-  1. Test locally if possible
-  2. Commit and push immediately
-  3. GitHub Actions will auto-deploy frontend
+### Backend File Organization
+```
+backend/
+├── api/routes/      # HTTP handlers (thin layer, < 150 lines each)
+├── services/        # Business logic (< 500 lines each)
+├── ml/              # ML models and predictions
+├── database/        # SQLAlchemy models and CRUD
+├── fpl/             # FPL API client
+└── data/            # Data utilities
+```
+
+### Key Files
+- Route handlers: `backend/api/routes/*.py`
+- Services: `backend/services/*.py`
+- Dependencies: `backend/services/dependencies.py` (use `get_dependencies()`)
+- Caching: `backend/services/cache.py` (use `cache.get/set`)
+- Request models: `backend/api/models.py`
+
+## Frontend Architecture (IMPORTANT)
+
+### Adding New Features
+1. **Define types** in `frontend/src/types/` if needed
+2. **Add API function** in `frontend/src/api/` for backend calls
+3. **Create component** in `frontend/src/components/` for reusable UI
+4. **Create tab** in `frontend/src/tabs/` for major sections
+5. **Update App.tsx** to include new tab
+6. **Update ARCHITECTURE.md** with new files
+
+### Frontend File Organization
+```
+frontend/src/
+├── types/           # TypeScript interfaces
+├── api/             # API client functions
+├── components/      # Reusable UI components (< 100 lines each)
+├── tabs/            # Tab content components (< 300 lines each)
+└── App.tsx          # Main app (state management, routing)
+```
 
 ## Build Verification (REQUIRED BEFORE COMMIT)
 - **ALWAYS verify both builds before committing and pushing:**
@@ -39,11 +76,19 @@
      - Must complete without errors
      - Fix any build errors before committing
   2. **Backend Build:**
-     - Run: `python3 -c "import sys; sys.path.insert(0, '.'); from backend.api.main import app"`
+     - Run: `PYTHONPATH=backend python -c "from backend.api.main import app; print('OK')"`
      - Must import successfully without errors
      - Fix any import/syntax errors before committing
   3. **Only after both builds pass:**
      - Proceed with `git add`, `git commit`, and `git push`
+
+## File Size Guidelines
+| File Type | Target Size | Action if Exceeded |
+|-----------|-------------|-------------------|
+| Route files | < 150 lines | Split into services |
+| Service files | < 500 lines | Split by feature |
+| React tabs | < 300 lines | Extract components |
+| Components | < 100 lines | Simplify or split |
 
 ## UI Alignment Rules (CRITICAL)
 - **Countdown Timer Alignment:**
@@ -51,13 +96,9 @@
     1. **MUST verify countdown timer alignment** between sidebar header and desktop header
     2. Both headers use `px-6 py-4` padding
     3. Both headers have inner content with `h-10` (40px height)
-    4. Countdown timer elements must use `flex items-center h-full` for proper vertical centering
-    5. All countdown boxes must have `flex items-center justify-center` for internal alignment
-    6. Separator line must use `flex items-center` for vertical centering
-  - **If alignment is off:**
-    - Check that all flex containers have `items-center` and `h-full` where needed
-    - Ensure countdown timer container matches sidebar header height (`h-10`)
-    - Verify padding consistency (`px-6 py-4` on both headers)
+    4. Countdown timer elements must use `flex items-center h-full`
+    5. All countdown boxes must have `flex items-center justify-center`
+    6. Separator line must use `flex items-center`
 
 ## Backend Deployment
 - After pushing backend changes:
@@ -65,3 +106,17 @@
   2. Or manually trigger deploy on Render dashboard
   3. Always verify deployment completed successfully
 
+## Quick Reference Commands
+
+```bash
+# Backend import check
+cd /Users/khaledyousef/AIFPL
+source .venv/bin/activate
+PYTHONPATH=backend python -c "from backend.api.main import app; print('OK')"
+
+# Frontend build
+cd frontend && npm run build
+
+# Commit and push
+git add -A && git commit -m "message" && git push origin main
+```
