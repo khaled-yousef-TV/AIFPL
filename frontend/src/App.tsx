@@ -45,7 +45,12 @@ function App() {
   // AbortController refs for cleanup
   const tcAbortControllerRef = useRef<AbortController | null>(null)
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
-  const [activeTab, setActiveTab] = useState('home')
+  // Initialize activeTab from URL hash (e.g., #transfers -> 'transfers')
+  const [activeTab, setActiveTab] = useState(() => {
+    const hash = window.location.hash.slice(1) // Remove the '#'
+    const validTabs = ['home', 'picks', 'differentials', 'transfers', 'triple_captain', 'selected_teams', 'tasks']
+    return validTabs.includes(hash) ? hash : 'home'
+  })
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
@@ -349,6 +354,31 @@ function App() {
 
   useEffect(() => {
     loadInitial()
+  }, [])
+
+  // Sync URL hash when activeTab changes
+  useEffect(() => {
+    const currentHash = window.location.hash.slice(1)
+    const expectedHash = activeTab === 'home' ? '' : activeTab
+    if (currentHash !== expectedHash) {
+      const newUrl = activeTab === 'home' ? window.location.pathname : `#${activeTab}`
+      window.history.pushState(null, '', newUrl)
+    }
+  }, [activeTab])
+
+  // Listen for browser back/forward navigation
+  useEffect(() => {
+    const handleNavigation = () => {
+      const hash = window.location.hash.slice(1)
+      const validTabs = ['home', 'picks', 'differentials', 'transfers', 'triple_captain', 'selected_teams', 'tasks']
+      setActiveTab(validTabs.includes(hash) ? hash : 'home')
+    }
+    window.addEventListener('popstate', handleNavigation)
+    window.addEventListener('hashchange', handleNavigation)
+    return () => {
+      window.removeEventListener('popstate', handleNavigation)
+      window.removeEventListener('hashchange', handleNavigation)
+    }
   }, [])
 
   // Countdown timer for gameweek deadline
