@@ -5,6 +5,7 @@ Provides endpoints for Triple Captain, Bench Boost, and Wildcard chip optimizati
 """
 
 import logging
+import uuid
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
@@ -13,6 +14,8 @@ from fpl.client import FPLClient
 from ml.features import FeatureEngineer
 from ml.predictor import HeuristicPredictor
 from ml.chips import TripleCaptainOptimizer, WildcardOptimizer
+from services.dependencies import get_dependencies
+from services.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -210,10 +213,74 @@ class WildcardRequest(BaseModel):
     horizon: int = 8
 
 
-@router.post("/wildcard-trajectory")
-async def get_wildcard_trajectory(request: WildcardRequest):
+def _calculate_wildcard_background(task_id: str, budget: float, horizon: int, current_squad: Optional[List[Dict]]):
     """
-    Get optimized 8-GW Wildcard trajectory.
+    Background task to calculate Wildcard trajectory.
+    This runs asynchronously so the API can return immediately.
+    """
+    try:
+        deps = get_dependencies()
+        db_manager = deps.db_manager
+        
+        # Update task to running
+        db_manager.update_task(task_id, status="running", progress=10)
+        
+        # Get dependencies for optimizer
+        # Use global variables if available, otherwise get from deps
+        opt_fpl_client = fpl_client or deps.fpl_client
+        opt_feature_engineer = feature_engineer or deps.feature_engineer
+        opt_predictor = predictor or deps.predictor_heuristic
+        
+        optimizer = WildcardOptimizer(opt_fpl_client, opt_feature_engineer, opt_predictor)
+        
+        # Update progress
+        db_manager.update_task(task_id, progress=30)
+        
+        trajectory = optimizer.get_optimal_trajectory(
+            budget=budget,
+            horizon=horizon,
+            current_squad=current_squad
+        )
+        
+        if not trajectory:
+            db_manager.update_task(
+                task_id,
+                status="failed",
+                error="Failed to generate wildcard trajectory. Please try again."
+            )
+            return
+        
+        # Update progress
+        db_manager.update_task(task_id, progress=80)
+        
+        # Convert to dict and store in cache
+        trajectory_dict = optimizer.trajectory_to_dict(trajectory)
+        cache.set("wildcard_results", task_id, trajectory_dict)
+        
+        # Mark task as completed
+        db_manager.update_task(task_id, status="completed", progress=100)
+        logger.info(f"Wildcard trajectory task {task_id} completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in background Wildcard calculation for task {task_id}: {e}", exc_info=True)
+        try:
+            deps = get_dependencies()
+            deps.db_manager.update_task(
+                task_id,
+                status="failed",
+                error=str(e)
+            )
+        except Exception:
+            pass
+
+
+@router.post("/wildcard-trajectory")
+async def get_wildcard_trajectory(request: WildcardRequest, background_tasks: BackgroundTasks):
+    """
+    Get optimized 8-GW Wildcard trajectory (async task-based).
+    
+    Creates a background task and returns immediately with a task ID.
+    Use GET /api/tasks/{task_id} to check status and GET /api/chips/wildcard-trajectory/{task_id} to get results.
     
     Uses hybrid LSTM+XGBoost model with:
     - Weighted formula: 0.7×LSTM + 0.3×XGBoost
@@ -225,9 +292,10 @@ async def get_wildcard_trajectory(request: WildcardRequest):
     
     Args:
         request: WildcardRequest with budget, horizon, and optional current_squad
+        background_tasks: FastAPI background tasks
         
     Returns:
-        Optimal squad trajectory with gameweek-by-gameweek predictions
+        Task ID and status
     """
     if not fpl_client or not feature_engineer:
         raise HTTPException(
@@ -236,42 +304,93 @@ async def get_wildcard_trajectory(request: WildcardRequest):
         )
     
     try:
-        optimizer = WildcardOptimizer(fpl_client, feature_engineer, predictor)
+        deps = get_dependencies()
+        db_manager = deps.db_manager
         
-        trajectory = optimizer.get_optimal_trajectory(
-            budget=request.budget,
-            horizon=request.horizon,
-            current_squad=request.current_squad
+        # Generate unique task ID
+        task_id = f"wildcard_{uuid.uuid4().hex[:12]}"
+        
+        # Create task
+        db_manager.create_task(
+            task_id=task_id,
+            task_type="wildcard",
+            title="Generate Wildcard Trajectory",
+            description=f"Optimizing {request.horizon}-gameweek wildcard trajectory with budget £{request.budget}m",
+            status="pending",
+            progress=0
         )
         
-        if not trajectory:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate wildcard trajectory. Please try again."
-            )
+        # Add to background tasks
+        background_tasks.add_task(
+            _calculate_wildcard_background,
+            task_id,
+            request.budget,
+            request.horizon,
+            request.current_squad
+        )
         
-        return optimizer.trajectory_to_dict(trajectory)
+        logger.info(f"Queued Wildcard trajectory calculation (task {task_id})")
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": "Wildcard trajectory calculation started. Check task status for progress."
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating wildcard trajectory: {e}", exc_info=True)
+        logger.error(f"Error queuing Wildcard trajectory calculation: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate wildcard trajectory: {str(e)}"
+            detail=f"Failed to queue Wildcard trajectory calculation: {str(e)}"
         )
 
 
-@router.get("/wildcard-trajectory")
-async def get_wildcard_trajectory_get(
-    budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
-    horizon: int = Query(8, ge=1, le=10, description="Number of gameweeks to optimize")
-):
+@router.get("/wildcard-trajectory/{task_id}")
+async def get_wildcard_trajectory_result(task_id: str):
     """
-    Get optimized 8-GW Wildcard trajectory (GET endpoint).
+    Get Wildcard trajectory result by task ID.
     
-    Same as POST but with query parameters for easier testing.
+    Args:
+        task_id: Task ID returned from POST /api/chips/wildcard-trajectory
+        
+    Returns:
+        Wildcard trajectory result if task is completed, otherwise error
     """
-    request = WildcardRequest(budget=budget, horizon=horizon)
-    return await get_wildcard_trajectory(request)
+    try:
+        deps = get_dependencies()
+        db_manager = deps.db_manager
+        
+        # Check task status
+        task = db_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+        
+        if task["status"] != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Task '{task_id}' is not completed yet. Status: {task['status']}"
+            )
+        
+        # Get result from cache
+        result = cache.get("wildcard_results", task_id)
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Result for task '{task_id}' not found. It may have expired."
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Wildcard trajectory result for task {task_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get Wildcard trajectory result: {str(e)}"
+        )
+
+
 

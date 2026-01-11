@@ -18,19 +18,22 @@ export interface WildcardTrajectoryRequest {
   }>
 }
 
+export interface WildcardTrajectoryTaskResponse {
+  task_id: string
+  status: string
+  message: string
+}
+
 /**
- * Get optimal 8-GW wildcard trajectory
+ * Submit wildcard trajectory calculation (returns task ID)
  * 
- * Uses hybrid LSTM+XGBoost model with:
- * - Weighted formula: 0.7×LSTM + 0.3×XGBoost
- * - FDR adjustment
- * - Transfer decay factor
- * - MILP optimizer
+ * Creates an async task and returns immediately with a task ID.
+ * Use getWildcardTrajectoryResult() to fetch the result once the task completes.
  */
-export async function fetchWildcardTrajectory(
+export async function submitWildcardTrajectory(
   request: WildcardTrajectoryRequest = {}
-): Promise<WildcardTrajectory> {
-  return apiRequest<WildcardTrajectory>('/api/chips/wildcard-trajectory', {
+): Promise<WildcardTrajectoryTaskResponse> {
+  return apiRequest<WildcardTrajectoryTaskResponse>('/api/chips/wildcard-trajectory', {
     method: 'POST',
     body: JSON.stringify({
       budget: request.budget ?? 100.0,
@@ -41,14 +44,33 @@ export async function fetchWildcardTrajectory(
 }
 
 /**
+ * Get wildcard trajectory result by task ID
+ */
+export async function getWildcardTrajectoryResult(taskId: string): Promise<WildcardTrajectory> {
+  return apiRequest<WildcardTrajectory>(`/api/chips/wildcard-trajectory/${taskId}`)
+}
+
+/**
+ * Get optimal 8-GW wildcard trajectory (legacy - synchronous)
+ * 
+ * @deprecated Use submitWildcardTrajectory() and getWildcardTrajectoryResult() for async task-based pattern
+ */
+export async function fetchWildcardTrajectory(
+  request: WildcardTrajectoryRequest = {}
+): Promise<WildcardTrajectory> {
+  // Submit task and wait for result (for backward compatibility)
+  const taskResponse = await submitWildcardTrajectory(request)
+  return getWildcardTrajectoryResult(taskResponse.task_id)
+}
+
+/**
  * Get wildcard trajectory with query params (GET endpoint)
+ * @deprecated Use submitWildcardTrajectory() for async task-based pattern
  */
 export async function fetchWildcardTrajectoryGet(
   budget: number = 100.0,
   horizon: number = 8
 ): Promise<WildcardTrajectory> {
-  return apiRequest<WildcardTrajectory>(
-    `/api/chips/wildcard-trajectory?budget=${budget}&horizon=${horizon}`
-  )
+  return fetchWildcardTrajectory({ budget, horizon })
 }
 

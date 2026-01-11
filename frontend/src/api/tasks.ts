@@ -25,6 +25,13 @@ export async function fetchTasks(includeOld: boolean = false): Promise<TasksResp
 }
 
 /**
+ * Fetch a single task by ID
+ */
+export async function fetchTask(taskId: string): Promise<Task> {
+  return apiRequest<Task>(`/api/tasks/${taskId}`)
+}
+
+/**
  * Create a new task
  */
 export async function createTask(task: Omit<Task, 'completedAt' | 'error'>): Promise<void> {

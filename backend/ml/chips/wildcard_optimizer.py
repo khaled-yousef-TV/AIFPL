@@ -162,9 +162,9 @@ class HybridPredictor:
                     logger.warning(f"Could not load LSTM model: {e}. Using proxy.")
                     self.lstm_model = None
             else:
-                logger.info(f"LSTM model not found at {lstm_model_path}. Using proxy.")
+                logger.debug(f"LSTM model not found at {lstm_model_path}. Using proxy.")
         else:
-            logger.info("LSTM not available. Using proxy implementation.")
+            logger.debug("LSTM not available. Using proxy implementation.")
     
     def _predict_lstm_proxy(self, features, player_history: List[Dict]) -> float:
         """
