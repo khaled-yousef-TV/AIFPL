@@ -5,20 +5,6 @@ import {
   ArrowRightLeft, Search, Plus, X, Trash2, Trophy, Home, Brain, Crown, CheckCircle2, Clock, AlertCircle, Loader2
 } from 'lucide-react'
 
-// Type imports
-import type { 
-  Player, 
-  SuggestedSquad, 
-  SquadPlayer, 
-  SelectedTeam,
-  TransferSuggestion, 
-  Task, 
-  TaskStatus, 
-  TaskType,
-  GameWeekInfo, 
-  SavedFplTeam 
-} from './types'
-
 // FPL-themed logo component
 const FPLLogo = ({ className }: { className?: string }) => (
   <svg 
@@ -63,7 +49,104 @@ const FPLLogo = ({ className }: { className?: string }) => (
 // In local dev it defaults to http://localhost:8001
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
-// Types are now imported from ./types
+// Types
+interface Player {
+  id: number
+  name: string
+  full_name?: string
+  team: string
+  position: string
+  position_id?: number
+  price: number
+  predicted?: number
+  predicted_points?: number
+  form?: number
+  total_points?: number
+  ownership?: number
+  is_captain?: boolean
+  is_vice_captain?: boolean
+  rotation_risk?: string
+  european_comp?: string
+  opponent?: string
+  difficulty?: number
+  is_home?: boolean
+  reason?: string
+}
+
+interface SuggestedSquad {
+  gameweek: number
+  formation: string
+  starting_xi: Player[]
+  bench: Player[]
+  captain: { id: number; name: string; predicted: number }
+  vice_captain: { id: number; name: string; predicted: number }
+  total_cost: number
+  remaining_budget: number
+  predicted_points: number
+}
+
+interface GameWeekInfo {
+  current?: { id: number; name: string }
+  next?: { id: number; name: string; deadline: string }
+}
+
+interface SquadPlayer {
+  id: number
+  name: string
+  position: string
+  // IMPORTANT: For "Quick Transfers" this should be the user's SELLING price.
+  // Search results provide current price, which may differ from selling price.
+  price: number
+  team?: string
+  rotation_risk?: string
+  european_comp?: string
+}
+
+interface TransferSuggestion {
+  out: any
+  in: any
+  cost: number
+  points_gain: number
+  priority_score: number
+  reason: string
+  all_reasons: string[]
+  teammate_comparison?: {
+    team?: string
+    position?: string
+    why?: string
+    chosen?: any
+    alternatives?: any[]
+  }
+  type?: 'hold' | 'transfer'
+  why?: string[]
+  best_net_gain?: number | null
+  hit_cost?: number
+  best_alternative?: any
+}
+
+type SavedSquad = {
+  id: string
+  name: string
+  updatedAt: number
+  squad: SquadPlayer[]
+  bank: number
+  freeTransfers: number
+}
+
+type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
+type TaskType = 'daily_snapshot' | 'triple_captain' | 'refresh_picks' | 'refresh_differentials' | 'refresh_transfers' | 'refresh_wildcard'
+
+interface Task {
+  id: string
+  type: TaskType
+  title: string
+  description: string
+  status: TaskStatus
+  progress: number // 0-100
+  createdAt: number
+  completedAt?: number
+  error?: string
+}
 
 function App() {
   const [loading, setLoading] = useState(true)
@@ -89,6 +172,10 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
+  const [savingSquad, setSavingSquad] = useState(false)
+  const [loadingSquad, setLoadingSquad] = useState(false)
+  const [updatingSquad, setUpdatingSquad] = useState(false)
+  const [deletingSquad, setDeletingSquad] = useState(false)
   
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
@@ -150,18 +237,33 @@ function App() {
     return { holdSuggestions, sortedGroups }
   }, [transferSuggestions, freeTransfers])
 
+  // Saved squads (persist between weeks) - now server-side
+  const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
+  const [selectedSavedName, setSelectedSavedName] = useState<string>('')
+  const [saveName, setSaveName] = useState<string>('My Squad')
+  const [loadingSavedSquads, setLoadingSavedSquads] = useState(false)
   
   // FPL team import
   const [fplTeamId, setFplTeamId] = useState<string>('')
   const [importingFplTeam, setImportingFplTeam] = useState(false)
   
   // Saved FPL team IDs (mapping of team name to team ID)
+  type SavedFplTeam = {
+    teamId: number
+    teamName: string
+    lastImported: number // timestamp
+  }
   const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
   const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
   
   // Removed: selectedSavedId (old localStorage-based code)
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
+  type SelectedTeam = {
+    gameweek: number
+    squad: SuggestedSquad
+    saved_at: string
+  }
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
   const [loadingSelectedTeams, setLoadingSelectedTeams] = useState(false)
   const [updatingSnapshot, setUpdatingSnapshot] = useState(false)
@@ -391,25 +493,9 @@ function App() {
     }
   }, [tasks])
 
-  // Load initial data (gameweek info)
-  const loadInitial = useCallback(async () => {
-    // Only load lightweight header data on boot (keeps Quick Transfers instant).
-    setLoading(true)
-    setError(null)
-    try {
-      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
-      setGameweek(gwRes)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data')
-      console.error('Load error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     loadInitial()
-  }, [loadInitial])
+  }, [])
 
   // Countdown timer for gameweek deadline
   useEffect(() => {
@@ -446,6 +532,45 @@ function App() {
     return () => clearInterval(interval)
   }, [gameweek?.next?.deadline])
 
+  // Load saved squads from API on mount
+  const loadSavedSquads = useCallback(async () => {
+    setLoadingSavedSquads(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/saved-squads`)
+      if (!response.ok) {
+        console.error(`Failed to load saved squads: HTTP ${response.status}`, await response.text().catch(() => ''))
+        setSavedSquads([])
+        return
+      }
+      const res = await response.json()
+      if (res.squads && Array.isArray(res.squads)) {
+        // Map API response to frontend format
+        const mapped = res.squads.map((s: any) => {
+          // API squad_data contains { squad, bank, freeTransfers }
+          const squadData = s.squad || {}
+          return {
+            id: s.name, // Use name as id for API compatibility
+            name: s.name,
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : new Date(s.saved_at).getTime(),
+            squad: squadData.squad || [],
+            bank: squadData.bank || 0,
+            bankInput: String(squadData.bank || 0),
+            freeTransfers: squadData.freeTransfers || 1,
+          }
+        })
+        setSavedSquads(mapped)
+        console.log(`Loaded ${mapped.length} saved squad(s)`)
+      } else {
+        console.warn('Unexpected response format from saved-squads endpoint:', res)
+        setSavedSquads([])
+      }
+    } catch (err) {
+      console.error('Failed to load saved squads:', err)
+      setSavedSquads([])
+    } finally {
+      setLoadingSavedSquads(false)
+    }
+  }, [])
 
   // Load saved FPL team IDs from database
   const loadSavedFplTeams = useCallback(async () => {
@@ -476,8 +601,9 @@ function App() {
     }
   }, [])
 
-  // Load draft on mount
+  // Load saved squads and draft on mount
   useEffect(() => {
+    loadSavedSquads()
     loadSavedFplTeams()
 
     // Load draft squad from localStorage (still local, not synced)
@@ -495,7 +621,7 @@ function App() {
         }
       }
     } catch {}
-  }, [loadSavedFplTeams])
+  }, [loadSavedSquads, loadSavedFplTeams])
 
   // Load selected teams from API
   const loadSelectedTeams = async () => {
@@ -985,6 +1111,135 @@ function App() {
     } catch {}
   }, [mySquad, bank, freeTransfers])
 
+  const loadSavedSquad = useCallback(async () => {
+    if (!selectedSavedName) return
+    
+    setLoadingSquad(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`)
+      if (!res.ok) {
+        throw new Error('Failed to load saved squad')
+      }
+      const data = await res.json()
+      const squadData = data.squad || {}
+      
+      setMySquad(squadData.squad || [])
+      setBank(squadData.bank ?? 0)
+      setBankInput(String(squadData.bank ?? 0))
+      setFreeTransfers(squadData.freeTransfers ?? 1)
+      setSaveName(data.name || 'My Squad')
+      
+      // Reset view when loading a new squad
+      setWildcardPlan(null)
+      setTransferSuggestions([])
+      setSquadAnalysis([])
+    } catch (err) {
+      console.error('Failed to load saved squad:', err)
+      alert('Failed to load saved squad. Please try again.')
+    } finally {
+      setLoadingSquad(false)
+    }
+  }, [selectedSavedName])
+
+  const saveOrUpdateSquad = useCallback(async (mode: 'update' | 'new') => {
+    const name = (saveName || 'My Squad').trim()
+    if (!name) {
+      alert('Please enter a squad name')
+      return
+    }
+    
+    // Prepare squad data to save
+    const squadData = {
+      squad: mySquad,
+      bank: bank,
+      freeTransfers: freeTransfers
+    }
+
+    if (mode === 'update' && selectedSavedName) {
+      if (selectedSavedName !== name) {
+        alert('Cannot change squad name. Please create a new squad with a different name.')
+        return
+      }
+      
+      setUpdatingSquad(true)
+      try {
+        const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, squad: squadData })
+        })
+        
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({ detail: 'Failed to update squad' }))
+          throw new Error(error.detail || 'Failed to update squad')
+        }
+        
+        // Reload saved squads to get updated data
+        await loadSavedSquads()
+      } catch (err: any) {
+        console.error('Failed to update squad:', err)
+        alert(err.message || 'Failed to update squad. Please try again.')
+      } finally {
+        setUpdatingSquad(false)
+      }
+      return
+    }
+
+    // Create new squad
+    setSavingSquad(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, squad: squadData })
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to save squad' }))
+        throw new Error(error.detail || 'Failed to save squad')
+      }
+      
+      // Reload saved squads and select the newly created one
+      await loadSavedSquads()
+      setSelectedSavedName(name)
+      setSaveName(name)
+    } catch (err: any) {
+      console.error('Failed to save squad:', err)
+      alert(err.message || 'Failed to save squad. Please try again.')
+    } finally {
+      setSavingSquad(false)
+    }
+  }, [saveName, mySquad, bank, freeTransfers, selectedSavedName, loadSavedSquads])
+
+  const deleteSavedSquad = useCallback(async () => {
+    if (!selectedSavedName) return
+    
+    if (!confirm(`Are you sure you want to delete "${selectedSavedName}"?`)) {
+      return
+    }
+    
+    setDeletingSquad(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`, {
+        method: 'DELETE'
+      })
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to delete squad' }))
+        throw new Error(error.detail || 'Failed to delete squad')
+      }
+      
+      // Reload saved squads and clear selection
+      await loadSavedSquads()
+      setSelectedSavedName('')
+      setSaveName('My Squad')
+    } catch (err: any) {
+      console.error('Failed to delete squad:', err)
+      alert(err.message || 'Failed to delete squad. Please try again.')
+    } finally {
+      setDeletingSquad(false)
+    }
+  }, [selectedSavedName, loadSavedSquads])
 
   // Import squad from saved FPL team ID (always fetches latest from FPL)
   const importFromSavedFplTeam = useCallback(async (teamId: number) => {
@@ -1009,6 +1264,29 @@ function App() {
       setMySquad(squad)
       setBank(bank)
       setBankInput(String(bank))
+      setSaveName(teamName)
+      
+      // Save to database as a saved squad
+      const squadData = {
+        squad: squad,
+        bank: bank,
+        freeTransfers: freeTransfers
+      }
+      
+      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName, squad: squadData })
+      })
+      
+      if (!saveRes.ok) {
+        // If save fails, still keep the imported squad loaded
+        console.warn('Failed to save imported team to database, but squad is loaded')
+      } else {
+        // Reload saved squads and select the newly imported one
+        await loadSavedSquads()
+        setSelectedSavedName(teamName)
+      }
       
       // Reset view when importing a new squad
       setWildcardPlan(null)
@@ -1025,7 +1303,7 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }, [freeTransfers, loadSavedFplTeams])
+  }, [freeTransfers, loadSavedFplTeams, loadSavedSquads])
 
   const importFplTeam = useCallback(async () => {
     const teamId = parseInt(fplTeamId.trim())
@@ -1055,6 +1333,29 @@ function App() {
       setMySquad(squad)
       setBank(bank)
       setBankInput(String(bank))
+      setSaveName(teamName)
+      
+      // Save to database as a saved squad
+      const squadData = {
+        squad: squad,
+        bank: bank,
+        freeTransfers: freeTransfers
+      }
+      
+      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName, squad: squadData })
+      })
+      
+      if (!saveRes.ok) {
+        // If save fails, still keep the imported squad loaded
+        console.warn('Failed to save imported team to database, but squad is loaded')
+      } else {
+        // Reload saved squads and select the newly imported one
+        await loadSavedSquads()
+        setSelectedSavedName(teamName)
+      }
       
       // Reset view when importing a new squad
       setWildcardPlan(null)
@@ -1072,7 +1373,22 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }, [fplTeamId, freeTransfers, loadSavedFplTeams])
+  }, [fplTeamId, freeTransfers, loadSavedFplTeams, loadSavedSquads])
+
+  const loadInitial = async () => {
+    // Only load lightweight header data on boot (keeps Quick Transfers instant).
+    setLoading(true)
+    setError(null)
+    try {
+      const gwRes = await fetch(`${API_BASE}/api/gameweek`).then(r => r.json())
+      setGameweek(gwRes)
+    } catch (err: any) {
+      setError(err.message || 'Failed to load data')
+      console.error('Load error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const ensurePicksLoaded = async () => {
     if (Object.keys(topPicks).length > 0) return
@@ -2173,73 +2489,165 @@ function App() {
                 }
               </p>
               
-              {/* FPL Team Import */}
+              {/* Saved squads */}
               <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
-                {savedFplTeams.length > 0 && (
-                  <div className="mb-3">
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">Saved squads</span>
                       <select
-                        value={selectedSavedFplTeamId}
-                        onChange={(e) => {
-                          const teamId = e.target.value ? parseInt(e.target.value) : ''
-                          setSelectedSavedFplTeamId(teamId)
-                          if (teamId && typeof teamId === 'number') {
-                            importFromSavedFplTeam(teamId)
-                          }
-                        }}
-                        disabled={importingFplTeam}
+                        value={selectedSavedName}
+                        onChange={(e) => setSelectedSavedName(e.target.value)}
+                        disabled={loadingSavedSquads}
                         className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <option value="">— Select saved team —</option>
-                        {savedFplTeams.map((team) => (
-                          <option key={team.teamId} value={team.teamId}>
-                            {team.teamName} (ID: {team.teamId})
+                        <option value="">— Select —</option>
+                        {savedSquads.map(s => (
+                          <option key={s.id} value={s.name}>
+                            {s.name}
                           </option>
                         ))}
                       </select>
                     </div>
-                    <div className="text-[10px] text-gray-500 mt-1.5">
-                      Select a saved team to import the latest squad
+                    <div className="flex flex-wrap gap-2">
+                      <button 
+                        onClick={loadSavedSquad} 
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {loadingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Loading...</span>
+                          </>
+                        ) : (
+                          'Load'
+                        )}
+                      </button>
+                      <button 
+                        onClick={() => saveOrUpdateSquad('update')} 
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {updatingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Updating...</span>
+                          </>
+                        ) : (
+                          'Update'
+                        )}
+                      </button>
+                      <button 
+                        onClick={() => saveOrUpdateSquad('new')} 
+                        disabled={loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {savingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Saving...</span>
+                          </>
+                        ) : (
+                          'Save'
+                        )}
+                      </button>
+                      <button 
+                        onClick={deleteSavedSquad} 
+                        disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {deletingSquad ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Deleting...</span>
+                          </>
+                        ) : (
+                          'Delete'
+                        )}
+                      </button>
                     </div>
                   </div>
-                )}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
-                  <input
-                    type="number"
-                    value={fplTeamId}
-                    onChange={(e) => setFplTeamId(e.target.value)}
-                    disabled={importingFplTeam}
-                    className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    placeholder="FPL Team ID"
-                  />
-                  <button
-                    onClick={importFplTeam}
-                    disabled={!fplTeamId.trim() || importingFplTeam}
-                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    {importingFplTeam ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="hidden sm:inline">Importing...</span>
-                      </>
-                    ) : (
-                      'Import'
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <span className="text-xs text-gray-400 whitespace-nowrap">Name</span>
+                    <input
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      disabled={!!selectedSavedName}
+                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[#080811]"
+                      placeholder="My Squad"
+                    />
+                  </div>
+
+                  {/* FPL Team Import */}
+                  <div className="pt-3 border-t border-[#2a2a4a]">
+                    {savedFplTeams.length > 0 && (
+                      <div className="mb-2">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
+                          <select
+                            value={selectedSavedFplTeamId}
+                            onChange={(e) => {
+                              const teamId = e.target.value ? parseInt(e.target.value) : ''
+                              setSelectedSavedFplTeamId(teamId)
+                              if (teamId && typeof teamId === 'number') {
+                                importFromSavedFplTeam(teamId)
+                              }
+                            }}
+                            disabled={importingFplTeam}
+                            className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <option value="">— Select saved team —</option>
+                            {savedFplTeams.map((team) => (
+                              <option key={team.teamId} value={team.teamId}>
+                                {team.teamName} (ID: {team.teamId})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-1.5">
+                          Select a saved team to import the latest squad
+                        </div>
+                      </div>
                     )}
-                  </button>
-                </div>
-                <div className="text-[10px] text-gray-500 mt-1.5">
-                  Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
+                      <input
+                        type="number"
+                        value={fplTeamId}
+                        onChange={(e) => setFplTeamId(e.target.value)}
+                        disabled={importingFplTeam}
+                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="FPL Team ID"
+                      />
+                      <button
+                        onClick={importFplTeam}
+                        disabled={!fplTeamId.trim() || importingFplTeam || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                        className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        {importingFplTeam ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span className="hidden sm:inline">Importing...</span>
+                          </>
+                        ) : (
+                          'Import'
+                        )}
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1.5">
+                      Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
+                    </div>
+                  </div>
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
-                  Your current squad is auto-saved locally.
+                  Your current squad is auto-saved locally and saved squads are synced across devices.
                 </div>
               </div>
-            </div>
 
-            {/* Squad Input */}
-            <div className="space-y-6">
+              {/* Squad Input */}
+              <div className="space-y-6">
                 {/* Search & Add */}
                 <div>
                   <h3 className="font-medium mb-3">Add Players to Squad</h3>
