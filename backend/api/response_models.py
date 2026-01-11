@@ -62,43 +62,6 @@ class SuggestedSquadResponse(BaseModel):
     predicted_points: float
 
 
-class SavedSquadInfo(BaseModel):
-    """Saved squad information."""
-    id: int
-    name: str
-    squad: Dict[str, Any]
-    saved_at: str
-    updated_at: str
-
-
-class SavedSquadsResponse(BaseModel):
-    """Response for saved squads list endpoint."""
-    squads: List[SavedSquadInfo]
-
-
-class SavedSquadResponse(BaseModel):
-    """Response for single saved squad endpoint."""
-    id: int
-    name: str
-    squad: Dict[str, Any]
-    saved_at: str
-    updated_at: str
-
-
-class SaveSquadResponse(BaseModel):
-    """Response for save/update squad endpoint."""
-    success: bool
-    name: str
-    message: str
-
-
-class DeleteSquadResponse(BaseModel):
-    """Response for delete squad endpoint."""
-    success: bool
-    name: str
-    message: str
-
-
 class FplTeamInfo(BaseModel):
     """FPL team information."""
     id: int

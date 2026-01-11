@@ -19,8 +19,7 @@ from pydantic import BaseModel
 
 # Import response models for better API documentation
 from .response_models import (
-    GameWeekResponse, SuggestedSquadResponse, SavedSquadsResponse,
-    SavedSquadResponse, SaveSquadResponse, DeleteSquadResponse,
+    GameWeekResponse, SuggestedSquadResponse,
     HealthResponse, BettingOddsDebugResponse,
     FplTeamsResponse, SaveFplTeamResponse
 )
@@ -176,7 +175,6 @@ from api.routes import gameweek as gameweek_router
 from api.routes import players as players_router
 from api.routes import tasks as tasks_router
 from api.routes import fpl_teams as fpl_teams_router
-from api.routes import squads as squads_router
 from api.routes import selected_teams as selected_teams_router
 from api.routes import predictions as predictions_router
 from api.routes import suggested_squad as suggested_squad_router
@@ -197,7 +195,6 @@ app.include_router(gameweek_router.router, prefix="/api", tags=["gameweek"])
 app.include_router(players_router.router, prefix="/api/players", tags=["players"])
 app.include_router(tasks_router.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(fpl_teams_router.router, prefix="/api/fpl-teams", tags=["fpl-teams"])
-app.include_router(squads_router.router, prefix="/api/saved-squads", tags=["squads"])
 app.include_router(selected_teams_router.router, prefix="/api/selected-teams", tags=["selected-teams"])
 app.include_router(predictions_router.router, prefix="/api", tags=["predictions"])
 app.include_router(suggested_squad_router.router, prefix="/api", tags=["squad"])
@@ -569,8 +566,6 @@ async def save_selected_team():
         logger.error(f"Error saving selected team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# NOTE: /api/saved-squads/* moved to api/routes/squads.py
 
 # NOTE: /api/fpl-teams/* moved to api/routes/fpl_teams.py
 

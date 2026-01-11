@@ -29,7 +29,6 @@ backend/
 │       ├── selected_teams.py # /api/selected-teams/*
 │       ├── players.py       # /api/players/search
 │       ├── tasks.py         # /api/tasks/*
-│       ├── squads.py        # /api/saved-squads/*
 │       ├── chips.py         # /api/chips/* (triple captain, etc.)
 │       ├── health.py        # /api/health, /api/betting-odds-status
 │       ├── gameweek.py      # /api/gameweek
@@ -172,7 +171,6 @@ frontend/src/
 - `GET /api/players/search` - Player search
 
 ### Saved Data
-- `GET/POST /api/saved-squads` - User-saved squads
 - `GET/POST /api/selected-teams` - Selected teams by GW
 - `GET/POST/PUT/DELETE /api/tasks` - Background tasks
 

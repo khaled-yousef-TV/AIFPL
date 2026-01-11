@@ -202,24 +202,6 @@ class DailySnapshot(Base):
         return f"<DailySnapshot(gameweek={self.gameweek}, saved_at={self.saved_at})>"
 
 
-class SavedSquad(Base):
-    """Store user-saved squads with custom names (from My Transfers tab)."""
-    __tablename__ = "saved_squads"
-    
-    id = Column(Integer, primary_key=True)
-    name = Column(String(200), nullable=False, index=True)  # Custom name provided by user
-    
-    # Squad data (stored as JSON)
-    squad_data = Column(JSON, nullable=False)  # Full squad dict (formation, starting_xi, bench, etc.)
-    
-    # Timestamps
-    saved_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
-    def __repr__(self):
-        return f"<SavedSquad(id={self.id}, name='{self.name}', saved_at={self.saved_at})>"
-
-
 class FplTeam(Base):
     """Store FPL team IDs imported by users for quick squad imports."""
     __tablename__ = "fpl_teams"

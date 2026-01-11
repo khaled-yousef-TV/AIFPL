@@ -10,7 +10,6 @@ from .gameweek import router as gameweek_router
 from .players import router as players_router
 from .tasks import router as tasks_router
 from .fpl_teams import router as fpl_teams_router
-from .squads import router as squads_router
 from .selected_teams import router as selected_teams_router
 from .predictions import router as predictions_router
 from .suggested_squad import router as suggested_squad_router
@@ -31,8 +30,6 @@ __all__ = [
     'tasks_router',
     # FPL Teams
     'fpl_teams_router',
-    # Squads
-    'squads_router',
     # Selected Teams
     'selected_teams_router',
     # Predictions

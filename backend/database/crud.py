@@ -14,9 +14,9 @@ from .models import (
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
     TripleCaptainRecommendations, Task, init_db
 )
-# Import SavedSquad and FplTeam - must be imported after other models to avoid circular imports
+# Import FplTeam - must be imported after other models to avoid circular imports
 try:
-    from .models import SavedSquad, FplTeam
+    from .models import FplTeam
 except ImportError:
     # Fallback: try absolute import
     import sys
@@ -24,11 +24,9 @@ except ImportError:
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
-    from database.models import SavedSquad, FplTeam
+    from database.models import FplTeam
 
-# Verify SavedSquad and FplTeam are available
-if 'SavedSquad' not in globals():
-    raise ImportError("Failed to import SavedSquad from database.models")
+# Verify FplTeam is available
 if 'FplTeam' not in globals():
     raise ImportError("Failed to import FplTeam from database.models")
 
@@ -505,121 +503,6 @@ class DatabaseManager:
                     "saved_at": (snapshot.saved_at.isoformat() + 'Z') if snapshot.saved_at else None
                 }
             return None
-    
-    # ==================== Saved Squads (User-saved with custom names) ====================
-    
-    def save_saved_squad(self, name: str, squad_data: Dict[str, Any]) -> bool:
-        """
-        Save or update a user-saved squad with a custom name.
-        
-        Args:
-            name: Custom name for the squad
-            squad_data: Full squad dictionary (formation, starting_xi, bench, captain, etc.)
-            
-        Returns:
-            True if saved, False if error
-        """
-        try:
-            with self.get_session() as session:
-                existing = session.query(SavedSquad).filter(
-                    SavedSquad.name == name
-                ).first()
-                
-                if existing:
-                    # Update existing
-                    existing.squad_data = squad_data
-                    existing.updated_at = datetime.utcnow()
-                else:
-                    # Create new
-                    saved_squad = SavedSquad(
-                        name=name,
-                        squad_data=squad_data,
-                        saved_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
-                    )
-                    session.add(saved_squad)
-                
-                session.commit()
-                logger.info(f"Saved squad: '{name}'")
-                return True
-        except Exception as e:
-            logger.error(f"Failed to save squad '{name}': {e}")
-            return False
-    
-    def get_saved_squad(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get a saved squad by name."""
-        with self.get_session() as session:
-            squad = session.query(SavedSquad).filter(
-                SavedSquad.name == name
-            ).first()
-            
-            if squad:
-                return {
-                    "id": squad.id,
-                    "name": squad.name,
-                    "squad": squad.squad_data,
-                    "saved_at": (squad.saved_at.isoformat() + 'Z') if squad.saved_at else None,
-                    "updated_at": (squad.updated_at.isoformat() + 'Z') if squad.updated_at else None
-                }
-            return None
-    
-    def get_all_saved_squads(self) -> List[Dict[str, Any]]:
-        """Get all saved squads, sorted by most recently updated first."""
-        with self.get_session() as session:
-            squads = session.query(SavedSquad).order_by(
-                SavedSquad.updated_at.desc()
-            ).all()
-            
-            return [
-                {
-                    "id": squad.id,
-                    "name": squad.name,
-                    "squad": squad.squad_data,
-                    "saved_at": (squad.saved_at.isoformat() + 'Z') if squad.saved_at else None,
-                    "updated_at": (squad.updated_at.isoformat() + 'Z') if squad.updated_at else None
-                }
-                for squad in squads
-            ]
-    
-    def delete_saved_squad(self, name: str) -> bool:
-        """Delete a saved squad by name."""
-        try:
-            with self.get_session() as session:
-                squad = session.query(SavedSquad).filter(
-                    SavedSquad.name == name
-                ).first()
-                
-                if squad:
-                    session.delete(squad)
-                    session.commit()
-                    logger.info(f"Deleted saved squad: '{name}'")
-                    return True
-                else:
-                    logger.warning(f"Saved squad '{name}' not found for deletion")
-                    return False
-        except Exception as e:
-            logger.error(f"Failed to delete saved squad '{name}': {e}")
-            return False
-    
-    def delete_saved_squad_by_id(self, squad_id: int) -> bool:
-        """Delete a saved squad by ID."""
-        try:
-            with self.get_session() as session:
-                squad = session.query(SavedSquad).filter(
-                    SavedSquad.id == squad_id
-                ).first()
-                
-                if squad:
-                    session.delete(squad)
-                    session.commit()
-                    logger.info(f"Deleted saved squad ID: {squad_id}")
-                    return True
-                else:
-                    logger.warning(f"Saved squad ID {squad_id} not found for deletion")
-                    return False
-        except Exception as e:
-            logger.error(f"Failed to delete saved squad ID {squad_id}: {e}")
-            return False
     
     # ==================== FPL Teams (Saved team IDs for quick imports) ====================
     
