@@ -14,6 +14,7 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 # Try to import optimization libraries
 try:
@@ -23,6 +24,14 @@ except ImportError:
     PULP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Try to import LSTM model
+try:
+    from .lstm_model import LSTMPredictor
+    LSTM_AVAILABLE = True
+except ImportError:
+    LSTM_AVAILABLE = False
+    logger.warning("LSTM model not available. Using proxy implementation.")
 
 # LSTM weights for prediction (simplified - uses form momentum as proxy)
 LSTM_WEIGHT = 0.7
@@ -123,21 +132,46 @@ class HybridPredictor:
     """
     Hybrid LSTM-XGBoost predictor for multi-gameweek predictions.
     
-    Uses form momentum as LSTM proxy and standard XGBoost predictions.
+    Uses real LSTM model (if trained) or falls back to form momentum proxy.
     Formula: 0.7 × LSTM + 0.3 × XGBoost
     """
     
-    def __init__(self, fpl_client, feature_engineer, base_predictor):
+    def __init__(
+        self, 
+        fpl_client, 
+        feature_engineer, 
+        base_predictor,
+        lstm_model_path: Optional[str] = None
+    ):
         self.fpl_client = fpl_client
         self.feature_eng = feature_engineer
         self.base_predictor = base_predictor
+        self.lstm_model: Optional[LSTMPredictor] = None
+        
+        # Try to load LSTM model if available
+        if LSTM_AVAILABLE:
+            if lstm_model_path is None:
+                # Default model path
+                lstm_model_path = "backend/ml/models/lstm_wildcard_model.keras"
+            
+            if Path(lstm_model_path).exists():
+                try:
+                    self.lstm_model = LSTMPredictor(model_path=lstm_model_path)
+                    logger.info(f"Loaded trained LSTM model from {lstm_model_path}")
+                except Exception as e:
+                    logger.warning(f"Could not load LSTM model: {e}. Using proxy.")
+                    self.lstm_model = None
+            else:
+                logger.info(f"LSTM model not found at {lstm_model_path}. Using proxy.")
+        else:
+            logger.info("LSTM not available. Using proxy implementation.")
     
-    def predict_lstm(self, features, player_history: List[Dict]) -> float:
+    def _predict_lstm_proxy(self, features, player_history: List[Dict]) -> float:
         """
-        LSTM-style prediction using form momentum.
+        LSTM proxy using form momentum (fallback when model not trained).
         
         Uses recent form trajectory and momentum to predict future points.
-        This is a simplified proxy for a true LSTM model.
+        This is a simplified approximation for when the LSTM model isn't available.
         """
         # Get recent points history
         if not player_history:
@@ -168,6 +202,28 @@ class HybridPredictor:
         
         # Bound the prediction
         return max(1.0, min(15.0, lstm_prediction))
+    
+    def predict_lstm(self, features, player_history: List[Dict]) -> float:
+        """
+        LSTM prediction using trained model or proxy fallback.
+        
+        Args:
+            features: PlayerFeatures object
+            player_history: List of gameweek history entries
+            
+        Returns:
+            Predicted points
+        """
+        if self.lstm_model is not None:
+            # Use trained LSTM model
+            try:
+                return self.lstm_model.predict_from_history(player_history)
+            except Exception as e:
+                logger.debug(f"LSTM prediction failed, using proxy: {e}")
+                return self._predict_lstm_proxy(features, player_history)
+        else:
+            # Use proxy
+            return self._predict_lstm_proxy(features, player_history)
     
     def predict_xgboost(self, features) -> float:
         """XGBoost-style prediction using the base predictor."""
