@@ -501,21 +501,8 @@ async def shutdown_event():
 # NOTE: /api/suggested-squad moved to api/routes/suggested_squad.py
 
 # ==================== Transfer Suggestions ====================
-
-class SquadPlayer(BaseModel):
-    """Player in user's squad."""
-    id: int
-    name: str
-    position: str  # GK, DEF, MID, FWD
-    price: float  # Current selling price
-
-
-class TransferRequest(BaseModel):
-    """Request for transfer suggestions."""
-    squad: List[SquadPlayer]
-    bank: float = 0.0  # Money in the bank
-    free_transfers: int = 1
-    suggestions_limit: int = 3  # How many transfer moves to return (hold suggestion may be added on top)
+# Request models are now in api/models.py
+from api.models import SquadPlayer, TransferRequest
 
 
 @app.post("/api/transfer-suggestions")
