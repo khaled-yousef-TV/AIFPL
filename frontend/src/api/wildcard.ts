@@ -51,6 +51,20 @@ export async function getWildcardTrajectoryResult(taskId: string): Promise<Wildc
 }
 
 /**
+ * Get the latest saved wildcard trajectory from database
+ */
+export async function getLatestWildcardTrajectory(): Promise<WildcardTrajectory | null> {
+  try {
+    return await apiRequest<WildcardTrajectory>('/api/chips/wildcard-trajectory/latest')
+  } catch (err: any) {
+    if (err.message?.includes('404') || err.message?.includes('not found')) {
+      return null
+    }
+    throw err
+  }
+}
+
+/**
  * Get optimal 8-GW wildcard trajectory (legacy - synchronous)
  * 
  * @deprecated Use submitWildcardTrajectory() and getWildcardTrajectoryResult() for async task-based pattern

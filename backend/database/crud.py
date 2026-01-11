@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
-    TripleCaptainRecommendations, Task, init_db
+    TripleCaptainRecommendations, Task, WildcardTrajectory, init_db
 )
 # Import FplTeam - must be imported after other models to avoid circular imports
 try:
@@ -893,5 +893,66 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to cleanup old tasks: {e}")
             return 0
+    
+    # ==================== Wildcard Trajectories ====================
+    
+    def save_wildcard_trajectory(
+        self,
+        trajectory_data: Dict[str, Any],
+        budget: float,
+        horizon: int
+    ) -> bool:
+        """
+        Save wildcard trajectory. Replaces any existing trajectory.
+        
+        Args:
+            trajectory_data: Full WildcardTrajectory dictionary
+            budget: Budget used
+            horizon: Number of gameweeks
+            
+        Returns:
+            True if saved, False if error
+        """
+        try:
+            with self.get_session() as session:
+                # Delete existing trajectory (only keep latest)
+                session.query(WildcardTrajectory).delete()
+                session.commit()
+                
+                # Create new trajectory
+                trajectory = WildcardTrajectory(
+                    trajectory_data=trajectory_data,
+                    budget=budget,
+                    horizon=horizon
+                )
+                session.add(trajectory)
+                session.commit()
+                
+                logger.info(f"Saved wildcard trajectory (budget={budget}, horizon={horizon})")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save wildcard trajectory: {e}")
+            return False
+    
+    def get_wildcard_trajectory(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the latest wildcard trajectory.
+        
+        Returns:
+            Trajectory dictionary or None if not found
+        """
+        try:
+            with self.get_session() as session:
+                trajectory = session.query(WildcardTrajectory).order_by(
+                    WildcardTrajectory.created_at.desc()
+                ).first()
+                
+                if not trajectory:
+                    return None
+                
+                return trajectory.trajectory_data
+        except Exception as e:
+            logger.error(f"Failed to get wildcard trajectory: {e}")
+            return None
 
 

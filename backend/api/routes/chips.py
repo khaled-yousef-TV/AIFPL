@@ -253,8 +253,13 @@ def _calculate_wildcard_background(task_id: str, budget: float, horizon: int, cu
         # Update progress
         db_manager.update_task(task_id, progress=80)
         
-        # Convert to dict and store in cache
+        # Convert to dict
         trajectory_dict = optimizer.trajectory_to_dict(trajectory)
+        
+        # Save to database (replaces any existing)
+        db_manager.save_wildcard_trajectory(trajectory_dict, budget, horizon)
+        
+        # Also store in cache for immediate retrieval
         cache.set("wildcard_results", task_id, trajectory_dict)
         
         # Mark task as completed
@@ -403,6 +408,37 @@ async def get_wildcard_trajectory_result(task_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get Wildcard trajectory result: {str(e)}"
+        )
+
+
+@router.get("/wildcard-trajectory/latest")
+async def get_latest_wildcard_trajectory():
+    """
+    Get the latest saved wildcard trajectory from database.
+    
+    Returns:
+        Latest wildcard trajectory or 404 if not found
+    """
+    try:
+        deps = get_dependencies()
+        db_manager = deps.db_manager
+        
+        trajectory = db_manager.get_wildcard_trajectory()
+        if not trajectory:
+            raise HTTPException(
+                status_code=404,
+                detail="No wildcard trajectory found. Generate one first."
+            )
+        
+        return trajectory
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting latest wildcard trajectory: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get latest wildcard trajectory: {str(e)}"
         )
 
 

@@ -4,14 +4,12 @@ import {
   ChevronDown, ChevronUp, Home, Plane, Crown, Star
 } from 'lucide-react'
 import type { WildcardTrajectory, TrajectoryPlayer, GameweekBreakdown } from '../types'
-import { submitWildcardTrajectory, getWildcardTrajectoryResult } from '../api/wildcard'
+import { submitWildcardTrajectory, getWildcardTrajectoryResult, getLatestWildcardTrajectory } from '../api/wildcard'
 import { fetchTask } from '../api/tasks'
 
 interface WildcardTabProps {
   gameweek: number | null
 }
-
-const WILDCARD_TRAJECTORY_KEY = 'fpl_wildcard_trajectory_v1'
 
 const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
   const [loading, setLoading] = useState(false)
@@ -33,32 +31,23 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     })
   }
 
-  // Load saved trajectory from localStorage on mount
+  // Load saved trajectory from database on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(WILDCARD_TRAJECTORY_KEY)
-      if (saved) {
-        const parsed = JSON.parse(saved) as WildcardTrajectory
-        setTrajectory(parsed)
-        // Set first gameweek as selected
-        const gws = Object.keys(parsed.gameweek_predictions).map(Number).sort((a, b) => a - b)
-        if (gws.length > 0) setSelectedGw(gws[0])
-      }
-    } catch (err) {
-      console.debug('Could not load saved wildcard trajectory:', err)
-    }
-  }, [])
-
-  // Save trajectory to localStorage whenever it changes
-  useEffect(() => {
-    if (trajectory) {
+    const loadSavedTrajectory = async () => {
       try {
-        localStorage.setItem(WILDCARD_TRAJECTORY_KEY, JSON.stringify(trajectory))
+        const saved = await getLatestWildcardTrajectory()
+        if (saved) {
+          setTrajectory(saved)
+          // Set first gameweek as selected
+          const gws = Object.keys(saved.gameweek_predictions).map(Number).sort((a, b) => a - b)
+          if (gws.length > 0) setSelectedGw(gws[0])
+        }
       } catch (err) {
-        console.debug('Could not save wildcard trajectory to localStorage:', err)
+        console.debug('Could not load saved wildcard trajectory:', err)
       }
     }
-  }, [trajectory])
+    loadSavedTrajectory()
+  }, [])
 
   // Cleanup polling on unmount
   useEffect(() => {

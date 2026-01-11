@@ -260,6 +260,26 @@ class Task(Base):
         return f"<Task(task_id='{self.task_id}', type='{self.task_type}', status='{self.status}')>"
 
 
+class WildcardTrajectory(Base):
+    """Store wildcard trajectory results."""
+    __tablename__ = "wildcard_trajectories"
+    
+    id = Column(Integer, primary_key=True)
+    
+    # Trajectory data (stored as JSON)
+    trajectory_data = Column(JSON, nullable=False)  # Full WildcardTrajectory dict
+    
+    # Metadata
+    budget = Column(Float, nullable=False)  # Budget used
+    horizon = Column(Integer, nullable=False)  # Number of gameweeks
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<WildcardTrajectory(id={self.id}, budget={self.budget}, horizon={self.horizon}, created_at={self.created_at})>"
+
+
 def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.
