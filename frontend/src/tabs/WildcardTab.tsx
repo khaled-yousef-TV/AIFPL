@@ -137,6 +137,148 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     }
   }
 
+  const getPositionClass = (pos: string) => {
+    const classes: Record<string, string> = {
+      'GK': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+      'DEF': 'bg-green-500/20 text-green-400 border-green-500/30',
+      'MID': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      'FWD': 'bg-red-500/20 text-red-400 border-red-500/30'
+    }
+    return classes[pos] || 'bg-gray-500/20 text-gray-400'
+  }
+
+  const parseFormation = (formation: string) => {
+    const parts = formation.split('-').map(Number)
+    return {
+      def: parts[0] || 0,
+      mid: parts[1] || 0,
+      fwd: parts[2] || 0,
+      gk: 1
+    }
+  }
+
+  const renderPlayerPill = (player: TrajectoryPlayer, isCaptain: boolean = false, isViceCaptain: boolean = false) => {
+    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
+    
+    return (
+      <div
+        className={`${pillClasses} ${
+          isCaptain 
+            ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
+            : isViceCaptain
+            ? 'bg-purple-500/30 border-purple-400 shadow-lg shadow-purple-500/20'
+            : 'bg-slate-800/80 border-slate-700'
+        }`}
+      >
+        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
+          {isCaptain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
+          {isViceCaptain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+            {player.position}
+          </span>
+        </div>
+        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
+        <div className="text-[9px] text-slate-400 truncate w-full text-center mt-0.5">{player.team}</div>
+        <div className="text-[9px] text-violet-400 font-mono mt-1">{player.predicted_points.toFixed(1)}</div>
+      </div>
+    )
+  }
+
+  const renderWildcardPitch = () => {
+    if (!trajectory) return null
+
+    const formationLayout = parseFormation(trajectory.formation)
+    
+    // Group players by position
+    const byPosition = {
+      GK: trajectory.squad.filter(p => p.position === 'GK'),
+      DEF: trajectory.squad.filter(p => p.position === 'DEF'),
+      MID: trajectory.squad.filter(p => p.position === 'MID'),
+      FWD: trajectory.squad.filter(p => p.position === 'FWD'),
+    }
+
+    // Starting XI positions
+    const startingXiGK = byPosition.GK.slice(0, 1)
+    const startingXiDEF = byPosition.DEF.slice(0, formationLayout.def)
+    const startingXiMID = byPosition.MID.slice(0, formationLayout.mid)
+    const startingXiFWD = byPosition.FWD.slice(0, formationLayout.fwd)
+    
+    // Bench players (remaining after starting XI)
+    const benchGK = byPosition.GK.slice(1)
+    const benchDEF = byPosition.DEF.slice(formationLayout.def)
+    const benchMID = byPosition.MID.slice(formationLayout.mid)
+    const benchFWD = byPosition.FWD.slice(formationLayout.fwd)
+
+    const isCaptain = (player: TrajectoryPlayer) => player.id === trajectory.captain.id
+    const isViceCaptain = (player: TrajectoryPlayer) => player.id === trajectory.vice_captain.id
+
+    return (
+      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+        <div className="relative min-h-[400px] sm:min-h-[500px] md:min-h-[550px] flex flex-col justify-between">
+          {/* Goalkeeper (TOP) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+            {startingXiGK.map((player) => (
+              <div key={`gk-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+            {/* Bench GK */}
+            {benchGK.map((player) => (
+              <div key={`bench-gk-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+          </div>
+
+          {/* Defenders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {startingXiDEF.map((player) => (
+              <div key={`def-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+            {/* Bench DEF */}
+            {benchDEF.map((player) => (
+              <div key={`bench-def-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+          </div>
+
+          {/* Midfielders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {startingXiMID.map((player) => (
+              <div key={`mid-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+            {/* Bench MID */}
+            {benchMID.map((player) => (
+              <div key={`bench-mid-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+          </div>
+
+          {/* Forwards (BOTTOM) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+            {startingXiFWD.map((player) => (
+              <div key={`fwd-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+            {/* Bench FWD */}
+            {benchFWD.map((player) => (
+              <div key={`bench-fwd-${player.id}`}>
+                {renderPlayerPill(player, isCaptain(player), isViceCaptain(player))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderPlayerCard = (player: TrajectoryPlayer, isCaptain: boolean = false, isViceCaptain: boolean = false) => (
     <div 
       key={player.id}
@@ -401,15 +543,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
               )}
             </button>
             {expandedSections.has('squad') && (
-              <div className="p-4 pt-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {trajectory.squad
-                  .sort((a, b) => a.position_id - b.position_id || b.predicted_points - a.predicted_points)
-                  .map(player => renderPlayerCard(
-                    player, 
-                    player.id === trajectory.captain.id,
-                    player.id === trajectory.vice_captain.id
-                  ))
-                }
+              <div className="p-4 pt-0">
+                {renderWildcardPitch()}
               </div>
             )}
           </div>
