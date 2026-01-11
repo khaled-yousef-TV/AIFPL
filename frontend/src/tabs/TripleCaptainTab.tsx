@@ -28,9 +28,6 @@ interface TripleCaptainTabProps {
   selectedTcGameweekTab: number | null
   setSelectedTcGameweekTab: (gw: number) => void
   loadingTripleCaptain: boolean
-  calculatingTripleCaptain: boolean
-  calculateTripleCaptain: () => void
-  tcCalculationMessage: { type: 'success' | 'error'; text: string } | null
 }
 
 const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
@@ -38,9 +35,6 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
   selectedTcGameweekTab,
   setSelectedTcGameweekTab,
   loadingTripleCaptain,
-  calculatingTripleCaptain,
-  calculateTripleCaptain,
-  tcCalculationMessage,
 }) => {
   const sortedGameweeks = Object.keys(tripleCaptainRecs).map(Number).sort((a, b) => b - a)
   const selectedGameweek = selectedTcGameweekTab || (sortedGameweeks.length > 0 ? sortedGameweeks[0] : null)
@@ -50,38 +44,11 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
     <div className="space-y-6">
       <div className="card">
         <div className="card-header">
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-2">
-              <Crown className="w-5 h-5 text-purple-400" />
-              <span>Triple Captain Recommendations</span>
-            </div>
-            <button
-              onClick={calculateTripleCaptain}
-              disabled={calculatingTripleCaptain}
-              className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-              title="Manually calculate Triple Captain recommendations"
-            >
-              <RefreshCw className={`w-4 h-4 ${calculatingTripleCaptain ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{calculatingTripleCaptain ? 'Calculating...' : 'Calculate Now'}</span>
-            </button>
+          <div className="flex items-center gap-2">
+            <Crown className="w-5 h-5 text-purple-400" />
+            <span>Triple Captain Recommendations</span>
           </div>
         </div>
-
-        {tcCalculationMessage && (
-          <div className={`mb-4 p-3 rounded-lg border ${
-            tcCalculationMessage.type === 'success' 
-              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
-              : 'bg-red-500/10 border-red-500/30 text-red-400'
-          }`}>
-            <div className="flex items-center gap-2 text-sm">
-              {tcCalculationMessage.type === 'success' ? (
-                <span>✓ {tcCalculationMessage.text}</span>
-              ) : (
-                <span>✗ {tcCalculationMessage.text}</span>
-              )}
-            </div>
-          </div>
-        )}
 
         {loadingTripleCaptain ? (
           <div className="text-center py-8">

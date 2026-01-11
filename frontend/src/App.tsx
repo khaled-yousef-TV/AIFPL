@@ -39,8 +39,6 @@ function App() {
   const [differentials, setDifferentials] = useState<Player[]>([])
   const [tripleCaptainRecs, setTripleCaptainRecs] = useState<Record<number, any>>({})
   const [loadingTripleCaptain, setLoadingTripleCaptain] = useState(false)
-  const [calculatingTripleCaptain, setCalculatingTripleCaptain] = useState(false)
-  const [tcCalculationMessage, setTcCalculationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedTcGameweekTab, setSelectedTcGameweekTab] = useState<number | null>(null)
   const [tcPollingInterval, setTcPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
   
@@ -847,70 +845,6 @@ function App() {
     )
   }
 
-  const calculateTripleCaptain = async () => {
-    // Check if already running
-    if (isTaskRunning('triple_captain')) {
-      return
-    }
-    
-    setCalculatingTripleCaptain(true)
-    setTcCalculationMessage(null)
-    
-    await createRefreshTask(
-      'triple_captain',
-      'Calculate Triple Captain',
-      'Analyzing optimal gameweeks for Triple Captain chip...',
-      '/api/chips/triple-captain/calculate',
-      'POST',
-      {
-        onSuccess: () => {
-          setCalculatingTripleCaptain(false)
-          setTcCalculationMessage({ 
-            type: 'success', 
-            text: 'Calculation complete! Recommendations are now available.' 
-          })
-          setTimeout(() => setTcCalculationMessage(null), 10000)
-          // Reload recommendations
-          setTripleCaptainRecs({})
-          setSelectedTcGameweekTab(null)
-          ensureTripleCaptainLoaded()
-        },
-        onError: (error) => {
-          setCalculatingTripleCaptain(false)
-          setTcCalculationMessage({ type: 'error', text: error })
-          setTimeout(() => setTcCalculationMessage(null), 5000)
-        },
-        progressUpdater: (taskId, pollCount, maxPolls) => {
-          // Custom progress updater: 20% -> 95% over polling period
-          const progress = Math.min(20 + (pollCount / maxPolls) * 75, 95)
-          updateTask(taskId, { progress })
-        },
-        completionChecker: async (data, startTime) => {
-          // Check if we got results from API response
-          // The API should return recommendations or gameweeks
-          if (data && typeof data === 'object') {
-            // Check if it has recommendations or gameweeks with actual data
-            const hasRecs = (data.recommendations && Object.keys(data.recommendations).length > 0) || 
-                          (data.gameweeks && Array.isArray(data.gameweeks) && data.gameweeks.length > 0) ||
-                          (data.gameweek && typeof data.gameweek === 'object')
-            
-            if (hasRecs) {
-              // Reload recommendations in UI (fire and forget)
-              setTripleCaptainRecs({})
-              setSelectedTcGameweekTab(null)
-              ensureTripleCaptainLoaded()
-            }
-            return !!hasRecs
-          }
-          return false
-        },
-        checkEndpoint: '/api/chips/triple-captain',
-        maxPolls: 360, // 60 minutes (1 hour)
-        pollInterval: 10000 // 10 seconds
-      }
-    )
-  }
-
   // Load selected teams when the tab is active
   useEffect(() => {
     if (activeTab === 'selected_teams') {
@@ -1159,7 +1093,6 @@ function App() {
       }
       // Reset loading states on unmount
       setLoadingTripleCaptain(false)
-      setCalculatingTripleCaptain(false)
     }
   }, [activeTab, loadTasksFromStorage])
 
@@ -2224,9 +2157,6 @@ function App() {
             selectedTcGameweekTab={selectedTcGameweekTab}
             setSelectedTcGameweekTab={setSelectedTcGameweekTab}
             loadingTripleCaptain={loadingTripleCaptain}
-            calculatingTripleCaptain={calculatingTripleCaptain}
-            calculateTripleCaptain={calculateTripleCaptain}
-            tcCalculationMessage={tcCalculationMessage}
           />
         )}
 
