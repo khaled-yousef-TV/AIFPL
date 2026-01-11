@@ -126,6 +126,8 @@ frontend/src/
 │   ├── DifferentialsTab.tsx # Low-ownership picks tab
 │   ├── PicksTab.tsx         # Top picks by position tab
 │   ├── TasksTab.tsx         # Background tasks tab
+│   ├── TripleCaptainTab.tsx # Triple captain recommendations tab
+│   ├── SelectedTeamsTab.tsx # Saved squads/free hit tab
 │   └── index.ts             # Re-exports all tabs
 └── constants.ts             # API_BASE, localStorage keys
 ```
