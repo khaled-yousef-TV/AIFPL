@@ -185,7 +185,7 @@ from services.dependencies import init_dependencies
 deps = init_dependencies()
 
 # Initialize routers with dependencies (for legacy routers that need explicit init)
-chips_router.initialize_chips_router(deps.fpl_client, deps.feature_engineer)
+chips_router.initialize_chips_router(deps.fpl_client, deps.feature_engineer, deps.predictor_heuristic)
 health_router.initialize_health_router(deps.betting_odds_client)
 
 # Register all routers

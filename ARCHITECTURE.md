@@ -45,7 +45,10 @@ backend/
 ├── ml/                      # Machine learning models
 │   ├── predictor.py         # HeuristicPredictor, FormPredictor, etc.
 │   ├── features.py          # FeatureEngineer
-│   └── chips.py             # TripleCaptainOptimizer
+│   └── chips/               # Chip optimization algorithms
+│       ├── triple_captain.py    # TripleCaptainOptimizer
+│       ├── wildcard_optimizer.py # WildcardOptimizer (8-GW hybrid LSTM-XGBoost)
+│       └── haul_probability.py  # HaulProbabilityCalculator
 ├── fpl/                     # FPL API client
 │   └── client.py            # FPLClient wrapper
 ├── data/                    # Data utilities
@@ -129,6 +132,7 @@ frontend/src/
 │   ├── TripleCaptainTab.tsx # Triple captain recommendations tab
 │   ├── SelectedTeamsTab.tsx # Saved squads/free hit tab
 │   ├── TransfersTab.tsx     # Main transfers/wildcard tab (~700 lines)
+│   ├── WildcardTab.tsx      # 8-GW trajectory optimizer tab
 │   └── index.ts             # Re-exports all tabs
 └── constants.ts             # API_BASE, localStorage keys
 ```
@@ -162,6 +166,7 @@ frontend/src/
 - `GET /api/suggested-squad` - AI-optimized squad
 - `POST /api/transfer-suggestions` - Transfer recommendations
 - `POST /api/wildcard` - Wildcard planning
+- `POST /api/chips/wildcard-trajectory` - 8-GW hybrid LSTM-XGBoost trajectory optimizer
 
 ### FPL Data
 - `GET /api/fpl-teams` - Saved team IDs

@@ -9,9 +9,12 @@ This module provides optimization algorithms for:
 
 from .haul_probability import HaulProbabilityCalculator
 from .triple_captain import TripleCaptainOptimizer
+from .wildcard_optimizer import WildcardOptimizer, WildcardTrajectory
 
 __all__ = [
     "TripleCaptainOptimizer",
     "HaulProbabilityCalculator",
+    "WildcardOptimizer",
+    "WildcardTrajectory",
 ]
 

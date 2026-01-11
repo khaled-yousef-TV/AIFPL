@@ -33,3 +33,12 @@ export {
   type SavedFplTeam 
 } from './fpl'
 
+// Wildcard types
+export {
+  type WildcardTrajectory,
+  type TrajectoryPlayer,
+  type GameweekPrediction,
+  type GameweekBreakdown,
+  type FixtureBlock
+} from './wildcard'
+

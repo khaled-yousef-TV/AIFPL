@@ -6,12 +6,13 @@ Provides endpoints for Triple Captain, Bench Boost, and Wildcard chip optimizati
 
 import logging
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 
 from fpl.client import FPLClient
 from ml.features import FeatureEngineer
-from ml.chips import TripleCaptainOptimizer
+from ml.predictor import HeuristicPredictor
+from ml.chips import TripleCaptainOptimizer, WildcardOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,15 @@ router = APIRouter()
 # Initialize components (will be set by main.py)
 fpl_client: Optional[FPLClient] = None
 feature_engineer: Optional[FeatureEngineer] = None
+predictor: Optional[HeuristicPredictor] = None
 
 
-def initialize_chips_router(client: FPLClient, engineer: FeatureEngineer):
+def initialize_chips_router(client: FPLClient, engineer: FeatureEngineer, pred: Optional[HeuristicPredictor] = None):
     """Initialize the chips router with dependencies."""
-    global fpl_client, feature_engineer
+    global fpl_client, feature_engineer, predictor
     fpl_client = client
     feature_engineer = engineer
+    predictor = pred or HeuristicPredictor()
 
 
 @router.get("/triple-captain")
@@ -206,19 +209,69 @@ class WildcardRequest(BaseModel):
     budget: float = 100.0
     horizon: int = 8
 
-@router.post("/wildcard")
-async def get_wildcard_squad(request: WildcardRequest):
+
+@router.post("/wildcard-trajectory")
+async def get_wildcard_trajectory(request: WildcardRequest):
     """
-    Get optimized Wildcard squad.
+    Get optimized 8-GW Wildcard trajectory.
     
-    Optimizes squad over 8 gameweeks using LSTM+XGBoost predictions with transfer decay.
+    Uses hybrid LSTM+XGBoost model with:
+    - Weighted formula: 0.7×LSTM + 0.3×XGBoost
+    - Fixture Difficulty Rating (FDR) adjustment
+    - Transfer decay factor for uncertainty over time
+    - MILP optimizer for optimal squad path
     
+    Prioritizes long-term fixture blocks over single-week peaks.
+    
+    Args:
+        request: WildcardRequest with budget, horizon, and optional current_squad
+        
     Returns:
-        Optimal squad path over specified horizon
+        Optimal squad trajectory with gameweek-by-gameweek predictions
     """
-    # TODO: Implement Wildcard optimization
-    raise HTTPException(
-        status_code=501,
-        detail="Wildcard optimization not yet implemented"
-    )
+    if not fpl_client or not feature_engineer:
+        raise HTTPException(
+            status_code=500,
+            detail="Chips router not initialized. Please ensure dependencies are set."
+        )
+    
+    try:
+        optimizer = WildcardOptimizer(fpl_client, feature_engineer, predictor)
+        
+        trajectory = optimizer.get_optimal_trajectory(
+            budget=request.budget,
+            horizon=request.horizon,
+            current_squad=request.current_squad
+        )
+        
+        if not trajectory:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate wildcard trajectory. Please try again."
+            )
+        
+        return optimizer.trajectory_to_dict(trajectory)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating wildcard trajectory: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate wildcard trajectory: {str(e)}"
+        )
+
+
+@router.get("/wildcard-trajectory")
+async def get_wildcard_trajectory_get(
+    budget: float = Query(100.0, ge=0.0, description="Budget constraint"),
+    horizon: int = Query(8, ge=1, le=10, description="Number of gameweeks to optimize")
+):
+    """
+    Get optimized 8-GW Wildcard trajectory (GET endpoint).
+    
+    Same as POST but with query parameters for easier testing.
+    """
+    request = WildcardRequest(budget=budget, horizon=horizon)
+    return await get_wildcard_trajectory(request)
 

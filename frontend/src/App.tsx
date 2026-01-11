@@ -21,7 +21,7 @@ import type {
 
 // Component imports
 import { FPLLogo } from './components'
-import { HomeTab, DifferentialsTab, PicksTab, TasksTab, TripleCaptainTab, SelectedTeamsTab, TransfersTab } from './tabs'
+import { HomeTab, DifferentialsTab, PicksTab, TasksTab, TripleCaptainTab, SelectedTeamsTab, TransfersTab, WildcardTab } from './tabs'
 
 // In production (GitHub Pages) set this to your hosted backend, e.g. https://api.fplai.nl
 // In local dev it defaults to http://localhost:8001
@@ -48,7 +48,7 @@ function App() {
   // Initialize activeTab from URL hash (e.g., #transfers -> 'transfers')
   const [activeTab, setActiveTab] = useState(() => {
     const hash = window.location.hash.slice(1) // Remove the '#'
-    const validTabs = ['home', 'picks', 'differentials', 'transfers', 'triple_captain', 'selected_teams', 'tasks']
+    const validTabs = ['home', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
     return validTabs.includes(hash) ? hash : 'home'
   })
   const [error, setError] = useState<string | null>(null)
@@ -373,7 +373,7 @@ function App() {
   useEffect(() => {
     const handleNavigation = () => {
       const hash = window.location.hash.slice(1)
-      const validTabs = ['home', 'picks', 'differentials', 'transfers', 'triple_captain', 'selected_teams', 'tasks']
+      const validTabs = ['home', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
       setActiveTab(validTabs.includes(hash) ? hash : 'home')
     }
     window.addEventListener('popstate', handleNavigation)
@@ -1829,6 +1829,7 @@ function App() {
 
   const navigationTabs = [
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
+    { id: 'wildcard', icon: Zap, label: 'Wildcard', shortLabel: 'WC', color: 'text-violet-400', description: '8-GW trajectory optimizer using hybrid LSTM-XGBoost model' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
     { id: 'triple-captain', icon: Crown, label: 'Triple Captain', shortLabel: 'TC', color: 'text-purple-400', description: 'Find optimal gameweeks to use Triple Captain chip' },
     { id: 'picks', icon: Star, label: 'Top Picks', shortLabel: 'Picks', color: 'text-yellow-400', description: 'Top player picks by position' },
@@ -2143,6 +2144,12 @@ function App() {
           />
         )}
 
+        {/* Wildcard Tab */}
+        {activeTab === 'wildcard' && (
+          <WildcardTab
+            gameweek={gameweek?.id ?? null}
+          />
+        )}
 
         {/* Free Hit of the Week Tab */}
         {activeTab === 'selected_teams' && (

@@ -64,3 +64,10 @@ export type { FplTeamsResponse, SaveFplTeamResponse } from './fpl'
 export { searchPlayers } from './players'
 export type { PlayerSearchResult, PlayersSearchResponse } from './players'
 
+// Wildcard Trajectory
+export { 
+  fetchWildcardTrajectory, 
+  fetchWildcardTrajectoryGet 
+} from './wildcard'
+export type { WildcardTrajectoryRequest } from './wildcard'
+
