@@ -1,4 +1,4 @@
-import React, { RefObject } from 'react'
+import React, { RefObject, useRef, useEffect } from 'react'
 import { 
   ArrowRightLeft, Search, Plus, X, RefreshCw, TrendingUp, 
   Target, Users, Star, ChevronUp, ChevronDown
@@ -169,6 +169,26 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
   API_BASE,
   resultsSectionRef,
 }) => {
+  // Ref for search results section to enable auto-scroll
+  const searchResultsRef = useRef<HTMLDivElement>(null)
+  
+  // Track previous searchPosition to detect changes
+  const prevSearchPositionRef = useRef<string>(searchPosition)
+  
+  // Auto-scroll to search results when position filter changes
+  useEffect(() => {
+    if (searchPosition !== prevSearchPositionRef.current && searchResults.length > 0) {
+      setTimeout(() => {
+        if (searchResultsRef.current) {
+          searchResultsRef.current.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start'
+          })
+        }
+      }, 100)
+    }
+    prevSearchPositionRef.current = searchPosition
+  }, [searchPosition, searchResults.length])
 
   const handleGenerateSuggestions = async () => {
     if (mySquad.length < 15) {
@@ -364,7 +384,10 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
               
               {/* Search Results */}
               {searchResults.length > 0 && (
-                <div className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto">
+                <div 
+                  ref={searchResultsRef}
+                  className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto scroll-mt-4"
+                >
                   {searchResults.map(player => {
                     const alreadyInSquad = mySquad.find(p => p.id === player.id) !== undefined
                     const positionFull = isPositionFull(player.position)
