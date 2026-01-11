@@ -78,6 +78,9 @@ function App() {
   // Ref for scrolling to results after generation
   const resultsSectionRef = useRef<HTMLDivElement>(null)
   
+  // Ref for scrolling to squad section after import
+  const squadSectionRef = useRef<HTMLDivElement>(null)
+  
   // Memoized grouped transfer suggestions
   const groupedTransferSuggestions = useMemo(() => {
     if (transferSuggestions.length === 0) return null
@@ -923,6 +926,13 @@ function App() {
       setSelectedSavedFplTeamId('')
       
       alert(`Successfully imported ${teamName}!`)
+      
+      // Scroll to squad section after import
+      setTimeout(() => {
+        if (squadSectionRef.current) {
+          squadSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 100)
     } catch (err: any) {
       console.error('Failed to import FPL team:', err)
       alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
@@ -970,6 +980,13 @@ function App() {
       setSelectedSavedFplTeamId('')
       
       alert(`Successfully imported ${teamName}!`)
+      
+      // Scroll to squad section after import
+      setTimeout(() => {
+        if (squadSectionRef.current) {
+          squadSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 100)
     } catch (err: any) {
       console.error('Failed to import FPL team:', err)
       alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
@@ -2122,6 +2139,7 @@ function App() {
             parseFormation={parseFormation}
             API_BASE={API_BASE}
             resultsSectionRef={resultsSectionRef}
+            squadSectionRef={squadSectionRef}
           />
         )}
 

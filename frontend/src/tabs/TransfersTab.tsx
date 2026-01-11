@@ -118,6 +118,7 @@ interface TransfersTabProps {
   
   // Refs
   resultsSectionRef: RefObject<HTMLDivElement>
+  squadSectionRef: RefObject<HTMLDivElement>
 }
 
 const TransfersTab: React.FC<TransfersTabProps> = ({
@@ -168,6 +169,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
   parseFormation,
   API_BASE,
   resultsSectionRef,
+  squadSectionRef,
 }) => {
   // Ref for search results section to enable auto-scroll
   const searchResultsRef = useRef<HTMLDivElement>(null)
@@ -506,7 +508,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             
             {/* Current Squad - Pitch Formation (only show when no results) */}
             {!wildcardPlan && !groupedTransferSuggestions && (
-              <div>
+              <div ref={squadSectionRef} className="scroll-mt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-medium">Your Squad ({mySquad.length}/15)</h3>
                   <div className="flex items-center gap-3">
