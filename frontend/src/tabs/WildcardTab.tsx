@@ -469,7 +469,11 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
           <button
             onClick={fetchTrajectory}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-600/50 text-white rounded-lg transition-colors"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+              loading
+                ? 'bg-slate-600/50 text-slate-400 cursor-not-allowed opacity-60'
+                : 'bg-violet-600 hover:bg-violet-500 text-white'
+            }`}
           >
             {loading ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
