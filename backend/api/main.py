@@ -172,14 +172,28 @@ app.add_middleware(
 # Include modular routes
 from api.routes import chips as chips_router
 from api.routes import health as health_router
+from api.routes import gameweek as gameweek_router
+from api.routes import players as players_router
+from api.routes import tasks as tasks_router
+from api.routes import fpl_teams as fpl_teams_router
+from api.routes import squads as squads_router
 
-# Initialize routers with dependencies
-chips_router.initialize_chips_router(fpl_client, feature_eng)
-health_router.initialize_health_router(betting_odds_client)
+# Initialize dependencies for routes
+from services.dependencies import init_dependencies
+deps = init_dependencies()
 
-# Register routers
+# Initialize routers with dependencies (for legacy routers that need explicit init)
+chips_router.initialize_chips_router(deps.fpl_client, deps.feature_engineer)
+health_router.initialize_health_router(deps.betting_odds_client)
+
+# Register all routers
 app.include_router(chips_router.router, prefix="/api/chips", tags=["chips"])
 app.include_router(health_router.router, prefix="/api", tags=["health"])
+app.include_router(gameweek_router.router, prefix="/api", tags=["gameweek"])
+app.include_router(players_router.router, prefix="/api/players", tags=["players"])
+app.include_router(tasks_router.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(fpl_teams_router.router, prefix="/api/fpl-teams", tags=["fpl-teams"])
+app.include_router(squads_router.router, prefix="/api/saved-squads", tags=["squads"])
 
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
@@ -473,31 +487,7 @@ async def shutdown_event():
 # NOTE: /api/health and /api/betting-odds-status moved to api/routes/health.py
 
 
-# ==================== Gameweek Info ====================
-
-@app.get("/api/gameweek", response_model=GameWeekResponse)
-async def get_gameweek():
-    """Get current and next gameweek info."""
-    try:
-        current = fpl_client.get_current_gameweek()
-        next_gw = fpl_client.get_next_gameweek()
-        
-        return {
-            "current": {
-                "id": current.id if current else None,
-                "name": current.name if current else None,
-                "finished": current.finished if current else None
-            } if current else None,
-            "next": {
-                "id": next_gw.id if next_gw else None,
-                "name": next_gw.name if next_gw else None,
-                "deadline": next_gw.deadline_time.isoformat() if next_gw and next_gw.deadline_time else None
-            } if next_gw else None
-        }
-    except Exception as e:
-        logger.error(f"Error getting gameweek: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# NOTE: /api/gameweek moved to api/routes/gameweek.py
 
 # ==================== Predictions ====================
 
@@ -2022,132 +2012,7 @@ async def get_wildcard(request: TransferRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== Search Players ====================
-
-@app.get("/api/players/search")
-async def search_players(q: str = "", position: Optional[str] = None, limit: int = 50):
-    """Search players by name or team for squad input."""
-    try:
-        # Get players with error handling
-        try:
-            players = fpl_client.get_players()
-        except Exception as e:
-            logger.error(f"Failed to get players from FPL API: {e}")
-            raise HTTPException(status_code=503, detail=f"FPL API unavailable: {str(e)}")
-        
-        # Get teams with error handling
-        try:
-            teams = fpl_client.get_teams()
-        except Exception as e:
-            logger.error(f"Failed to get teams from FPL API: {e}")
-            raise HTTPException(status_code=503, detail=f"FPL API unavailable: {str(e)}")
-        
-        team_names = {t.id: t.short_name for t in teams}
-
-        # Rotation/EU badges are based on the upcoming gameweek context.
-        try:
-            next_gw = fpl_client.get_next_gameweek()
-            fixtures = fpl_client.get_fixtures(gameweek=next_gw.id if next_gw else None)
-            gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
-        except Exception as e:
-            logger.warning(f"Failed to get gameweek/fixtures, using defaults: {e}")
-            fixtures = []
-            gw_deadline = datetime.now()
-
-        fixture_info: Dict[int, Dict[str, Any]] = {}
-        for f in fixtures:
-            fixture_info[f.team_h] = {"difficulty": f.team_h_difficulty, "is_home": True}
-            fixture_info[f.team_a] = {"difficulty": f.team_a_difficulty, "is_home": False}
-
-        q_lower = (q or "").strip().lower()
-        limit = max(1, min(100, int(limit or 50)))
-
-        # Filter by position first
-        filtered = players
-        if position:
-            filtered = [p for p in filtered if p.position == position]
-
-        # If q is empty, return cheapest players for that position (bench fodder)
-        if not q_lower:
-            filtered.sort(key=lambda p: (p.price, -p.minutes))
-            filtered = filtered[: min(20, limit)]
-        else:
-            # Allow searching by team name/short code too (e.g., "spurs", "tottenham", "TOT")
-            team_match_ids = set()
-            for t in teams:
-                t_name = (t.name or "").lower()
-                t_short = (t.short_name or "").lower()
-                if q_lower in t_name or q_lower == t_short or q_lower in t_short:
-                    team_match_ids.add(t.id)
-
-            # Small alias support (common fan names)
-            if q_lower in {"spurs", "tottenham", "tot"}:
-                for t in teams:
-                    if (t.short_name or "").lower() == "tot" or "spurs" in (t.name or "").lower():
-                        team_match_ids.add(t.id)
-
-            ranked = []
-            for p in filtered:
-                web = p.web_name.lower()
-                full = p.full_name.lower()
-                name_hit = (q_lower in web) or (q_lower in full)
-                team_hit = p.team in team_match_ids
-                if not (name_hit or team_hit):
-                    continue
-
-                rank = 0
-                if web == q_lower or full == q_lower:
-                    rank += 3
-                if name_hit:
-                    rank += 2
-                if team_hit:
-                    rank += 1
-
-                ranked.append((-rank, -p.minutes, p.price, p.web_name, p))
-
-            ranked.sort()
-            filtered = [x[-1] for x in ranked][:limit]
-
-        results = []
-        for p in filtered:
-            try:
-                team_short = team_names.get(p.team, "???")
-                fix = fixture_info.get(p.team, {})
-                difficulty = fix.get("difficulty", 3)
-                try:
-                    rotation = assess_rotation_risk(team_short, gw_deadline, difficulty)
-                    rotation_risk = rotation.risk_level
-                    european_comp = rotation.competition
-                except Exception as rot_error:
-                    logger.warning(f"Rotation risk assessment failed for {team_short}: {rot_error}")
-                    rotation_risk = "low"
-                    european_comp = None
-                
-                results.append({
-                    "id": p.id,
-                    "name": p.web_name,
-                    "full_name": p.full_name,
-                    "team": team_short,
-                    "position": p.position,
-                    "price": p.price,
-                    "minutes": p.minutes,
-                    "status": p.status,
-                    "rotation_risk": rotation_risk,
-                    "european_comp": european_comp,
-                })
-            except Exception as player_error:
-                logger.warning(f"Error processing player {p.id}: {player_error}")
-                continue  # Skip this player and continue with others
-
-        return {"players": results}
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 503 from FPL API)
-        raise
-    except Exception as e:
-        import traceback
-        logger.error(f"Search error: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+# NOTE: /api/players/search moved to api/routes/players.py
 
 
 @app.get("/api/selected-teams")
@@ -2488,363 +2353,11 @@ async def save_selected_team():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== Saved Squads (User-saved with custom names) ====================
+# NOTE: /api/saved-squads/* moved to api/routes/squads.py
 
-class SaveSquadRequest(BaseModel):
-    """Request model for saving a squad."""
-    name: str
-    squad: Dict[str, Any]  # Full squad data (formation, starting_xi, bench, captain, etc.)
-    
-    class Config:
-        """Pydantic config."""
-        json_schema_extra = {
-            "example": {
-                "name": "My Favorite Squad",
-                "squad": {
-                    "formation": "4-4-2",
-                    "starting_xi": [],
-                    "bench": [],
-                    "captain": 123,
-                    "vice_captain": 456
-                }
-            }
-        }
+# NOTE: /api/fpl-teams/* moved to api/routes/fpl_teams.py
 
-
-@app.get("/api/saved-squads", response_model=SavedSquadsResponse)
-async def get_saved_squads():
-    """
-    Get all user-saved squads (with custom names).
-    Returns list of all saved squads sorted by most recently updated first.
-    """
-    try:
-        squads = db_manager.get_all_saved_squads()
-        return {"squads": squads}
-    except Exception as e:
-        logger.error(f"Error fetching saved squads: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/saved-squads/{name}", response_model=SavedSquadResponse)
-async def get_saved_squad(name: str):
-    """
-    Get a specific saved squad by name.
-    """
-    try:
-        squad = db_manager.get_saved_squad(name)
-        if not squad:
-            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
-        return squad
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching saved squad '{name}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/saved-squads", response_model=SaveSquadResponse)
-async def save_squad(request: SaveSquadRequest):
-    """
-    Save or update a squad with a custom name.
-    If a squad with the same name exists, it will be updated.
-    """
-    try:
-        name = request.name.strip() if request.name else ""
-        
-        # Validate squad name
-        if not name:
-            raise HTTPException(status_code=400, detail="Squad name is required")
-        if len(name) > 200:  # Match database column limit
-            raise HTTPException(status_code=400, detail="Squad name too long (max 200 characters)")
-        if len(name) < 1:
-            raise HTTPException(status_code=400, detail="Squad name too short")
-        # Prevent XSS attempts (SQL injection is handled by SQLAlchemy)
-        # Allow apostrophes and quotes in names (common in squad names)
-        # Only block HTML/script tags
-        if any(char in name for char in ['<', '>', '&']):
-            raise HTTPException(status_code=400, detail="Squad name contains invalid characters")
-        
-        if not request.squad:
-            raise HTTPException(status_code=400, detail="Squad data is required")
-        
-        success = db_manager.save_saved_squad(name, request.squad)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to save squad")
-        
-        return {
-            "success": True,
-            "name": name,
-            "message": f"Squad '{name}' saved successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error saving squad '{request.name if hasattr(request, 'name') else 'unknown'}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/api/saved-squads/{name}", response_model=SaveSquadResponse)
-async def update_saved_squad(name: str, request: SaveSquadRequest):
-    """
-    Update an existing saved squad.
-    The name in the URL must match the name in the request body.
-    """
-    try:
-        if request.name != name:
-            raise HTTPException(status_code=400, detail="Name in URL must match name in request body")
-        
-        if not request.squad:
-            raise HTTPException(status_code=400, detail="Squad data is required")
-        
-        # Check if exists
-        existing = db_manager.get_saved_squad(name)
-        if not existing:
-            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
-        
-        success = db_manager.save_saved_squad(name, request.squad)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update squad")
-        
-        return {
-            "success": True,
-            "name": name,
-            "message": f"Squad '{name}' updated successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating squad '{name}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/saved-squads/{name}", response_model=DeleteSquadResponse)
-async def delete_saved_squad(name: str):
-    """
-    Delete a saved squad by name.
-    """
-    try:
-        success = db_manager.delete_saved_squad(name)
-        if not success:
-            raise HTTPException(status_code=404, detail=f"Saved squad '{name}' not found")
-        
-        return {
-            "success": True,
-            "name": name,
-            "message": f"Squad '{name}' deleted successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting squad '{name}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== FPL Teams API ====================
-
-@app.get("/api/fpl-teams", response_model=FplTeamsResponse)
-async def get_fpl_teams():
-    """
-    Get all saved FPL team IDs.
-    Returns list of all saved FPL teams sorted by most recently imported first.
-    """
-    try:
-        teams = db_manager.get_all_fpl_teams()
-        return {"teams": teams}
-    except Exception as e:
-        logger.error(f"Error fetching FPL teams: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-class SaveFplTeamRequest(BaseModel):
-    """Request model for saving an FPL team."""
-    team_id: int
-    team_name: str
-    
-    class Config:
-        """Pydantic config."""
-        json_schema_extra = {
-            "example": {
-                "team_id": 12345,
-                "team_name": "My FPL Team"
-            }
-        }
-
-
-@app.post("/api/fpl-teams", response_model=SaveFplTeamResponse)
-async def save_fpl_team(request: SaveFplTeamRequest):
-    """
-    Save or update an FPL team ID.
-    If a team with the same ID exists, it will be updated.
-    """
-    try:
-        team_id = request.team_id
-        team_name = request.team_name.strip() if request.team_name else ""
-        
-        if not team_id or team_id <= 0:
-            raise HTTPException(status_code=400, detail="Invalid team ID")
-        if not team_name:
-            raise HTTPException(status_code=400, detail="Team name is required")
-        if len(team_name) > 200:
-            raise HTTPException(status_code=400, detail="Team name too long (max 200 characters)")
-        
-        success = db_manager.save_fpl_team(team_id, team_name)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to save FPL team")
-        
-        return {
-            "success": True,
-            "teamId": team_id,
-            "teamName": team_name,
-            "message": f"FPL team ID {team_id} saved successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error saving FPL team: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Tasks API ====================
-
-@app.get("/api/tasks")
-async def get_tasks(include_old: bool = False):
-    """
-    Get all tasks.
-    
-    Args:
-        include_old: If True, include old completed tasks. If False, only return tasks from last 5 minutes or running/pending tasks.
-    
-    Returns:
-        List of tasks
-    """
-    try:
-        tasks = db_manager.get_all_tasks(include_old=include_old)
-        return {"tasks": tasks}
-    except Exception as e:
-        logger.error(f"Error fetching tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/tasks/{task_id}")
-async def get_task(task_id: str):
-    """
-    Get a specific task by ID.
-    
-    Args:
-        task_id: Unique task identifier
-    
-    Returns:
-        Task data
-    """
-    try:
-        task = db_manager.get_task(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-        return task
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/tasks")
-async def create_task(request: dict):
-    """
-    Create a new task.
-    
-    Request body:
-        - task_id: Unique task identifier (required)
-        - task_type: Type of task (required)
-        - title: Task title (required)
-        - description: Task description (optional)
-        - status: Task status (default: "pending")
-        - progress: Progress percentage 0-100 (default: 0)
-    
-    Returns:
-        Created task data
-    """
-    try:
-        task_id = request.get("task_id") or request.get("id")
-        if not task_id:
-            raise HTTPException(status_code=400, detail="task_id is required")
-        
-        task_type = request.get("task_type") or request.get("type")
-        if not task_type:
-            raise HTTPException(status_code=400, detail="task_type is required")
-        
-        title = request.get("title")
-        if not title:
-            raise HTTPException(status_code=400, detail="title is required")
-        
-        task = db_manager.create_task(
-            task_id=task_id,
-            task_type=task_type,
-            title=title,
-            description=request.get("description"),
-            status=request.get("status", "pending"),
-            progress=request.get("progress", 0)
-        )
-        return task
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/api/tasks/{task_id}")
-async def update_task(task_id: str, request: dict):
-    """
-    Update an existing task.
-    
-    Request body (all optional):
-        - status: New status
-        - progress: New progress (0-100)
-        - error: Error message if failed
-    
-    Returns:
-        Updated task data
-    """
-    try:
-        task = db_manager.update_task(
-            task_id=task_id,
-            status=request.get("status"),
-            progress=request.get("progress"),
-            error=request.get("error")
-        )
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-        return task
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str):
-    """
-    Delete a task.
-    
-    Args:
-        task_id: Unique task identifier
-    
-    Returns:
-        Success message
-    """
-    try:
-        deleted = db_manager.delete_task(task_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-        return {"success": True, "message": f"Task '{task_id}' deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# NOTE: /api/tasks/* moved to api/routes/tasks.py
 
 # ==================== Wake-up Endpoint for Render Free Tier ====================
 
