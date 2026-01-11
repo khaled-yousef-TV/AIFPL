@@ -41,9 +41,14 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
   }, [])
 
   const fetchTrajectory = async () => {
+    // Don't allow multiple requests
+    if (loading) {
+      return
+    }
+    
     setLoading(true)
     setError(null)
-    setTrajectory(null)
+    // Don't clear trajectory - keep previous one visible while loading new one
     
     // Clear any existing polling
     if (pollingIntervalRef.current) {

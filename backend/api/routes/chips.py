@@ -307,6 +307,19 @@ async def get_wildcard_trajectory(request: WildcardRequest, background_tasks: Ba
         deps = get_dependencies()
         db_manager = deps.db_manager
         
+        # Check if there's already a running or pending wildcard task
+        all_tasks = db_manager.get_all_tasks(include_old=False)
+        existing_wildcard = next(
+            (task for task in all_tasks if task.get("type") == "wildcard" and task.get("status") in ["pending", "running"]),
+            None
+        )
+        
+        if existing_wildcard:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A wildcard trajectory calculation is already in progress (task: {existing_wildcard['id']}). Please wait for it to complete."
+            )
+        
         # Generate unique task ID
         task_id = f"wildcard_{uuid.uuid4().hex[:12]}"
         
