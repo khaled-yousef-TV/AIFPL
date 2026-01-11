@@ -120,6 +120,7 @@ frontend/src/
 │   ├── FPLLogo.tsx          # Logo SVG component
 │   ├── PlayerCard.tsx       # Player display card
 │   ├── LoadingSpinner.tsx   # Loading indicator
+│   ├── TransferOption.tsx   # Single transfer option card
 │   └── index.ts             # Re-exports all components
 ├── tabs/                    # Tab content components
 │   ├── HomeTab.tsx          # Home/navigation tab
@@ -128,6 +129,7 @@ frontend/src/
 │   ├── TasksTab.tsx         # Background tasks tab
 │   ├── TripleCaptainTab.tsx # Triple captain recommendations tab
 │   ├── SelectedTeamsTab.tsx # Saved squads/free hit tab
+│   ├── TransfersTab.tsx     # Main transfers/wildcard tab (~700 lines)
 │   └── index.ts             # Re-exports all tabs
 └── constants.ts             # API_BASE, localStorage keys
 ```
