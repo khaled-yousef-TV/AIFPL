@@ -1123,7 +1123,7 @@ function App() {
     setImportingFplTeam(true)
     try {
       // Always fetch latest team data from FPL API
-      const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
+      const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
         throw new Error(error.detail || 'Failed to import FPL team')
@@ -1192,7 +1192,7 @@ function App() {
     setImportingFplTeam(true)
     try {
       // Import team from FPL (backend automatically saves to database)
-      const res = await fetch(`${API_BASE}/api/import-fpl-team/${teamId}`)
+      const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
         throw new Error(error.detail || 'Failed to import FPL team')

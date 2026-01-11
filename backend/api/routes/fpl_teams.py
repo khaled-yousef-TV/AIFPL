@@ -1,12 +1,14 @@
 """
-FPL Teams management endpoints (saved team IDs).
+FPL Teams management endpoints (saved team IDs and import).
 """
 
 import logging
+from typing import Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from services.dependencies import get_dependencies
+from services.fpl_import_service import import_fpl_team
 
 logger = logging.getLogger(__name__)
 
@@ -77,3 +79,25 @@ async def save_fpl_team(request: SaveFplTeamRequest):
         logger.error(f"Error saving FPL team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/import/{team_id}")
+async def import_team(
+    team_id: int,
+    gameweek: Optional[int] = Query(None, description="Specific gameweek to import")
+):
+    """
+    Import a team from FPL by team ID.
+    
+    Uses the public FPL API endpoint.
+    If gameweek is not provided, tries current gameweek first, then falls back.
+    
+    Returns the squad in SquadPlayer format ready for the transfers tab.
+    """
+    try:
+        result = await import_fpl_team(team_id, gameweek)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error importing FPL team {team_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

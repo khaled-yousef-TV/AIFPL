@@ -72,7 +72,7 @@ export async function importFplTeam(
   teamId: number,
   gameweek?: number
 ): Promise<ImportFplTeamResponse> {
-  let url = `/api/import-fpl-team/${teamId}`
+  let url = `/api/fpl-teams/import/${teamId}`
   if (gameweek) url += `?gameweek=${gameweek}`
   return apiRequest<ImportFplTeamResponse>(url)
 }
