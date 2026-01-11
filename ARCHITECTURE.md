@@ -123,6 +123,9 @@ frontend/src/
 │   └── index.ts             # Re-exports all components
 ├── tabs/                    # Tab content components
 │   ├── HomeTab.tsx          # Home/navigation tab
+│   ├── DifferentialsTab.tsx # Low-ownership picks tab
+│   ├── PicksTab.tsx         # Top picks by position tab
+│   ├── TasksTab.tsx         # Background tasks tab
 │   └── index.ts             # Re-exports all tabs
 └── constants.ts             # API_BASE, localStorage keys
 ```

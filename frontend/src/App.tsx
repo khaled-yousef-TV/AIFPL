@@ -21,6 +21,7 @@ import type {
 
 // Component imports
 import { FPLLogo } from './components'
+import { HomeTab, DifferentialsTab, PicksTab, TasksTab } from './tabs'
 
 // In production (GitHub Pages) set this to your hosted backend, e.g. https://api.fplai.nl
 // In local dev it defaults to http://localhost:8001
