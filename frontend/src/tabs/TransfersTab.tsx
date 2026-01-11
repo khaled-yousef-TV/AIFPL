@@ -14,10 +14,6 @@ const POSITION_LIMITS: Record<string, number> = {
   'FWD': 3,
 }
 
-interface SavedSquad {
-  id: string
-  name: string
-}
 
 interface GroupedSuggestions {
   holdSuggestions: TransferSuggestion[]
@@ -94,21 +90,6 @@ interface TransfersTabProps {
   error: string | null
   setError: (error: string | null) => void
   
-  // Saved squads
-  savedSquads: SavedSquad[]
-  selectedSavedName: string
-  setSelectedSavedName: (name: string) => void
-  saveName: string
-  setSaveName: (name: string) => void
-  loadingSavedSquads: boolean
-  loadingSquad: boolean
-  savingSquad: boolean
-  updatingSquad: boolean
-  deletingSquad: boolean
-  loadSavedSquad: () => void
-  saveOrUpdateSquad: (mode: 'new' | 'update') => void
-  deleteSavedSquad: () => void
-  
   // FPL Import
   savedFplTeams: SavedFplTeam[]
   selectedSavedFplTeamId: number | string
@@ -173,19 +154,6 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
   squadAnalysis,
   error,
   setError,
-  savedSquads,
-  selectedSavedName,
-  setSelectedSavedName,
-  saveName,
-  setSaveName,
-  loadingSavedSquads,
-  loadingSquad,
-  savingSquad,
-  updatingSquad,
-  deletingSquad,
-  loadSavedSquad,
-  saveOrUpdateSquad,
-  deleteSavedSquad,
   savedFplTeams,
   selectedSavedFplTeamId,
   setSelectedSavedFplTeamId,
@@ -273,141 +241,55 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             }
           </p>
           
-          {/* Saved squads */}
+          {/* FPL Team Import */}
           <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
             <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">Saved squads</span>
-                  <select
-                    value={selectedSavedName}
-                    onChange={(e) => setSelectedSavedName(e.target.value)}
-                    disabled={loadingSavedSquads}
-                    className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">— Select —</option>
-                    {savedSquads.map(s => (
-                      <option key={s.id} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button 
-                    onClick={loadSavedSquad} 
-                    disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
-                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    {loadingSquad ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="hidden sm:inline">Loading...</span>
-                      </>
-                    ) : (
-                      'Load'
-                    )}
-                  </button>
-                  <button 
-                    onClick={() => saveOrUpdateSquad('update')} 
-                    disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
-                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    {updatingSquad ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="hidden sm:inline">Updating...</span>
-                      </>
-                    ) : (
-                      'Update'
-                    )}
-                  </button>
-                  <button 
-                    onClick={() => saveOrUpdateSquad('new')} 
-                    disabled={loadingSquad || savingSquad || updatingSquad || deletingSquad}
-                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    {savingSquad ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="hidden sm:inline">Saving...</span>
-                      </>
-                    ) : (
-                      'Save'
-                    )}
-                  </button>
-                  <button 
-                    onClick={deleteSavedSquad} 
-                    disabled={!selectedSavedName || loadingSquad || savingSquad || updatingSquad || deletingSquad}
-                    className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    {deletingSquad ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="hidden sm:inline">Deleting...</span>
-                      </>
-                    ) : (
-                      'Delete'
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                <span className="text-xs text-gray-400 whitespace-nowrap">Name</span>
-                <input
-                  value={saveName}
-                  onChange={(e) => setSaveName(e.target.value)}
-                  disabled={!!selectedSavedName}
-                  className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[#080811]"
-                  placeholder="My Squad"
-                />
-              </div>
-
-              {/* FPL Team Import */}
-              <div className="pt-3 border-t border-[#2a2a4a]">
-                {savedFplTeams.length > 0 && (
-                  <div className="mb-2">
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">Saved teams</span>
-                      <select
-                        value={selectedSavedFplTeamId}
-                        onChange={(e) => {
-                          const teamId = e.target.value ? parseInt(e.target.value) : ''
-                          setSelectedSavedFplTeamId(teamId)
-                          if (teamId && typeof teamId === 'number') {
-                            importFromSavedFplTeam(teamId)
-                          }
-                        }}
-                        disabled={importingFplTeam}
-                        className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value="">— Select saved team —</option>
-                        {savedFplTeams.map((team) => (
-                          <option key={team.teamId} value={team.teamId}>
-                            {team.teamName} (ID: {team.teamId})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="text-[10px] text-gray-500 mt-1.5">
-                      Select a saved team to import the latest squad
-                    </div>
+              {/* Previously imported teams */}
+              {savedFplTeams.length > 0 && (
+                <div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <span className="text-xs text-gray-400 whitespace-nowrap">Your teams</span>
+                    <select
+                      value={selectedSavedFplTeamId}
+                      onChange={(e) => {
+                        const teamId = e.target.value ? parseInt(e.target.value) : ''
+                        setSelectedSavedFplTeamId(teamId)
+                        if (teamId && typeof teamId === 'number') {
+                          importFromSavedFplTeam(teamId)
+                        }
+                      }}
+                      disabled={importingFplTeam}
+                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">— Select a team to refresh —</option>
+                      {savedFplTeams.map((team) => (
+                        <option key={team.teamId} value={team.teamId}>
+                          {team.teamName} (ID: {team.teamId})
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                )}
+                  <div className="text-[10px] text-gray-500 mt-1.5">
+                    Select a previously imported team to fetch the latest squad from FPL
+                  </div>
+                </div>
+              )}
+              
+              {/* Import new team */}
+              <div className={savedFplTeams.length > 0 ? "pt-3 border-t border-[#2a2a4a]" : ""}>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">Import from FPL</span>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">Import team</span>
                   <input
                     type="number"
                     value={fplTeamId}
                     onChange={(e) => setFplTeamId(e.target.value)}
                     disabled={importingFplTeam}
                     className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    placeholder="FPL Team ID"
+                    placeholder="Enter FPL Team ID"
                   />
                   <button
                     onClick={importFplTeam}
-                    disabled={!fplTeamId.trim() || importingFplTeam || loadingSquad || savingSquad || updatingSquad || deletingSquad}
+                    disabled={!fplTeamId.trim() || importingFplTeam}
                     className="btn btn-secondary text-xs sm:text-sm flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     {importingFplTeam ? (
@@ -421,12 +303,12 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                   </button>
                 </div>
                 <div className="text-[10px] text-gray-500 mt-1.5">
-                  Enter your FPL Team ID to import your current squad. Find it in your FPL profile URL.
+                  Enter your FPL Team ID to import your squad. Find it in your FPL profile URL (e.g., fantasy.premierleague.com/entry/<strong>123456</strong>/event/1).
                 </div>
               </div>
             </div>
             <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
-              Your current squad is auto-saved locally and saved squads are synced across devices.
+              Your squad is auto-saved locally. Importing will fetch the latest data from FPL.
             </div>
           </div>
 

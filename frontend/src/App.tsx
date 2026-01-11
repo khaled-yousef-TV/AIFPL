@@ -27,17 +27,6 @@ import { HomeTab, DifferentialsTab, PicksTab, TasksTab, TripleCaptainTab, Select
 // In local dev it defaults to http://localhost:8001
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
-// Types are imported from ./types module
-// SavedSquad kept inline as it's used for saved squads feature
-type SavedSquad = {
-  id: string
-  name: string
-  updatedAt: number
-  squad: SquadPlayer[]
-  bank: number
-  freeTransfers: number
-}
-
 function App() {
   const [loading, setLoading] = useState(true)
   const [squad, setSquad] = useState<SuggestedSquad | null>(null)
@@ -62,11 +51,6 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
-  const [savingSquad, setSavingSquad] = useState(false)
-  const [loadingSquad, setLoadingSquad] = useState(false)
-  const [updatingSquad, setUpdatingSquad] = useState(false)
-  const [deletingSquad, setDeletingSquad] = useState(false)
-  
   // Transfer tab state
   const [mySquad, setMySquad] = useState<SquadPlayer[]>([])
   const [bank, setBank] = useState(0)
@@ -127,12 +111,6 @@ function App() {
     return { holdSuggestions, sortedGroups }
   }, [transferSuggestions, freeTransfers])
 
-  // Saved squads (persist between weeks) - now server-side
-  const [savedSquads, setSavedSquads] = useState<SavedSquad[]>([])
-  const [selectedSavedName, setSelectedSavedName] = useState<string>('')
-  const [saveName, setSaveName] = useState<string>('My Squad')
-  const [loadingSavedSquads, setLoadingSavedSquads] = useState(false)
-  
   // FPL team import
   const [fplTeamId, setFplTeamId] = useState<string>('')
   const [importingFplTeam, setImportingFplTeam] = useState(false)
@@ -410,46 +388,6 @@ function App() {
     return () => clearInterval(interval)
   }, [gameweek?.next?.deadline])
 
-  // Load saved squads from API on mount
-  const loadSavedSquads = useCallback(async () => {
-    setLoadingSavedSquads(true)
-    try {
-      const response = await fetch(`${API_BASE}/api/saved-squads`)
-      if (!response.ok) {
-        console.error(`Failed to load saved squads: HTTP ${response.status}`, await response.text().catch(() => ''))
-        setSavedSquads([])
-        return
-      }
-      const res = await response.json()
-      if (res.squads && Array.isArray(res.squads)) {
-        // Map API response to frontend format
-        const mapped = res.squads.map((s: any) => {
-          // API squad_data contains { squad, bank, freeTransfers }
-          const squadData = s.squad || {}
-          return {
-            id: s.name, // Use name as id for API compatibility
-            name: s.name,
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : new Date(s.saved_at).getTime(),
-            squad: squadData.squad || [],
-            bank: squadData.bank || 0,
-            bankInput: String(squadData.bank || 0),
-            freeTransfers: squadData.freeTransfers || 1,
-          }
-        })
-        setSavedSquads(mapped)
-        console.log(`Loaded ${mapped.length} saved squad(s)`)
-      } else {
-        console.warn('Unexpected response format from saved-squads endpoint:', res)
-        setSavedSquads([])
-      }
-    } catch (err) {
-      console.error('Failed to load saved squads:', err)
-      setSavedSquads([])
-    } finally {
-      setLoadingSavedSquads(false)
-    }
-  }, [])
-
   // Load saved FPL team IDs from database
   const loadSavedFplTeams = useCallback(async () => {
     try {
@@ -479,9 +417,8 @@ function App() {
     }
   }, [])
 
-  // Load saved squads and draft on mount
+  // Load FPL teams and draft on mount
   useEffect(() => {
-    loadSavedSquads()
     loadSavedFplTeams()
 
     // Load draft squad from localStorage (still local, not synced)
@@ -499,7 +436,7 @@ function App() {
         }
       }
     } catch {}
-  }, [loadSavedSquads, loadSavedFplTeams])
+  }, [loadSavedFplTeams])
 
   // Load selected teams from API
   const loadSelectedTeams = async () => {
@@ -989,136 +926,6 @@ function App() {
     } catch {}
   }, [mySquad, bank, freeTransfers])
 
-  const loadSavedSquad = useCallback(async () => {
-    if (!selectedSavedName) return
-    
-    setLoadingSquad(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`)
-      if (!res.ok) {
-        throw new Error('Failed to load saved squad')
-      }
-      const data = await res.json()
-      const squadData = data.squad || {}
-      
-      setMySquad(squadData.squad || [])
-      setBank(squadData.bank ?? 0)
-      setBankInput(String(squadData.bank ?? 0))
-      setFreeTransfers(squadData.freeTransfers ?? 1)
-      setSaveName(data.name || 'My Squad')
-      
-      // Reset view when loading a new squad
-      setWildcardPlan(null)
-      setTransferSuggestions([])
-      setSquadAnalysis([])
-    } catch (err) {
-      console.error('Failed to load saved squad:', err)
-      alert('Failed to load saved squad. Please try again.')
-    } finally {
-      setLoadingSquad(false)
-    }
-  }, [selectedSavedName])
-
-  const saveOrUpdateSquad = useCallback(async (mode: 'update' | 'new') => {
-    const name = (saveName || 'My Squad').trim()
-    if (!name) {
-      alert('Please enter a squad name')
-      return
-    }
-    
-    // Prepare squad data to save
-    const squadData = {
-      squad: mySquad,
-      bank: bank,
-      freeTransfers: freeTransfers
-    }
-
-    if (mode === 'update' && selectedSavedName) {
-      if (selectedSavedName !== name) {
-        alert('Cannot change squad name. Please create a new squad with a different name.')
-        return
-      }
-      
-      setUpdatingSquad(true)
-      try {
-        const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(name)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, squad: squadData })
-        })
-        
-        if (!res.ok) {
-          const error = await res.json().catch(() => ({ detail: 'Failed to update squad' }))
-          throw new Error(error.detail || 'Failed to update squad')
-        }
-        
-        // Reload saved squads to get updated data
-        await loadSavedSquads()
-      } catch (err: any) {
-        console.error('Failed to update squad:', err)
-        alert(err.message || 'Failed to update squad. Please try again.')
-      } finally {
-        setUpdatingSquad(false)
-      }
-      return
-    }
-
-    // Create new squad
-    setSavingSquad(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/saved-squads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, squad: squadData })
-      })
-      
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Failed to save squad' }))
-        throw new Error(error.detail || 'Failed to save squad')
-      }
-      
-      // Reload saved squads and select the newly created one
-      await loadSavedSquads()
-      setSelectedSavedName(name)
-      setSaveName(name)
-    } catch (err: any) {
-      console.error('Failed to save squad:', err)
-      alert(err.message || 'Failed to save squad. Please try again.')
-    } finally {
-      setSavingSquad(false)
-    }
-  }, [saveName, mySquad, bank, freeTransfers, selectedSavedName, loadSavedSquads])
-
-  const deleteSavedSquad = useCallback(async () => {
-    if (!selectedSavedName) return
-    
-    if (!confirm(`Are you sure you want to delete "${selectedSavedName}"?`)) {
-      return
-    }
-    
-    setDeletingSquad(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/saved-squads/${encodeURIComponent(selectedSavedName)}`, {
-        method: 'DELETE'
-      })
-      
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Failed to delete squad' }))
-        throw new Error(error.detail || 'Failed to delete squad')
-      }
-      
-      // Reload saved squads and clear selection
-      await loadSavedSquads()
-      setSelectedSavedName('')
-      setSaveName('My Squad')
-    } catch (err: any) {
-      console.error('Failed to delete squad:', err)
-      alert(err.message || 'Failed to delete squad. Please try again.')
-    } finally {
-      setDeletingSquad(false)
-    }
-  }, [selectedSavedName, loadSavedSquads])
-
   // Import squad from saved FPL team ID (always fetches latest from FPL)
   const importFromSavedFplTeam = useCallback(async (teamId: number) => {
     setImportingFplTeam(true)
@@ -1132,7 +939,7 @@ function App() {
       
       const data = await res.json()
       const squad = data.squad || []
-      const bank = data.bank || 0
+      const importedBank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
       // Backend automatically saves/updates FPL team in database, so reload the list
@@ -1140,31 +947,8 @@ function App() {
       
       // Load the squad into the UI
       setMySquad(squad)
-      setBank(bank)
-      setBankInput(String(bank))
-      setSaveName(teamName)
-      
-      // Save to database as a saved squad
-      const squadData = {
-        squad: squad,
-        bank: bank,
-        freeTransfers: freeTransfers
-      }
-      
-      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: teamName, squad: squadData })
-      })
-      
-      if (!saveRes.ok) {
-        // If save fails, still keep the imported squad loaded
-        console.warn('Failed to save imported team to database, but squad is loaded')
-      } else {
-        // Reload saved squads and select the newly imported one
-        await loadSavedSquads()
-        setSelectedSavedName(teamName)
-      }
+      setBank(importedBank)
+      setBankInput(String(importedBank))
       
       // Reset view when importing a new squad
       setWildcardPlan(null)
@@ -1181,7 +965,7 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }, [freeTransfers, loadSavedFplTeams, loadSavedSquads])
+  }, [loadSavedFplTeams])
 
   const importFplTeam = useCallback(async () => {
     const teamId = parseInt(fplTeamId.trim())
@@ -1201,7 +985,7 @@ function App() {
       
       const data = await res.json()
       const squad = data.squad || []
-      const bank = data.bank || 0
+      const importedBank = data.bank || 0
       const teamName = data.team_name || `FPL Team ${teamId}`
       
       // Backend automatically saves/updates FPL team in database, so reload the list
@@ -1209,31 +993,8 @@ function App() {
       
       // Load the squad into the UI
       setMySquad(squad)
-      setBank(bank)
-      setBankInput(String(bank))
-      setSaveName(teamName)
-      
-      // Save to database as a saved squad
-      const squadData = {
-        squad: squad,
-        bank: bank,
-        freeTransfers: freeTransfers
-      }
-      
-      const saveRes = await fetch(`${API_BASE}/api/saved-squads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: teamName, squad: squadData })
-      })
-      
-      if (!saveRes.ok) {
-        // If save fails, still keep the imported squad loaded
-        console.warn('Failed to save imported team to database, but squad is loaded')
-      } else {
-        // Reload saved squads and select the newly imported one
-        await loadSavedSquads()
-        setSelectedSavedName(teamName)
-      }
+      setBank(importedBank)
+      setBankInput(String(importedBank))
       
       // Reset view when importing a new squad
       setWildcardPlan(null)
@@ -1251,7 +1012,7 @@ function App() {
     } finally {
       setImportingFplTeam(false)
     }
-  }, [fplTeamId, freeTransfers, loadSavedFplTeams, loadSavedSquads])
+  }, [fplTeamId, loadSavedFplTeams])
 
   const loadInitial = async () => {
     // Only load lightweight header data on boot (keeps Quick Transfers instant).
@@ -2384,19 +2145,6 @@ function App() {
             squadAnalysis={squadAnalysis}
             error={error}
             setError={setError}
-            savedSquads={savedSquads}
-            selectedSavedName={selectedSavedName}
-            setSelectedSavedName={setSelectedSavedName}
-            saveName={saveName}
-            setSaveName={setSaveName}
-            loadingSavedSquads={loadingSavedSquads}
-            loadingSquad={loadingSquad}
-            savingSquad={savingSquad}
-            updatingSquad={updatingSquad}
-            deletingSquad={deletingSquad}
-            loadSavedSquad={loadSavedSquad}
-            saveOrUpdateSquad={saveOrUpdateSquad}
-            deleteSavedSquad={deleteSavedSquad}
             savedFplTeams={savedFplTeams}
             selectedSavedFplTeamId={selectedSavedFplTeamId}
             setSelectedSavedFplTeamId={setSelectedSavedFplTeamId}
