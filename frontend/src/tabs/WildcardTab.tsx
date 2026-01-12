@@ -31,22 +31,92 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     })
   }
 
-  // Load saved trajectory from database on mount
-  useEffect(() => {
-    const loadSavedTrajectory = async () => {
+  // Resume polling function (shared between initial load and fetchTrajectory)
+  const resumePolling = (taskId: string) => {
+    // Clear any existing polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+
+    setCurrentTaskId(taskId)
+    setLoading(true)
+
+    // Start polling for task completion
+    const pollForResult = async () => {
       try {
-        const saved = await getLatestWildcardTrajectory()
-        if (saved) {
-          setTrajectory(saved)
-          // Set first gameweek as selected
-          const gws = Object.keys(saved.gameweek_predictions).map(Number).sort((a, b) => a - b)
-          if (gws.length > 0) setSelectedGw(gws[0])
+        const task = await fetchTask(taskId)
+        
+        if (task.status === 'completed') {
+          // Task completed - fetch result
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+          
+          try {
+            const data = await getWildcardTrajectoryResult(taskId)
+            setTrajectory(data)
+            // Set first gameweek as selected
+            const gws = Object.keys(data.gameweek_predictions).map(Number).sort((a, b) => a - b)
+            if (gws.length > 0) setSelectedGw(gws[0])
+            setLoading(false)
+            setCurrentTaskId(null)
+          } catch (err: any) {
+            setError(err.message || 'Failed to fetch trajectory result')
+            setLoading(false)
+            setCurrentTaskId(null)
+          }
+        } else if (task.status === 'failed') {
+          // Task failed
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+          setError(task.error || 'Failed to generate trajectory')
+          setLoading(false)
+          setCurrentTaskId(null)
         }
+        // If still running or pending, continue polling
       } catch (err) {
-        console.debug('Could not load saved wildcard trajectory:', err)
+        // Error fetching task - continue polling
+        console.error('Error polling task status:', err)
       }
     }
-    loadSavedTrajectory()
+    
+    // Poll immediately, then every 2 seconds
+    pollForResult()
+    pollingIntervalRef.current = setInterval(pollForResult, 2000)
+  }
+
+  // Load saved trajectory and check for running tasks on mount
+  useEffect(() => {
+    const loadSavedTrajectoryAndCheckTasks = async () => {
+      try {
+        // First, check for running/pending wildcard tasks
+        const tasksResponse = await fetchTasks(false)
+        const runningWildcardTask = tasksResponse.tasks.find(
+          (task) => task.type === 'wildcard' && (task.status === 'running' || task.status === 'pending')
+        )
+        
+        if (runningWildcardTask) {
+          // Found a running task - resume polling
+          resumePolling(runningWildcardTask.id)
+        } else {
+          // No running task - load saved trajectory
+          const saved = await getLatestWildcardTrajectory()
+          if (saved) {
+            setTrajectory(saved)
+            // Set first gameweek as selected
+            const gws = Object.keys(saved.gameweek_predictions).map(Number).sort((a, b) => a - b)
+            if (gws.length > 0) setSelectedGw(gws[0])
+          }
+        }
+      } catch (err) {
+        console.debug('Could not load saved wildcard trajectory or check tasks:', err)
+      }
+    }
+    loadSavedTrajectoryAndCheckTasks()
   }, [])
 
   // Cleanup polling on unmount
