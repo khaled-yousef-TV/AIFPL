@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import type { WildcardTrajectory, TrajectoryPlayer, GameweekBreakdown } from '../types'
 import { submitWildcardTrajectory, getWildcardTrajectoryResult, getLatestWildcardTrajectory } from '../api/wildcard'
-import { fetchTask } from '../api/tasks'
+import { fetchTask, fetchTasks } from '../api/tasks'
 
 interface WildcardTabProps {
   gameweek: number | null
@@ -68,63 +68,13 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     setError(null)
     // Don't clear trajectory - keep previous one visible while loading new one
     
-    // Clear any existing polling
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
-    }
-    
     try {
       // Submit task and get task ID
       const taskResponse = await submitWildcardTrajectory({ budget, horizon })
       const taskId = taskResponse.task_id
-      setCurrentTaskId(taskId)
       
-      // Start polling for task completion
-      const pollForResult = async () => {
-        try {
-          const task = await fetchTask(taskId)
-          
-          if (task.status === 'completed') {
-            // Task completed - fetch result
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current)
-              pollingIntervalRef.current = null
-            }
-            
-            try {
-              const data = await getWildcardTrajectoryResult(taskId)
-              setTrajectory(data)
-              // Set first gameweek as selected
-              const gws = Object.keys(data.gameweek_predictions).map(Number).sort((a, b) => a - b)
-              if (gws.length > 0) setSelectedGw(gws[0])
-              setLoading(false)
-              setCurrentTaskId(null)
-            } catch (err: any) {
-              setError(err.message || 'Failed to fetch trajectory result')
-              setLoading(false)
-              setCurrentTaskId(null)
-            }
-          } else if (task.status === 'failed') {
-            // Task failed
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current)
-              pollingIntervalRef.current = null
-            }
-            setError(task.error || 'Failed to generate trajectory')
-            setLoading(false)
-            setCurrentTaskId(null)
-          }
-          // If still running or pending, continue polling
-        } catch (err) {
-          // Error fetching task - continue polling
-          console.error('Error polling task status:', err)
-        }
-      }
-      
-      // Poll immediately, then every 2 seconds
-      pollForResult()
-      pollingIntervalRef.current = setInterval(pollForResult, 2000)
+      // Start polling
+      resumePolling(taskId)
       
     } catch (err: any) {
       setError(err.message || 'Failed to submit trajectory calculation')
