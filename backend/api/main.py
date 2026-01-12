@@ -182,6 +182,7 @@ from api.routes import transfers as transfers_router
 
 # Initialize dependencies for routes
 from services.dependencies import init_dependencies
+from services.squad_service import build_squad_with_predictor
 deps = init_dependencies()
 
 # Initialize routers with dependencies (for legacy routers that need explicit init)
@@ -232,7 +233,7 @@ async def _save_selected_team_async():
             return
         
         # Get the current combined squad suggestion
-        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        squad_data = await build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0, force_refresh=False)
         
         # Save to database
         success = db_manager.save_selected_team(next_gw.id, squad_data)
@@ -267,7 +268,7 @@ async def _save_daily_snapshot_async():
         fpl_client.get_bootstrap(force_refresh=True)
         
         # Get the current combined squad suggestion with refresh enabled
-        squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
+        squad_data = await build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0, force_refresh=True)
         
         # Validate squad doesn't contain unavailable/doubtful players and regenerate if needed
         # (max 2 attempts to avoid infinite loop)
@@ -310,7 +311,7 @@ async def _save_daily_snapshot_async():
                 logger.warning(f"Regenerating squad (attempt {attempt + 1}/{max_attempts})...")
                 # Force another refresh and regenerate
                 fpl_client.get_bootstrap(force_refresh=True)
-                squad_data = await get_suggested_squad(budget=100.0, method="combined", refresh=True)
+                squad_data = await build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0, force_refresh=True)
             else:
                 # Final attempt still has invalid players - log warning but save anyway
                 logger.error(f"Daily snapshot still contains {len(invalid_players)} invalid players after {max_attempts} attempts: {', '.join(invalid_players)}")
@@ -548,9 +549,8 @@ async def save_selected_team():
         if existing:
             return {"success": True, "gameweek": next_gw.id, "message": f"Already saved for Gameweek {next_gw.id}"}
         
-        # Get the current combined squad suggestion by calling the existing endpoint logic
-        # We'll reuse the get_suggested_squad logic
-        squad_data = await get_suggested_squad(budget=100.0, method="combined")
+        # Get the current combined squad suggestion
+        squad_data = await build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0, force_refresh=False)
         
         # Save to database
         success = db_manager.save_selected_team(next_gw.id, squad_data)

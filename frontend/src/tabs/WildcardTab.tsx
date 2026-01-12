@@ -386,6 +386,93 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     )
   }
 
+  const renderGameweekPlayerPill = (player: GameweekBreakdown['starting_xi'][0]) => {
+    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
+    
+    return (
+      <div className={`${pillClasses} bg-slate-800/80 border-slate-700`}>
+        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
+            {player.position}
+          </span>
+        </div>
+        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
+        <div className="flex items-center gap-1 text-[9px] text-slate-400 truncate w-full text-center mt-0.5 justify-center">
+          {player.is_home ? <Home className="w-2.5 h-2.5" /> : <Plane className="w-2.5 h-2.5" />}
+          <span>{player.opponent}</span>
+        </div>
+        <div className="text-[9px] text-violet-400 font-mono mt-1">{player.predicted.toFixed(1)}</div>
+        <div className={`px-1 py-0.5 rounded text-[8px] mt-0.5 ${getFdrColor(Math.round(player.fdr))}`}>
+          FDR {player.fdr}
+        </div>
+      </div>
+    )
+  }
+
+  const renderGameweekPitch = () => {
+    if (!trajectory || selectedGw === null) return null
+    const gwData = trajectory.gameweek_predictions[selectedGw]
+    if (!gwData) return null
+
+    const formationLayout = parseFormation(gwData.formation)
+    
+    // Group players by position
+    const byPosition = {
+      GK: gwData.starting_xi.filter(p => p.position === 'GK'),
+      DEF: gwData.starting_xi.filter(p => p.position === 'DEF'),
+      MID: gwData.starting_xi.filter(p => p.position === 'MID'),
+      FWD: gwData.starting_xi.filter(p => p.position === 'FWD'),
+    }
+
+    // Starting XI positions
+    const startingXiGK = byPosition.GK.slice(0, 1)
+    const startingXiDEF = byPosition.DEF.slice(0, formationLayout.def)
+    const startingXiMID = byPosition.MID.slice(0, formationLayout.mid)
+    const startingXiFWD = byPosition.FWD.slice(0, formationLayout.fwd)
+
+    return (
+      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
+        <div className="relative min-h-[300px] sm:min-h-[350px] md:min-h-[400px] flex flex-col justify-between">
+          {/* Goalkeeper (TOP) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+            {startingXiGK.map((player) => (
+              <div key={`gk-${player.id}`}>
+                {renderGameweekPlayerPill(player)}
+              </div>
+            ))}
+          </div>
+
+          {/* Defenders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {startingXiDEF.map((player) => (
+              <div key={`def-${player.id}`}>
+                {renderGameweekPlayerPill(player)}
+              </div>
+            ))}
+          </div>
+
+          {/* Midfielders */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+            {startingXiMID.map((player) => (
+              <div key={`mid-${player.id}`}>
+                {renderGameweekPlayerPill(player)}
+              </div>
+            ))}
+          </div>
+
+          {/* Forwards (BOTTOM) */}
+          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
+            {startingXiFWD.map((player) => (
+              <div key={`fwd-${player.id}`}>
+                {renderGameweekPlayerPill(player)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderGameweekDetail = () => {
     if (!trajectory || selectedGw === null) return null
     const gwData = trajectory.gameweek_predictions[selectedGw]
@@ -402,33 +489,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
           <div className="text-violet-400 font-bold text-lg">{gwData.predicted_points.toFixed(1)} pts</div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {gwData.starting_xi.map((player) => (
-            <div 
-              key={player.id}
-              className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <span className={`px-1.5 py-0.5 rounded text-xs ${getPositionColor(player.position)}`}>
-                    {player.position}
-                  </span>
-                  <span className="text-white text-sm font-medium">{player.name}</span>
-                </div>
-                <span className="text-violet-400 font-medium">{player.predicted.toFixed(1)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1 text-slate-400">
-                  {player.is_home ? <Home className="w-3 h-3" /> : <Plane className="w-3 h-3" />}
-                  <span>vs {player.opponent}</span>
-                </div>
-                <span className={`px-1.5 py-0.5 rounded ${getFdrColor(player.fdr)}`}>
-                  FDR {player.fdr}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+        {renderGameweekPitch()}
       </div>
     )
   }
@@ -578,9 +639,6 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
             {renderGameweekTimeline()}
           </div>
 
-          {/* Selected Gameweek Detail */}
-          {renderGameweekDetail()}
-
           {/* Squad Section */}
           <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
             <button
@@ -603,6 +661,9 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
               </div>
             )}
           </div>
+
+          {/* Selected Gameweek Detail */}
+          {renderGameweekDetail()}
 
           {/* Fixture Blocks Section */}
           <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
