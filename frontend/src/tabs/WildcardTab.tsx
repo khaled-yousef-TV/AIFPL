@@ -12,7 +12,7 @@ interface WildcardTabProps {
 }
 
 const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true) // Start with loading to prevent flash
   const [trajectory, setTrajectory] = useState<WildcardTrajectory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [budget, setBudget] = useState(100.0)
@@ -100,10 +100,11 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         )
         
         if (runningWildcardTask) {
-          // Found a running task - resume polling
+          // Found a running task - resume polling (keeps loading = true)
           resumePolling(runningWildcardTask.id)
         } else {
-          // No running task - load saved trajectory
+          // No running task - load saved trajectory and set loading = false
+          setLoading(false)
           const saved = await getLatestWildcardTrajectory()
           if (saved) {
             setTrajectory(saved)
@@ -114,6 +115,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         }
       } catch (err) {
         console.debug('Could not load saved wildcard trajectory or check tasks:', err)
+        setLoading(false)
       }
     }
     loadSavedTrajectoryAndCheckTasks()
