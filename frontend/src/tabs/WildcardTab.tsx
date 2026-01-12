@@ -48,20 +48,31 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         const task = await fetchTask(taskId)
         
         if (task.status === 'completed') {
-          // Task completed - fetch result
+          // Task completed - fetch result from database
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current)
             pollingIntervalRef.current = null
           }
           
           try {
-            const data = await getWildcardTrajectoryResult(taskId)
-            setTrajectory(data)
-            // Set first gameweek as selected
-            const gws = Object.keys(data.gameweek_predictions).map(Number).sort((a, b) => a - b)
-            if (gws.length > 0) setSelectedGw(gws[0])
-            setLoading(false)
-            setCurrentTaskId(null)
+            // Get result from database (more reliable than cache)
+            const data = await getLatestWildcardTrajectory()
+            if (data) {
+              setTrajectory(data)
+              // Set first gameweek as selected
+              const gws = Object.keys(data.gameweek_predictions).map(Number).sort((a, b) => a - b)
+              if (gws.length > 0) setSelectedGw(gws[0])
+              setLoading(false)
+              setCurrentTaskId(null)
+            } else {
+              // Fallback: try cache if database doesn't have it yet
+              const cacheData = await getWildcardTrajectoryResult(taskId)
+              setTrajectory(cacheData)
+              const gws = Object.keys(cacheData.gameweek_predictions).map(Number).sort((a, b) => a - b)
+              if (gws.length > 0) setSelectedGw(gws[0])
+              setLoading(false)
+              setCurrentTaskId(null)
+            }
           } catch (err: any) {
             setError(err.message || 'Failed to fetch trajectory result')
             setLoading(false)
