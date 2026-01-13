@@ -4,76 +4,62 @@ import {
   ChevronDown, ChevronUp, Home, Plane, Crown, Star
 } from 'lucide-react'
 import type { WildcardTrajectory, TrajectoryPlayer, GameweekBreakdown } from '../types'
-import type { SuggestedSquad, Player } from '../types'
-import { submitWildcardTrajectory, getWildcardTrajectoryResult, getLatestWildcardTrajectory } from '../api/wildcard'
+import { submitWildcardTrajectory, getWildcardTrajectoryResult } from '../api/wildcard'
 import { fetchTask, fetchTasks } from '../api/tasks'
-import { apiRequest } from '../api/client'
 
 interface WildcardTabProps {
   gameweek: number | null
+  trajectory: WildcardTrajectory | null
+  loading: boolean
+  onGenerate: (budget: number, horizon: number) => Promise<void>
 }
 
-const WILDCARD_TRAJECTORY_STORAGE_KEY = 'wildcard_trajectory'
-const WILDCARD_SELECTED_GW_KEY = 'wildcard_selected_gw'
-
-const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
-  const [loading, setLoading] = useState(true) // Start with loading to prevent flash
-  const [trajectory, setTrajectory] = useState<WildcardTrajectory | null>(() => {
-    // Load from localStorage on mount
-    try {
-      const saved = localStorage.getItem(WILDCARD_TRAJECTORY_STORAGE_KEY)
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed && parsed.squad && Array.isArray(parsed.squad) && parsed.squad.length > 0) {
-          return parsed
-        }
-      }
-    } catch (err) {
-      console.debug('Could not load trajectory from localStorage:', err)
-    }
-    return null
-  })
+const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek, trajectory, loading: propLoading, onGenerate }) => {
   const [error, setError] = useState<string | null>(null)
   const [budget, setBudget] = useState(100.0)
   const [horizon, setHorizon] = useState(8)
-  const [selectedGw, setSelectedGw] = useState<number | null>(() => {
-    // Load selected GW from localStorage
-    try {
-      const saved = localStorage.getItem(WILDCARD_SELECTED_GW_KEY)
-      if (saved) {
-        const parsed = parseInt(saved, 10)
-        if (!isNaN(parsed)) return parsed
-      }
-    } catch (err) {
-      console.debug('Could not load selected GW from localStorage:', err)
-    }
-    return null
-  })
+  const [selectedGw, setSelectedGw] = useState<number | null>(null)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['squad', 'fixtures']))
+  const [generating, setGenerating] = useState(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Persist trajectory to localStorage whenever it changes
+  // Set selected GW when trajectory changes
   useEffect(() => {
-    if (trajectory) {
-      try {
-        localStorage.setItem(WILDCARD_TRAJECTORY_STORAGE_KEY, JSON.stringify(trajectory))
-      } catch (err) {
-        console.debug('Could not save trajectory to localStorage:', err)
+    if (trajectory && trajectory.gameweek_predictions) {
+      const gws = Object.keys(trajectory.gameweek_predictions).map(Number).sort((a, b) => a - b)
+      if (gws.length > 0 && selectedGw === null) {
+        setSelectedGw(gws[0])
       }
     }
-  }, [trajectory])
+  }, [trajectory, selectedGw])
 
-  // Persist selected GW to localStorage whenever it changes
+  // Check for running tasks on mount
   useEffect(() => {
-    if (selectedGw !== null) {
+    const checkRunningTasks = async () => {
       try {
-        localStorage.setItem(WILDCARD_SELECTED_GW_KEY, selectedGw.toString())
+        const tasksResponse = await fetchTasks(false)
+        const runningWildcardTask = tasksResponse.tasks.find(
+          (task) => task.type === 'wildcard' && (task.status === 'running' || task.status === 'pending')
+        )
+        
+        if (runningWildcardTask) {
+          setCurrentTaskId(runningWildcardTask.id)
+          setGenerating(true)
+          resumePolling(runningWildcardTask.id)
+        }
       } catch (err) {
-        console.debug('Could not save selected GW to localStorage:', err)
+        console.debug('Could not check for running tasks:', err)
       }
     }
-  }, [selectedGw])
+    checkRunningTasks()
+    
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [])
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => {
@@ -84,7 +70,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     })
   }
 
-  // Resume polling function (shared between initial load and fetchTrajectory)
+  // Resume polling function
   const resumePolling = (taskId: string) => {
     // Clear any existing polling
     if (pollingIntervalRef.current) {
@@ -93,8 +79,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     }
 
     setCurrentTaskId(taskId)
-    setLoading(true)
-    // Don't clear trajectory - keep previous one visible while loading
+    setGenerating(true)
 
     // Start polling for task completion
     const pollForResult = async () => {
@@ -102,52 +87,21 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         const task = await fetchTask(taskId)
         
         if (task.status === 'completed') {
-          // Task completed - fetch result
+          // Task completed - reload trajectory via onGenerate callback
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current)
             pollingIntervalRef.current = null
           }
           
+          // Call onGenerate to reload from database
           try {
-            // Try cache first (set immediately when task completes)
-            let data = null
-            try {
-              data = await getWildcardTrajectoryResult(taskId)
-            } catch (cacheErr: any) {
-              // Cache might not be available, try database
-              console.debug('Cache lookup failed, trying database:', cacheErr)
-            }
-            
-            // If cache didn't work, try database
-            if (!data || !data.squad || data.squad.length === 0) {
-              try {
-                data = await getLatestWildcardTrajectory()
-              } catch (dbErr: any) {
-                // Database might not be ready yet, that's okay
-                console.debug('Database lookup failed:', dbErr)
-              }
-            }
-            
-            // Validate data has squad
-            if (data && data.squad && data.squad.length > 0) {
-              // Replace trajectory with newly generated one
-              setTrajectory(data)
-              // Set first gameweek as selected
-              const gws = Object.keys(data.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
-              if (gws.length > 0) setSelectedGw(gws[0])
-              setLoading(false)
-              setCurrentTaskId(null)
-              setError(null) // Clear any previous errors
-            } else {
-              // No valid data found - task completed but data not available
-              // Don't clear existing trajectory - keep previous one visible
-              setError('Trajectory calculation completed but result is not available. Previous squad is still shown. Please try generating again.')
-              setLoading(false)
-              setCurrentTaskId(null)
-            }
+            await onGenerate(budget, horizon)
+            setGenerating(false)
+            setCurrentTaskId(null)
+            setError(null)
           } catch (err: any) {
             setError(err.message || 'Failed to fetch trajectory result')
-            setLoading(false)
+            setGenerating(false)
             setCurrentTaskId(null)
           }
         } else if (task.status === 'failed') {
@@ -157,9 +111,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
             pollingIntervalRef.current = null
           }
           setError(task.error || 'Failed to generate trajectory')
-          setLoading(false)
+          setGenerating(false)
           setCurrentTaskId(null)
-          // Don't clear trajectory on failure - keep previous one visible
         }
         // If still running or pending, continue polling
       } catch (err) {
@@ -173,198 +126,27 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     pollingIntervalRef.current = setInterval(pollForResult, 2000)
   }
 
-  // Convert SuggestedSquad to WildcardTrajectory format for display
-  const convertSuggestedSquadToTrajectory = (squad: SuggestedSquad): WildcardTrajectory => {
-    // Combine starting_xi and bench into full squad
-    const allPlayers = [...squad.starting_xi, ...squad.bench]
-    
-    // Convert Player[] to TrajectoryPlayer[]
-    const trajectoryPlayers: TrajectoryPlayer[] = allPlayers.map((p: Player) => {
-      // Map position string to position_id if not provided
-      let positionId = p.position_id
-      if (!positionId) {
-        const posMap: Record<string, number> = { 'GK': 1, 'DEF': 2, 'MID': 3, 'FWD': 4 }
-        positionId = posMap[p.position] || 3
-      }
-      
-      return {
-        id: p.id,
-        name: p.name,
-        team: p.team || '???',
-        team_id: (p as any).team_id || 0, // team_id might not be in Player type
-        position: p.position,
-        position_id: positionId,
-        price: p.price,
-        form: p.form || 0,
-        total_points: p.total_points || 0,
-        ownership: p.ownership || 0,
-        predicted_points: p.predicted || p.predicted_points || 0,
-        avg_fdr: (p as any).avg_fdr || (p as any).difficulty || 3.0,
-        fixture_swing: 0,
-        gameweek_predictions: {}
-      }
-    })
-    
-    // Find captain and vice captain
-    const captain = trajectoryPlayers.find(p => p.id === squad.captain.id) || trajectoryPlayers[0]
-    const viceCaptain = trajectoryPlayers.find(p => p.id === squad.vice_captain.id) || trajectoryPlayers[1] || trajectoryPlayers[0]
-    
-    // Create a basic gameweek breakdown for the current gameweek
-    const gameweekBreakdown: GameweekBreakdown = {
-      gameweek: squad.gameweek,
-      formation: squad.formation,
-      predicted_points: squad.predicted_points,
-      starting_xi: squad.starting_xi.map((p: Player) => ({
-        id: p.id,
-        name: p.name,
-        team: p.team || '???',
-        position: p.position,
-        predicted: p.predicted || p.predicted_points || 0,
-        opponent: p.opponent || '???',
-        fdr: (p as any).fdr || (p as any).difficulty || 3,
-        is_home: p.is_home || false
-      }))
-    }
-    
-    return {
-      squad: trajectoryPlayers,
-      starting_xi: trajectoryPlayers.slice(0, 11),
-      bench: trajectoryPlayers.slice(11),
-      captain,
-      vice_captain: viceCaptain,
-      formation: squad.formation,
-      gameweek_predictions: {
-        [squad.gameweek]: gameweekBreakdown
-      },
-      total_predicted_points: squad.predicted_points,
-      avg_weekly_points: squad.predicted_points,
-      total_cost: squad.total_cost,
-      remaining_budget: squad.remaining_budget,
-      horizon: 1,
-      fixture_blocks: [],
-      rationale: 'Default suggested squad. Generate a wildcard trajectory for optimized 8-gameweek planning.'
-    }
-  }
-
-  // Fetch suggested squad as fallback
-  const fetchDefaultSquad = async (): Promise<WildcardTrajectory | null> => {
-    try {
-      const response = await apiRequest<{ squad: SuggestedSquad }>('/api/suggested-squad?budget=100&method=combined')
-      if (response.squad) {
-        return convertSuggestedSquadToTrajectory(response.squad)
-      }
-    } catch (err) {
-      console.debug('Could not fetch default suggested squad:', err)
-    }
-    return null
-  }
-
-  // Load trajectory from database when tab is activated (prioritize DB over localStorage)
-  const loadTrajectoryFromDatabase = async (): Promise<boolean> => {
-    try {
-      const saved = await getLatestWildcardTrajectory()
-      if (saved && saved.squad && saved.squad.length > 0) {
-        setTrajectory(saved)
-        // Set first gameweek as selected if not already set
-        const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
-        if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
-        return true
-      }
-    } catch (err) {
-      // No saved trajectory in database, that's okay
-      console.debug('No saved trajectory in database:', err)
-    }
-    return false
-  }
-
-  // Load saved trajectory and check for running tasks on mount
-  useEffect(() => {
-    const loadSavedTrajectoryAndCheckTasks = async () => {
-      try {
-        // PRIORITY 1: Always try database first when tab is activated
-        let hasTrajectory = await loadTrajectoryFromDatabase()
-        
-        // PRIORITY 2: If no database trajectory, check localStorage (loaded in useState initializer)
-        if (!hasTrajectory) {
-          hasTrajectory = trajectory !== null && trajectory.squad && trajectory.squad.length > 0
-          if (hasTrajectory) {
-            // We have localStorage trajectory, but still try to refresh from DB in background
-            // (don't block UI, but update if DB has newer data)
-            loadTrajectoryFromDatabase().catch(() => {})
-          }
-        }
-        
-        // PRIORITY 3: If still no trajectory, fetch default suggested squad
-        if (!hasTrajectory) {
-          const defaultSquad = await fetchDefaultSquad()
-          if (defaultSquad) {
-            setTrajectory(defaultSquad)
-            const gws = Object.keys(defaultSquad.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
-            if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
-            hasTrajectory = true
-          }
-        }
-        
-        // If we have trajectory now, set loading to false
-        if (hasTrajectory) {
-          setLoading(false)
-        }
-        
-        // Then check for running/pending wildcard tasks
-        const tasksResponse = await fetchTasks(false)
-        const runningWildcardTask = tasksResponse.tasks.find(
-          (task) => task.type === 'wildcard' && (task.status === 'running' || task.status === 'pending')
-        )
-        
-        if (runningWildcardTask) {
-          // Found a running task - resume polling (keeps previous trajectory visible)
-          resumePolling(runningWildcardTask.id)
-        } else if (!hasTrajectory) {
-          // No running task and no trajectory - we're done
-          setLoading(false)
-        }
-      } catch (err) {
-        console.debug('Could not load saved wildcard trajectory or check tasks:', err)
-        setLoading(false)
-      }
-    }
-    loadSavedTrajectoryAndCheckTasks()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run on mount - trajectory and selectedGw are checked inside
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-      }
-    }
-  }, [])
-
   const fetchTrajectory = async () => {
     // Don't allow multiple requests
-    if (loading) {
+    if (generating || propLoading) {
       return
     }
     
-    // Keep previous trajectory visible - don't clear it
-    // Only update it when new data is ready
-    setLoading(true)
     setError(null)
+    setGenerating(true)
     
     try {
       // Submit task and get task ID
       const taskResponse = await submitWildcardTrajectory({ budget, horizon })
       const taskId = taskResponse.task_id
       
-      // Start polling - this will update trajectory when ready
+      // Start polling
       resumePolling(taskId)
       
     } catch (err: any) {
       setError(err.message || 'Failed to submit trajectory calculation')
-      setLoading(false)
+      setGenerating(false)
       setCurrentTaskId(null)
-      // Don't clear trajectory on error - keep previous one visible
     }
   }
 
@@ -749,6 +531,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     )
   }
 
+  const isLoading = propLoading || generating
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -791,19 +575,19 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
           </div>
           <button
             onClick={fetchTrajectory}
-            disabled={loading}
+            disabled={isLoading}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-              loading
+              isLoading
                 ? 'bg-slate-600/50 text-slate-400 cursor-not-allowed opacity-60'
                 : 'bg-violet-600 hover:bg-violet-500 text-white'
             }`}
           >
-            {loading ? (
+            {isLoading ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
               <Sparkles className="w-4 h-4" />
             )}
-            <span>{loading ? 'Optimizing...' : 'Generate Trajectory'}</span>
+            <span>{isLoading ? 'Optimizing...' : 'Generate Trajectory'}</span>
           </button>
         </div>
 
@@ -815,7 +599,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       </div>
 
       {/* Loading overlay when generating new trajectory */}
-      {loading && trajectory && (
+      {generating && trajectory && (
         <div className="bg-violet-600/10 border border-violet-500/30 rounded-xl p-4 flex items-center gap-3">
           <RefreshCw className="w-5 h-5 text-violet-400 animate-spin" />
           <div>
@@ -934,10 +718,19 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       )}
 
       {/* Empty State */}
-      {!trajectory && !loading && (
+      {!trajectory && !isLoading && (
         <div className="bg-slate-800/30 rounded-xl p-12 border border-slate-700/50 text-center">
           <Sparkles className="w-12 h-12 text-slate-600 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-white">Plan Your Wildcard</h3>
+          <p className="text-slate-400 text-sm mt-2">Trajectory is calculated daily at midnight. Generate one now or wait for the next calculation.</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {isLoading && !trajectory && (
+        <div className="bg-slate-800/30 rounded-xl p-12 border border-slate-700/50 text-center">
+          <RefreshCw className="w-12 h-12 text-violet-400 animate-spin mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-white">Loading trajectory...</h3>
         </div>
       )}
     </div>
@@ -945,4 +738,3 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
 }
 
 export default WildcardTab
-

@@ -339,6 +339,25 @@ async def _save_daily_snapshot_async():
         except Exception as tc_error:
             logger.error(f"Error starting Triple Captain calculation in daily snapshot job: {tc_error}")
             # Don't fail the entire job if triple captain calculation fails
+        
+        # Calculate Wildcard trajectory (runs in background thread)
+        try:
+            import threading
+            import uuid
+            logger.info(f"Starting Wildcard trajectory calculation as part of daily snapshot job (in background thread)")
+            # Generate unique task ID
+            task_id = f"wildcard_daily_{uuid.uuid4().hex[:12]}"
+            # Run in a separate thread to avoid blocking
+            thread = threading.Thread(
+                target=chips_router._calculate_wildcard_background,
+                args=(task_id, 100.0, 8, None),  # budget=100, horizon=8, current_squad=None
+                daemon=True
+            )
+            thread.start()
+            logger.info(f"Wildcard trajectory calculation started in background thread")
+        except Exception as wc_error:
+            logger.error(f"Error starting Wildcard trajectory calculation in daily snapshot job: {wc_error}")
+            # Don't fail the entire job if wildcard calculation fails
     except Exception as e:
         logger.error(f"Error in _save_daily_snapshot_async: {e}")
 

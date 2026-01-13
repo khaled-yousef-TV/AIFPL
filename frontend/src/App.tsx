@@ -69,8 +69,8 @@ function App() {
   const [transferLoading, setTransferLoading] = useState(false)
 
   // Wildcard state
-  const [wildcardLoading, setWildcardLoading] = useState(false)
-  const [wildcardPlan, setWildcardPlan] = useState<any>(null)
+  const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(null)
+  const [loadingWildcard, setLoadingWildcard] = useState(false)
   
   // Expanded groups for transfer suggestions
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
@@ -1149,6 +1149,40 @@ function App() {
     }
   }
 
+  const loadWildcardTrajectory = async () => {
+    // Don't reload if we already have data and we're not forcing a refresh
+    if (wildcardTrajectory && !loadingWildcard) return
+    
+    setLoadingWildcard(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/chips/wildcard-trajectory/latest`)
+      if (!response.ok) {
+        if (response.status === 404) {
+          // No trajectory calculated yet
+          setWildcardTrajectory(null)
+          return
+        }
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const data = await response.json()
+      if (data && data.squad && data.squad.length > 0) {
+        setWildcardTrajectory(data)
+      } else {
+        setWildcardTrajectory(null)
+      }
+    } catch (err) {
+      console.error('Failed to load wildcard trajectory:', err)
+      setWildcardTrajectory(null)
+    } finally {
+      setLoadingWildcard(false)
+    }
+  }
+
+  const handleWildcardGenerate = async (budget: number, horizon: number) => {
+    // After generation completes, reload from database
+    await loadWildcardTrajectory()
+  }
+
   const ensureTripleCaptainLoaded = async () => {
     // Cancel any existing load
     if (tcAbortControllerRef.current) {
@@ -1226,6 +1260,7 @@ function App() {
     // Lazy-load heavy tabs only when the user opens them
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
+    if (activeTab === 'wildcard') loadWildcardTrajectory()
     if (activeTab === 'triple-captain') {
       ensureTripleCaptainLoaded()
     } else {
@@ -2267,6 +2302,9 @@ function App() {
         {activeTab === 'wildcard' && (
           <WildcardTab
             gameweek={gameweek?.id ?? null}
+            trajectory={wildcardTrajectory}
+            loading={loadingWildcard}
+            onGenerate={handleWildcardGenerate}
           />
         )}
 
