@@ -31,17 +31,44 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
     fpl_client = deps.fpl_client
     db_manager = deps.db_manager
     
-    # If no specific gameweek requested, determine the latest gameweek with team changes
+    # If no specific gameweek requested, get the latest team state
     if gameweek is None:
-        gameweek = _determine_latest_gameweek(fpl_client, team_id)
-    
-    # Try to fetch picks from FPL API - will prioritize latest gameweek
-    picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
-    
-    if not picks_data or not picks_data.get("picks"):
-        raise ValueError(f"No team data found for team {team_id}")
-    
-    picks = picks_data["picks"]
+        next_gw = fpl_client.get_next_gameweek()
+        current_gw = fpl_client.get_current_gameweek()
+        
+        # Step 1: Try to get next gameweek picks (most recent team state)
+        if next_gw:
+            picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, next_gw.id)
+            if picks_data and picks_data.get("picks"):
+                # Next GW picks available - use them directly
+                logger.info(f"Using next gameweek {next_gw.id} picks for team {team_id}")
+                picks = picks_data["picks"]
+            else:
+                # Next GW picks not available - reconstruct from transfers
+                logger.info(f"Next gameweek {next_gw.id} picks not available, reconstructing from transfers...")
+                reconstructed_team = _try_reconstruct_team_from_transfers(fpl_client, team_id)
+                if reconstructed_team:
+                    return reconstructed_team
+                
+                # Fallback: use current/latest available gameweek
+                gameweek = current_gw.id if current_gw else None
+                picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
+                if not picks_data or not picks_data.get("picks"):
+                    raise ValueError(f"No team data found for team {team_id}")
+                picks = picks_data["picks"]
+        else:
+            # No next gameweek - use current
+            gameweek = current_gw.id if current_gw else None
+            picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
+            if not picks_data or not picks_data.get("picks"):
+                raise ValueError(f"No team data found for team {team_id}")
+            picks = picks_data["picks"]
+    else:
+        # Specific gameweek requested - fetch it
+        picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
+        if not picks_data or not picks_data.get("picks"):
+            raise ValueError(f"No team data found for team {team_id}")
+        picks = picks_data["picks"]
     
     # Get player and team data
     players = fpl_client.get_players()
@@ -195,6 +222,138 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
     # If all failed, return None with the requested gameweek (or next/current if None)
     fallback_gw = gameweek if gameweek else (next_gw.id if next_gw else (current_gw.id if current_gw else None))
     return None, fallback_gw
+
+
+def _try_reconstruct_team_from_transfers(fpl_client, team_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Try to reconstruct the current team by applying transfers to the last known picks.
+    
+    This is useful when the next gameweek picks aren't available yet but transfers have been made.
+    
+    Returns:
+        Dict with squad, bank, team_name, gameweek if successful, None otherwise
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Accept': 'application/json',
+    }
+    
+    current_gw = fpl_client.get_current_gameweek()
+    next_gw = fpl_client.get_next_gameweek()
+    
+    if not current_gw or not next_gw:
+        return None
+    
+    # Get the last available gameweek picks (usually current GW)
+    last_picks_data, last_gw = _fetch_team_picks(fpl_client, team_id, current_gw.id)
+    if not last_picks_data or not last_picks_data.get("picks"):
+        return None
+    
+    # Get transfer history
+    try:
+        transfers_url = f"{fpl_client.BASE_URL}/entry/{team_id}/transfers/"
+        transfers_response = requests.get(transfers_url, headers=headers, timeout=10)
+        
+        if transfers_response.status_code != 200:
+            return None
+        
+        transfers = transfers_response.json()
+        if not transfers or not isinstance(transfers, list):
+            return None
+        
+        # Filter transfers made for next gameweek (or after last known gameweek)
+        relevant_transfers = [
+            t for t in transfers
+            if t.get("event") and t.get("event") > last_gw
+        ]
+        
+        if not relevant_transfers:
+            # No transfers for future gameweeks, return None to use normal flow
+            return None
+        
+        logger.info(f"Found {len(relevant_transfers)} transfers after GW{last_gw}, reconstructing team...")
+        
+        # Get player data
+        players = fpl_client.get_players()
+        teams = fpl_client.get_teams()
+        players_by_id = {p.id: p for p in players}
+        teams_by_id = {t.id: t.short_name for t in teams}
+        
+        # Start with last known picks
+        current_picks = {pick.get("element"): pick for pick in last_picks_data["picks"]}
+        
+        # Apply transfers (most recent first, so we apply them in reverse)
+        for transfer in reversed(relevant_transfers):
+            element_out = transfer.get("element_out")
+            element_in = transfer.get("element_in")
+            
+            if element_out and element_out in current_picks:
+                # Remove the player being transferred out
+                del current_picks[element_out]
+            
+            if element_in:
+                # Add the player being transferred in
+                # Use the selling price from the transfer if available
+                selling_price = transfer.get("element_in_cost", 0)
+                if selling_price == 0:
+                    # Fallback to current player price
+                    player = players_by_id.get(element_in)
+                    if player:
+                        selling_price = player.now_cost
+                
+                current_picks[element_in] = {
+                    "element": element_in,
+                    "selling_price": selling_price,
+                    "purchase_price": selling_price,
+                    "position": len(current_picks) + 1,  # Will be corrected below
+                }
+        
+        # Convert to squad format
+        position_map = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+        squad = []
+        
+        for pick in current_picks.values():
+            player_id = pick.get("element")
+            player = players_by_id.get(player_id)
+            if not player:
+                continue
+            
+            selling_price = pick.get("selling_price", 0)
+            price = selling_price / 10.0 if selling_price > 0 else player.price
+            
+            squad.append({
+                "id": player_id,
+                "name": player.web_name,
+                "position": position_map.get(player.element_type, "MID"),
+                "price": price,
+                "team": teams_by_id.get(player.team, "UNK"),
+            })
+        
+        if len(squad) != 15:
+            logger.warning(f"Reconstructed squad has {len(squad)} players, expected 15. Using normal flow instead.")
+            return None
+        
+        # Get bank and team name
+        bank, team_name = _fetch_entry_data(fpl_client, team_id)
+        
+        # Adjust bank based on transfers
+        for transfer in relevant_transfers:
+            element_out_cost = transfer.get("element_out_cost", 0) / 10.0
+            element_in_cost = transfer.get("element_in_cost", 0) / 10.0
+            bank += element_out_cost - element_in_cost
+        
+        logger.info(f"Successfully reconstructed team {team_id} with {len(squad)} players")
+        
+        return {
+            "squad": squad,
+            "bank": bank,
+            "team_name": team_name,
+            "gameweek": next_gw.id,
+        }
+        
+    except Exception as e:
+        logger.debug(f"Could not reconstruct team from transfers: {e}")
+        return None
 
 
 def _determine_latest_gameweek(fpl_client, team_id: int) -> Optional[int]:
