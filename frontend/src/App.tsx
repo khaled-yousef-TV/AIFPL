@@ -450,17 +450,16 @@ function App() {
     }
   }, [tasks.length, pollTasksFromBackend]) // Trigger when task count changes
 
-  // Poll for task status updates - only when there are active tasks
+  // Poll for task status updates - always poll to detect new tasks
   useEffect(() => {
     const hasActiveTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
     
-    // Don't poll if no active tasks (saves resources)
-    if (!hasActiveTasks) {
-      return
-    }
+    // Use shorter interval (3s) when there are active tasks, longer (10s) when idle
+    // We still poll when idle to detect new tasks that might be created in the backend
+    const pollInterval = hasActiveTasks ? 3000 : 10000
 
-    // Poll every 3 seconds when there are active tasks
-    const pollInterval = 3000
+    // Poll immediately, then set up interval
+    pollTasksFromBackend()
     const pollIntervalId = setInterval(pollTasksFromBackend, pollInterval)
 
     return () => {
@@ -644,6 +643,16 @@ function App() {
     
     // Mark that we need immediate poll (will be handled by polling effect)
     needsImmediatePollRef.current = true
+    
+    // Poll immediately and then again after a short delay to catch status updates
+    // (backend might update status from 'pending' to 'running' asynchronously)
+    pollTasksFromBackend() // Immediate poll
+    setTimeout(() => {
+      pollTasksFromBackend() // Poll again after 500ms
+    }, 500)
+    setTimeout(() => {
+      pollTasksFromBackend() // Poll again after 2s to be sure
+    }, 2000)
     
     // Show modal if requested
     if (showModal) {
