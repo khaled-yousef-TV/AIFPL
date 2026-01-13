@@ -130,13 +130,14 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
             
             // Validate data has squad
             if (data && data.squad && data.squad.length > 0) {
-              // Only update trajectory when new data is ready
+              // Replace trajectory with newly generated one
               setTrajectory(data)
               // Set first gameweek as selected
               const gws = Object.keys(data.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
               if (gws.length > 0) setSelectedGw(gws[0])
               setLoading(false)
               setCurrentTaskId(null)
+              setError(null) // Clear any previous errors
             } else {
               // No valid data found - task completed but data not available
               // Don't clear existing trajectory - keep previous one visible
@@ -258,36 +259,42 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     return null
   }
 
+  // Load trajectory from database when tab is activated (prioritize DB over localStorage)
+  const loadTrajectoryFromDatabase = async (): Promise<boolean> => {
+    try {
+      const saved = await getLatestWildcardTrajectory()
+      if (saved && saved.squad && saved.squad.length > 0) {
+        setTrajectory(saved)
+        // Set first gameweek as selected if not already set
+        const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
+        if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
+        return true
+      }
+    } catch (err) {
+      // No saved trajectory in database, that's okay
+      console.debug('No saved trajectory in database:', err)
+    }
+    return false
+  }
+
   // Load saved trajectory and check for running tasks on mount
   useEffect(() => {
     const loadSavedTrajectoryAndCheckTasks = async () => {
       try {
-        // Check if we already have trajectory from localStorage (loaded in useState initializer)
-        let hasTrajectory = trajectory !== null && trajectory.squad && trajectory.squad.length > 0
+        // PRIORITY 1: Always try database first when tab is activated
+        let hasTrajectory = await loadTrajectoryFromDatabase()
         
-        // If we have trajectory from localStorage, set loading to false immediately
-        if (hasTrajectory) {
-          setLoading(false)
-        }
-        
-        // If no trajectory from localStorage, try to load from database
+        // PRIORITY 2: If no database trajectory, check localStorage (loaded in useState initializer)
         if (!hasTrajectory) {
-          try {
-            const saved = await getLatestWildcardTrajectory()
-            if (saved && saved.squad && saved.squad.length > 0) {
-              setTrajectory(saved)
-              // Set first gameweek as selected if not already set
-              const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
-              if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
-              hasTrajectory = true
-            }
-          } catch (err) {
-            // No saved trajectory, that's okay
-            console.debug('No saved trajectory found:', err)
+          hasTrajectory = trajectory !== null && trajectory.squad && trajectory.squad.length > 0
+          if (hasTrajectory) {
+            // We have localStorage trajectory, but still try to refresh from DB in background
+            // (don't block UI, but update if DB has newer data)
+            loadTrajectoryFromDatabase().catch(() => {})
           }
         }
         
-        // If still no trajectory, fetch default suggested squad
+        // PRIORITY 3: If still no trajectory, fetch default suggested squad
         if (!hasTrajectory) {
           const defaultSquad = await fetchDefaultSquad()
           if (defaultSquad) {
