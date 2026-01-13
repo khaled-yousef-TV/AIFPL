@@ -44,11 +44,20 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
                 logger.info(f"Using next gameweek {next_gw.id} picks for team {team_id}")
                 picks = picks_data["picks"]
             else:
-                # Next GW picks not available - reconstruct from transfers
-                logger.info(f"Next gameweek {next_gw.id} picks not available, reconstructing from transfers...")
+                # Next GW picks not available - try to reconstruct from transfers
+                logger.info(f"Next gameweek {next_gw.id} picks not available yet. Attempting to reconstruct from transfers...")
                 reconstructed_team = _try_reconstruct_team_from_transfers(fpl_client, team_id)
                 if reconstructed_team:
+                    logger.info(f"Successfully reconstructed team from transfers for GW{next_gw.id}")
                     return reconstructed_team
+                
+                # Reconstruction failed - likely because transfers are pending and not in API yet
+                logger.warning(
+                    f"Could not reconstruct team for GW{next_gw.id}. "
+                    f"This usually means transfers are pending and not yet confirmed in the FPL API. "
+                    f"GW{next_gw.id} picks will become available closer to the deadline. "
+                    f"Using latest available gameweek (GW{current_gw.id if current_gw else '?'}) for now."
+                )
                 
                 # Fallback: use current/latest available gameweek
                 gameweek = current_gw.id if current_gw else None
@@ -230,6 +239,10 @@ def _try_reconstruct_team_from_transfers(fpl_client, team_id: int) -> Optional[D
     
     This is useful when the next gameweek picks aren't available yet but transfers have been made.
     
+    Note: The FPL public API only shows confirmed transfers, not pending ones. If a transfer
+    was made for the next gameweek but hasn't been confirmed yet, it won't appear in the API.
+    In that case, we must wait for the next gameweek picks to become available.
+    
     Returns:
         Dict with squad, bank, team_name, gameweek if successful, None otherwise
     """
@@ -243,6 +256,20 @@ def _try_reconstruct_team_from_transfers(fpl_client, team_id: int) -> Optional[D
     
     if not current_gw or not next_gw:
         return None
+    
+    # IMPORTANT: First, double-check if next GW picks are available now
+    # (They might have become available since the initial check)
+    next_gw_picks_url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{next_gw.id}/picks/"
+    try:
+        next_response = requests.get(next_gw_picks_url, headers=headers, timeout=10)
+        if next_response.status_code == 200:
+            next_data = next_response.json()
+            if next_data.get("picks"):
+                logger.info(f"Next gameweek {next_gw.id} picks are now available!")
+                # Return None to let the main function handle it with proper processing
+                return None
+    except Exception:
+        pass
     
     # Get the last available gameweek picks (usually current GW)
     last_picks_data, last_gw = _fetch_team_picks(fpl_client, team_id, current_gw.id)
@@ -268,7 +295,11 @@ def _try_reconstruct_team_from_transfers(fpl_client, team_id: int) -> Optional[D
         ]
         
         if not relevant_transfers:
-            # No transfers for future gameweeks, return None to use normal flow
+            # No transfers for future gameweeks in API
+            # This could mean:
+            # 1. No transfers were made, OR
+            # 2. Transfers are pending and not yet in the API
+            logger.info(f"No transfers found for GW{next_gw.id} in API. Transfers may be pending and not yet confirmed.")
             return None
         
         logger.info(f"Found {len(relevant_transfers)} transfers after GW{last_gw}, reconstructing team...")
