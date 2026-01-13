@@ -1241,6 +1241,8 @@ function App() {
 
   const handleWildcardGenerate = async (budget: number, horizon: number) => {
     // After generation completes, reload from database
+    // Add a small delay to ensure the trajectory is saved to DB
+    await new Promise(resolve => setTimeout(resolve, 500))
     await loadWildcardTrajectory()
   }
 
