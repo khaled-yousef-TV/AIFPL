@@ -31,7 +31,10 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
     fpl_client = deps.fpl_client
     db_manager = deps.db_manager
     
-    # If no specific gameweek requested, fetch the latest available (prioritize next > current > past)
+    # If no specific gameweek requested, determine the latest gameweek with team changes
+    if gameweek is None:
+        gameweek = _determine_latest_gameweek(fpl_client, team_id)
+    
     # Try to fetch picks from FPL API - will prioritize latest gameweek
     picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
     
@@ -166,6 +169,65 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
     # If all failed, return None with the requested gameweek (or next/current if None)
     fallback_gw = gameweek if gameweek else (next_gw.id if next_gw else (current_gw.id if current_gw else None))
     return None, fallback_gw
+
+
+def _determine_latest_gameweek(fpl_client, team_id: int) -> Optional[int]:
+    """
+    Determine the latest gameweek that has team data after transfers.
+    
+    Strategy:
+    1. Check transfer history to find the latest gameweek with transfers
+    2. If no transfers found, use next/current gameweek
+    3. This ensures we get the most recent team state
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Accept': 'application/json',
+    }
+    
+    # First, try to get transfer history to find the latest gameweek with changes
+    try:
+        url = f"{fpl_client.BASE_URL}/entry/{team_id}/transfers/"
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            transfers = response.json()
+            if transfers and isinstance(transfers, list) and len(transfers) > 0:
+                # Get the most recent transfer's gameweek
+                # Transfers are typically ordered by most recent first
+                latest_transfer = transfers[0]
+                transfer_gw = latest_transfer.get("event")
+                if transfer_gw:
+                    logger.info(f"Found latest transfer in GW{transfer_gw} for team {team_id}")
+                    # Use the gameweek after the transfer (or current if transfer was this GW)
+                    current_gw = fpl_client.get_current_gameweek()
+                    next_gw = fpl_client.get_next_gameweek()
+                    
+                    # If transfer was in current GW, use next GW (if available) or current
+                    if current_gw and transfer_gw == current_gw.id:
+                        return next_gw.id if next_gw else current_gw.id
+                    # If transfer was in a past GW, use next GW (most recent team state)
+                    elif next_gw:
+                        return next_gw.id
+                    elif current_gw:
+                        return current_gw.id
+                    else:
+                        return transfer_gw
+    except Exception as e:
+        logger.debug(f"Could not fetch transfer history for team {team_id}: {e}")
+    
+    # Fallback: use next/current gameweek
+    next_gw = fpl_client.get_next_gameweek()
+    current_gw = fpl_client.get_current_gameweek()
+    
+    if next_gw:
+        logger.info(f"Using next gameweek {next_gw.id} for team {team_id}")
+        return next_gw.id
+    elif current_gw:
+        logger.info(f"Using current gameweek {current_gw.id} for team {team_id}")
+        return current_gw.id
+    
+    return None
 
 
 def _fetch_entry_data(fpl_client, team_id: int) -> tuple:
