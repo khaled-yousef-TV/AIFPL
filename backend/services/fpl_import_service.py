@@ -36,30 +36,14 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
         next_gw = fpl_client.get_next_gameweek()
         current_gw = fpl_client.get_current_gameweek()
         
-        # Step 1: Try to get next gameweek picks (most recent team state)
+        # Step 1: Get next gameweek picks (most recent team state)
+        # Keep trying until GW22 picks are available - they contain the latest transfers
         if next_gw:
-            picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, next_gw.id)
+            picks_data, used_gameweek = _fetch_team_picks_with_retry(fpl_client, team_id, next_gw.id)
             if picks_data and picks_data.get("picks"):
-                # Next GW picks available - use them directly
-                logger.info(f"Using next gameweek {next_gw.id} picks for team {team_id}")
                 picks = picks_data["picks"]
             else:
-                # Next GW picks not available - try to reconstruct from transfers
-                logger.info(f"Next gameweek {next_gw.id} picks not available yet. Attempting to reconstruct from transfers...")
-                reconstructed_team = _try_reconstruct_team_from_transfers(fpl_client, team_id)
-                if reconstructed_team:
-                    logger.info(f"Successfully reconstructed team from transfers for GW{next_gw.id}")
-                    return reconstructed_team
-                
-                # Reconstruction failed - likely because transfers are pending and not in API yet
-                logger.warning(
-                    f"Could not reconstruct team for GW{next_gw.id}. "
-                    f"This usually means transfers are pending and not yet confirmed in the FPL API. "
-                    f"GW{next_gw.id} picks will become available closer to the deadline. "
-                    f"Using latest available gameweek (GW{current_gw.id if current_gw else '?'}) for now."
-                )
-                
-                # Fallback: use current/latest available gameweek
+                # Fallback to current gameweek if next GW truly unavailable
                 gameweek = current_gw.id if current_gw else None
                 picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
                 if not picks_data or not picks_data.get("picks"):
@@ -131,6 +115,37 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
         "team_name": team_name,
         "gameweek": used_gameweek,
     }
+
+
+def _fetch_team_picks_with_retry(fpl_client, team_id: int, gameweek: int, max_retries: int = 5) -> tuple:
+    """
+    Fetch team picks with aggressive retries until available.
+    Used for next gameweek picks that may not be available immediately.
+    """
+    import time
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Accept': 'application/json',
+    }
+    
+    for attempt in range(max_retries):
+        try:
+            url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{gameweek}/picks/"
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("picks"):
+                    return data, gameweek
+        except Exception:
+            pass
+        
+        # Wait before retry (exponential backoff: 0.5s, 1s, 2s, 4s)
+        if attempt < max_retries - 1:
+            time.sleep(0.5 * (2 ** attempt))
+    
+    return None, gameweek
 
 
 def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) -> tuple:
