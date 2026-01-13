@@ -69,7 +69,21 @@ function App() {
   const [transferLoading, setTransferLoading] = useState(false)
 
   // Wildcard state (for WildcardTab - trajectory optimization)
-  const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(null)
+  // Initialize from localStorage for instant display (fallback until DB loads)
+  const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(() => {
+    try {
+      const stored = localStorage.getItem('wildcard_trajectory')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed && parsed.squad && parsed.squad.length > 0) {
+          return parsed
+        }
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+    return null
+  })
   const [loadingWildcard, setLoadingWildcard] = useState(false)
   
   // Wildcard plan state (for TransfersTab - 4+ transfer suggestions)
@@ -1212,6 +1226,11 @@ function App() {
             // Ignore localStorage errors
           }
         }
+      } else if (response.status === 404) {
+        // No trajectory found - same handling as Triple Captain
+        // Keep existing state (from localStorage if available) or null
+        // Don't set to null to avoid showing empty state
+        console.log('No wildcard trajectory found in database yet')
       }
     } catch (err) {
       console.error('Failed to load wildcard trajectory:', err)
