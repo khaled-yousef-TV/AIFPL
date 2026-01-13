@@ -355,9 +355,27 @@ class TripleCaptainOptimizer:
             xa_values = []
             
             for game in recent_history:
-                xg = game.get("expected_goals", 0.0)
-                xa = game.get("expected_assists", 0.0)
+                # Safely convert to float, handling None, strings, and invalid values
+                xg_raw = game.get("expected_goals", 0.0)
+                xa_raw = game.get("expected_assists", 0.0)
                 minutes = game.get("minutes", 0)
+                
+                # Convert to float, defaulting to 0.0 if conversion fails
+                try:
+                    xg = float(xg_raw) if xg_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    xg = 0.0
+                
+                try:
+                    xa = float(xa_raw) if xa_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    xa = 0.0
+                
+                # Convert minutes to int for comparison
+                try:
+                    minutes = int(minutes) if minutes is not None else 0
+                except (ValueError, TypeError):
+                    minutes = 0
                 
                 # Only include games where player actually played (minutes > 0)
                 if minutes > 0:
