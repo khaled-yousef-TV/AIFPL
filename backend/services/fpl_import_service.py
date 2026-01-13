@@ -98,12 +98,10 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
     """
     Fetch team picks from FPL API with fallback logic.
     
-    Prioritizes latest gameweek when gameweek is None (for refreshing):
-    - Next gameweek (most recent/latest team)
-    - Current gameweek
-    - Past gameweeks (as last resort)
+    When gameweek is None (refreshing), tries all available gameweeks and returns
+    the one with the highest gameweek number (most recent team state).
     
-    If gameweek is specified, tries that first, then falls back.
+    If gameweek is specified, tries that first, then falls back to find latest.
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
@@ -113,36 +111,37 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
     current_gw = fpl_client.get_current_gameweek()
     next_gw = fpl_client.get_next_gameweek()
     
-    # Build prioritized list of gameweeks to try
+    # Build list of gameweeks to try
     gameweeks_to_try = []
     
     if gameweek is None:
-        # When refreshing, prioritize latest gameweek first
-        # Next gameweek has the most recent team state
+        # When refreshing, try all recent gameweeks to find the latest
+        # Start with next (most likely to have latest team)
         if next_gw:
             gameweeks_to_try.append(next_gw.id)
         if current_gw and current_gw.id not in gameweeks_to_try:
             gameweeks_to_try.append(current_gw.id)
-        # Add past gameweeks as fallback (most recent first)
+        # Add recent past gameweeks
         if current_gw:
-            for past in [current_gw.id - 1, current_gw.id - 2, current_gw.id - 3]:
+            for past in [current_gw.id - 1, current_gw.id - 2, current_gw.id - 3, current_gw.id - 4, current_gw.id - 5]:
                 if past > 0 and past not in gameweeks_to_try:
                     gameweeks_to_try.append(past)
     else:
-        # Specific gameweek requested - try that first, then fallback
+        # Specific gameweek requested - try that first
         gameweeks_to_try.append(gameweek)
-        # Add next/current if different
+        # Also try next/current and recent past to find latest
         if next_gw and next_gw.id != gameweek:
             gameweeks_to_try.append(next_gw.id)
         if current_gw and current_gw.id != gameweek and current_gw.id not in gameweeks_to_try:
             gameweeks_to_try.append(current_gw.id)
-        # Add past gameweeks as fallback
         if current_gw:
             for past in [current_gw.id - 1, current_gw.id - 2, current_gw.id - 3]:
                 if past > 0 and past not in gameweeks_to_try:
                     gameweeks_to_try.append(past)
     
-    # Try each gameweek in priority order
+    # Try all gameweeks and collect successful responses
+    successful_fetches = []  # List of (data, gameweek) tuples
+    
     for gw in gameweeks_to_try:
         try:
             url = f"{fpl_client.BASE_URL}/entry/{team_id}/event/{gw}/picks/"
@@ -151,10 +150,18 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("picks"):
-                    logger.info(f"Fetched picks for team {team_id} from GW{gw}")
-                    return data, gw
+                    successful_fetches.append((data, gw))
+                    logger.debug(f"Successfully fetched picks for team {team_id} from GW{gw}")
         except Exception as e:
             logger.debug(f"Failed to fetch GW{gw}: {e}")
+    
+    # Return the response with the highest gameweek number (most recent)
+    if successful_fetches:
+        # Sort by gameweek number descending (highest first)
+        successful_fetches.sort(key=lambda x: x[1], reverse=True)
+        latest_data, latest_gw = successful_fetches[0]
+        logger.info(f"Using picks for team {team_id} from GW{latest_gw} (tried {len(successful_fetches)} gameweeks)")
+        return latest_data, latest_gw
     
     # If all failed, return None with the requested gameweek (or next/current if None)
     fallback_gw = gameweek if gameweek else (next_gw.id if next_gw else (current_gw.id if current_gw else None))
