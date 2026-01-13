@@ -48,28 +48,43 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         const task = await fetchTask(taskId)
         
         if (task.status === 'completed') {
-          // Task completed - fetch result from database
+          // Task completed - fetch result
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current)
             pollingIntervalRef.current = null
           }
           
           try {
-            // Get result from database (more reliable than cache)
-            const data = await getLatestWildcardTrajectory()
-            if (data) {
+            // Try cache first (set immediately when task completes)
+            let data = null
+            try {
+              data = await getWildcardTrajectoryResult(taskId)
+            } catch (cacheErr: any) {
+              // Cache might not be available, try database
+              console.debug('Cache lookup failed, trying database:', cacheErr)
+            }
+            
+            // If cache didn't work, try database
+            if (!data || !data.squad || data.squad.length === 0) {
+              try {
+                data = await getLatestWildcardTrajectory()
+              } catch (dbErr: any) {
+                // Database might not be ready yet, that's okay
+                console.debug('Database lookup failed:', dbErr)
+              }
+            }
+            
+            // Validate data has squad
+            if (data && data.squad && data.squad.length > 0) {
               setTrajectory(data)
               // Set first gameweek as selected
-              const gws = Object.keys(data.gameweek_predictions).map(Number).sort((a, b) => a - b)
+              const gws = Object.keys(data.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
               if (gws.length > 0) setSelectedGw(gws[0])
               setLoading(false)
               setCurrentTaskId(null)
             } else {
-              // Fallback: try cache if database doesn't have it yet
-              const cacheData = await getWildcardTrajectoryResult(taskId)
-              setTrajectory(cacheData)
-              const gws = Object.keys(cacheData.gameweek_predictions).map(Number).sort((a, b) => a - b)
-              if (gws.length > 0) setSelectedGw(gws[0])
+              // No valid data found - task completed but data not available
+              setError('Trajectory calculation completed but result is not available. Please try generating again.')
               setLoading(false)
               setCurrentTaskId(null)
             }
@@ -237,6 +252,15 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
 
   const renderWildcardPitch = () => {
     if (!trajectory) return null
+    
+    // Validate squad exists and has players
+    if (!trajectory.squad || !Array.isArray(trajectory.squad) || trajectory.squad.length === 0) {
+      return (
+        <div className="bg-slate-800/50 rounded-lg p-8 border border-slate-700/50 text-center">
+          <p className="text-slate-400">No squad data available. Please regenerate the trajectory.</p>
+        </div>
+      )
+    }
 
     const formationLayout = parseFormation(trajectory.formation)
     
