@@ -63,11 +63,21 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
         if not player:
             continue
         
+        # Use selling_price from picks data (user's actual selling price)
+        # If not available, fall back to current player price
+        # selling_price is in tenths (e.g., 100 = £10.0m), so divide by 10
+        selling_price = pick.get("selling_price")
+        if selling_price is not None:
+            price = selling_price / 10.0
+        else:
+            # Fallback to current price if selling_price not available
+            price = player.price
+        
         squad.append({
             "id": player_id,
             "name": player.web_name,
             "position": position_map.get(player.element_type, "MID"),
-            "price": player.price,
+            "price": price,
             "team": teams_by_id.get(player.team, "UNK"),
         })
     
