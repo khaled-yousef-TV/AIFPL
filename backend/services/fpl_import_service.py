@@ -114,18 +114,36 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
     current_gw = fpl_client.get_current_gameweek()
     next_gw = fpl_client.get_next_gameweek()
     
+    # Check if there are transfers for next gameweek (indicating team was updated)
+    has_next_gw_transfers = False
+    if next_gw:
+        try:
+            transfers_url = f"{fpl_client.BASE_URL}/entry/{team_id}/transfers/"
+            transfers_response = requests.get(transfers_url, headers=headers, timeout=10)
+            if transfers_response.status_code == 200:
+                transfers = transfers_response.json()
+                if transfers and isinstance(transfers, list):
+                    # Check if any transfer is for next gameweek
+                    for transfer in transfers[:10]:  # Check last 10 transfers
+                        if transfer.get("event") == next_gw.id:
+                            has_next_gw_transfers = True
+                            logger.info(f"Found transfers for GW{next_gw.id} - team may have been updated")
+                            break
+        except Exception as e:
+            logger.debug(f"Could not check transfers for next GW: {e}")
+    
     # Build list of gameweeks to try
     gameweeks_to_try = []
     
     if gameweek is None:
-        # When refreshing, try all recent gameweeks to find the latest
-        # Start with next (most likely to have latest team)
+        # When refreshing, prioritize next gameweek if it has transfers
+        # This ensures we get the latest team state after transfers
         if next_gw:
             gameweeks_to_try.append(next_gw.id)
         if current_gw and current_gw.id not in gameweeks_to_try:
             gameweeks_to_try.append(current_gw.id)
-        # Add recent past gameweeks
-        if current_gw:
+        # Add recent past gameweeks (but only if next GW doesn't have transfers)
+        if current_gw and not has_next_gw_transfers:
             for past in [current_gw.id - 1, current_gw.id - 2, current_gw.id - 3, current_gw.id - 4, current_gw.id - 5]:
                 if past > 0 and past not in gameweeks_to_try:
                     gameweeks_to_try.append(past)
@@ -137,7 +155,7 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
             gameweeks_to_try.append(next_gw.id)
         if current_gw and current_gw.id != gameweek and current_gw.id not in gameweeks_to_try:
             gameweeks_to_try.append(current_gw.id)
-        if current_gw:
+        if current_gw and not has_next_gw_transfers:
             for past in [current_gw.id - 1, current_gw.id - 2, current_gw.id - 3]:
                 if past > 0 and past not in gameweeks_to_try:
                     gameweeks_to_try.append(past)
@@ -163,6 +181,14 @@ def _fetch_team_picks(fpl_client, team_id: int, gameweek: Optional[int] = None) 
         # Sort by gameweek number descending (highest first)
         successful_fetches.sort(key=lambda x: x[1], reverse=True)
         latest_data, latest_gw = successful_fetches[0]
+        
+        # If we found next GW transfers but couldn't get next GW picks, log a warning
+        if has_next_gw_transfers and latest_gw < (next_gw.id if next_gw else 0):
+            logger.warning(f"Team {team_id} has transfers for GW{next_gw.id if next_gw else '?'} but picks not available yet. Using GW{latest_gw} (may be outdated).")
+        elif next_gw and latest_gw < next_gw.id:
+            # Even without explicit transfers, if we're using an old gameweek when next exists, warn
+            logger.info(f"Team {team_id}: Next gameweek {next_gw.id} picks not available yet, using GW{latest_gw}. Team may have pending transfers.")
+        
         logger.info(f"Using picks for team {team_id} from GW{latest_gw} (tried {len(successful_fetches)} gameweeks)")
         return latest_data, latest_gw
     
