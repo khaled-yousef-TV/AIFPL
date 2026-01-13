@@ -355,6 +355,72 @@ function App() {
     }
   }, [tasks])
 
+  // Poll for task status updates when there are running tasks
+  useEffect(() => {
+    const hasRunningTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
+    
+    if (!hasRunningTasks) {
+      return // No need to poll if no running tasks
+    }
+
+    // Poll every 3 seconds to check for task status updates
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/tasks?include_old=false`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.tasks && Array.isArray(data.tasks)) {
+            // Convert backend format to frontend format
+            const backendTasks = data.tasks.map((t: any) => ({
+              id: t.id,
+              type: t.type as TaskType,
+              title: t.title,
+              description: t.description || '',
+              status: t.status as TaskStatus,
+              progress: t.progress || 0,
+              createdAt: t.createdAt || Date.now(),
+              completedAt: t.completedAt,
+              error: t.error
+            }))
+
+            // Update tasks state with latest status from backend
+            setTasks(prevTasks => {
+              // Create a map of backend tasks by id for quick lookup
+              const backendTaskMap = new Map(backendTasks.map(t => [t.id, t]))
+              
+              // Update existing tasks with backend status, or add new tasks
+              const updatedTasks = prevTasks.map(task => {
+                const backendTask = backendTaskMap.get(task.id)
+                if (backendTask) {
+                  // Update with backend status
+                  return backendTask
+                }
+                // Keep existing task if not in backend (might be local-only)
+                return task
+              })
+
+              // Add any new tasks from backend that we don't have
+              backendTasks.forEach(backendTask => {
+                if (!updatedTasks.find(t => t.id === backendTask.id)) {
+                  updatedTasks.push(backendTask)
+                }
+              })
+
+              return updatedTasks
+            })
+          }
+        }
+      } catch (err) {
+        // Silently fail - polling errors shouldn't break the UI
+        console.debug('Error polling task status:', err)
+      }
+    }, 3000) // Poll every 3 seconds
+
+    return () => {
+      clearInterval(pollInterval)
+    }
+  }, [tasks])
+
   useEffect(() => {
     loadInitial()
   }, [])
