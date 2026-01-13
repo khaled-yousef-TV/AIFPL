@@ -157,6 +157,9 @@ function App() {
   
   // Ref to track if we need immediate poll (after task creation)
   const needsImmediatePollRef = useRef(false)
+  
+  // Ref to track previous task states for detecting completion
+  const previousTasksRef = useRef<Task[]>([])
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
@@ -484,6 +487,42 @@ function App() {
       clearInterval(pollIntervalId)
     }
   }, [tasks, pollTasksFromBackend])
+
+  // Detect task completion and show notifications
+  useEffect(() => {
+    // Request notification permission on first load
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {
+        // Silently fail if permission is denied
+      })
+    }
+
+    // Compare current tasks with previous tasks to detect completion
+    const previousTasks = previousTasksRef.current
+    if (previousTasks.length > 0) {
+      tasks.forEach(currentTask => {
+        const previousTask = previousTasks.find(t => t.id === currentTask.id)
+        
+        // Detect transition from running/pending to completed
+        if (previousTask && 
+            (previousTask.status === 'running' || previousTask.status === 'pending') &&
+            currentTask.status === 'completed') {
+          
+          // Show browser notification
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Task Completed', {
+              body: `${currentTask.title} has finished successfully.`,
+              icon: '/favicon.ico', // Optional: add favicon if available
+              tag: `task-${currentTask.id}`, // Prevent duplicate notifications
+            })
+          }
+        }
+      })
+    }
+
+    // Update previous tasks ref
+    previousTasksRef.current = tasks
+  }, [tasks])
 
   useEffect(() => {
     loadInitial()
