@@ -41,6 +41,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
 
     setCurrentTaskId(taskId)
     setLoading(true)
+    // Don't clear trajectory - keep previous one visible while loading
 
     // Start polling for task completion
     const pollForResult = async () => {
@@ -76,6 +77,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
             
             // Validate data has squad
             if (data && data.squad && data.squad.length > 0) {
+              // Only update trajectory when new data is ready
               setTrajectory(data)
               // Set first gameweek as selected
               const gws = Object.keys(data.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
@@ -84,7 +86,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
               setCurrentTaskId(null)
             } else {
               // No valid data found - task completed but data not available
-              setError('Trajectory calculation completed but result is not available. Please try generating again.')
+              // Don't clear existing trajectory - keep previous one visible
+              setError('Trajectory calculation completed but result is not available. Previous squad is still shown. Please try generating again.')
               setLoading(false)
               setCurrentTaskId(null)
             }
@@ -102,6 +105,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
           setError(task.error || 'Failed to generate trajectory')
           setLoading(false)
           setCurrentTaskId(null)
+          // Don't clear trajectory on failure - keep previous one visible
         }
         // If still running or pending, continue polling
       } catch (err) {
@@ -119,25 +123,32 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
   useEffect(() => {
     const loadSavedTrajectoryAndCheckTasks = async () => {
       try {
-        // First, check for running/pending wildcard tasks
+        // First, load saved trajectory immediately (if available) so it's visible right away
+        try {
+          const saved = await getLatestWildcardTrajectory()
+          if (saved && saved.squad && saved.squad.length > 0) {
+            setTrajectory(saved)
+            // Set first gameweek as selected
+            const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
+            if (gws.length > 0) setSelectedGw(gws[0])
+          }
+        } catch (err) {
+          // No saved trajectory, that's okay
+          console.debug('No saved trajectory found:', err)
+        }
+        
+        // Then check for running/pending wildcard tasks
         const tasksResponse = await fetchTasks(false)
         const runningWildcardTask = tasksResponse.tasks.find(
           (task) => task.type === 'wildcard' && (task.status === 'running' || task.status === 'pending')
         )
         
         if (runningWildcardTask) {
-          // Found a running task - resume polling (keeps loading = true)
+          // Found a running task - resume polling (keeps previous trajectory visible)
           resumePolling(runningWildcardTask.id)
         } else {
-          // No running task - load saved trajectory and set loading = false
+          // No running task - we're done
           setLoading(false)
-          const saved = await getLatestWildcardTrajectory()
-          if (saved) {
-            setTrajectory(saved)
-            // Set first gameweek as selected
-            const gws = Object.keys(saved.gameweek_predictions).map(Number).sort((a, b) => a - b)
-            if (gws.length > 0) setSelectedGw(gws[0])
-          }
         }
       } catch (err) {
         console.debug('Could not load saved wildcard trajectory or check tasks:', err)
@@ -162,22 +173,24 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       return
     }
     
+    // Keep previous trajectory visible - don't clear it
+    // Only update it when new data is ready
     setLoading(true)
     setError(null)
-    // Don't clear trajectory - keep previous one visible while loading new one
     
     try {
       // Submit task and get task ID
       const taskResponse = await submitWildcardTrajectory({ budget, horizon })
       const taskId = taskResponse.task_id
       
-      // Start polling
+      // Start polling - this will update trajectory when ready
       resumePolling(taskId)
       
     } catch (err: any) {
       setError(err.message || 'Failed to submit trajectory calculation')
       setLoading(false)
       setCurrentTaskId(null)
+      // Don't clear trajectory on error - keep previous one visible
     }
   }
 
@@ -626,6 +639,17 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
           </div>
         )}
       </div>
+
+      {/* Loading overlay when generating new trajectory */}
+      {loading && trajectory && (
+        <div className="bg-violet-600/10 border border-violet-500/30 rounded-xl p-4 flex items-center gap-3">
+          <RefreshCw className="w-5 h-5 text-violet-400 animate-spin" />
+          <div>
+            <div className="text-violet-400 font-medium">Generating new trajectory...</div>
+            <div className="text-slate-400 text-sm">Previous squad shown below. It will update when ready.</div>
+          </div>
+        </div>
+      )}
 
       {/* Results */}
       {trajectory && (
