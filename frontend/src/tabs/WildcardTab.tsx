@@ -4,23 +4,76 @@ import {
   ChevronDown, ChevronUp, Home, Plane, Crown, Star
 } from 'lucide-react'
 import type { WildcardTrajectory, TrajectoryPlayer, GameweekBreakdown } from '../types'
+import type { SuggestedSquad, Player } from '../types'
 import { submitWildcardTrajectory, getWildcardTrajectoryResult, getLatestWildcardTrajectory } from '../api/wildcard'
 import { fetchTask, fetchTasks } from '../api/tasks'
+import { apiRequest } from '../api/client'
 
 interface WildcardTabProps {
   gameweek: number | null
 }
 
+const WILDCARD_TRAJECTORY_STORAGE_KEY = 'wildcard_trajectory'
+const WILDCARD_SELECTED_GW_KEY = 'wildcard_selected_gw'
+
 const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
   const [loading, setLoading] = useState(true) // Start with loading to prevent flash
-  const [trajectory, setTrajectory] = useState<WildcardTrajectory | null>(null)
+  const [trajectory, setTrajectory] = useState<WildcardTrajectory | null>(() => {
+    // Load from localStorage on mount
+    try {
+      const saved = localStorage.getItem(WILDCARD_TRAJECTORY_STORAGE_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.squad && Array.isArray(parsed.squad) && parsed.squad.length > 0) {
+          return parsed
+        }
+      }
+    } catch (err) {
+      console.debug('Could not load trajectory from localStorage:', err)
+    }
+    return null
+  })
   const [error, setError] = useState<string | null>(null)
   const [budget, setBudget] = useState(100.0)
   const [horizon, setHorizon] = useState(8)
-  const [selectedGw, setSelectedGw] = useState<number | null>(null)
+  const [selectedGw, setSelectedGw] = useState<number | null>(() => {
+    // Load selected GW from localStorage
+    try {
+      const saved = localStorage.getItem(WILDCARD_SELECTED_GW_KEY)
+      if (saved) {
+        const parsed = parseInt(saved, 10)
+        if (!isNaN(parsed)) return parsed
+      }
+    } catch (err) {
+      console.debug('Could not load selected GW from localStorage:', err)
+    }
+    return null
+  })
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['squad', 'fixtures']))
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Persist trajectory to localStorage whenever it changes
+  useEffect(() => {
+    if (trajectory) {
+      try {
+        localStorage.setItem(WILDCARD_TRAJECTORY_STORAGE_KEY, JSON.stringify(trajectory))
+      } catch (err) {
+        console.debug('Could not save trajectory to localStorage:', err)
+      }
+    }
+  }, [trajectory])
+
+  // Persist selected GW to localStorage whenever it changes
+  useEffect(() => {
+    if (selectedGw !== null) {
+      try {
+        localStorage.setItem(WILDCARD_SELECTED_GW_KEY, selectedGw.toString())
+      } catch (err) {
+        console.debug('Could not save selected GW to localStorage:', err)
+      }
+    }
+  }, [selectedGw])
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => {
@@ -119,22 +172,135 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
     pollingIntervalRef.current = setInterval(pollForResult, 2000)
   }
 
+  // Convert SuggestedSquad to WildcardTrajectory format for display
+  const convertSuggestedSquadToTrajectory = (squad: SuggestedSquad): WildcardTrajectory => {
+    // Combine starting_xi and bench into full squad
+    const allPlayers = [...squad.starting_xi, ...squad.bench]
+    
+    // Convert Player[] to TrajectoryPlayer[]
+    const trajectoryPlayers: TrajectoryPlayer[] = allPlayers.map((p: Player) => {
+      // Map position string to position_id if not provided
+      let positionId = p.position_id
+      if (!positionId) {
+        const posMap: Record<string, number> = { 'GK': 1, 'DEF': 2, 'MID': 3, 'FWD': 4 }
+        positionId = posMap[p.position] || 3
+      }
+      
+      return {
+        id: p.id,
+        name: p.name,
+        team: p.team || '???',
+        team_id: (p as any).team_id || 0, // team_id might not be in Player type
+        position: p.position,
+        position_id: positionId,
+        price: p.price,
+        form: p.form || 0,
+        total_points: p.total_points || 0,
+        ownership: p.ownership || 0,
+        predicted_points: p.predicted || p.predicted_points || 0,
+        avg_fdr: (p as any).avg_fdr || (p as any).difficulty || 3.0,
+        fixture_swing: 0,
+        gameweek_predictions: {}
+      }
+    })
+    
+    // Find captain and vice captain
+    const captain = trajectoryPlayers.find(p => p.id === squad.captain.id) || trajectoryPlayers[0]
+    const viceCaptain = trajectoryPlayers.find(p => p.id === squad.vice_captain.id) || trajectoryPlayers[1] || trajectoryPlayers[0]
+    
+    // Create a basic gameweek breakdown for the current gameweek
+    const gameweekBreakdown: GameweekBreakdown = {
+      gameweek: squad.gameweek,
+      formation: squad.formation,
+      predicted_points: squad.predicted_points,
+      starting_xi: squad.starting_xi.map((p: Player) => ({
+        id: p.id,
+        name: p.name,
+        team: p.team || '???',
+        position: p.position,
+        predicted: p.predicted || p.predicted_points || 0,
+        opponent: p.opponent || '???',
+        fdr: (p as any).fdr || (p as any).difficulty || 3,
+        is_home: p.is_home || false
+      }))
+    }
+    
+    return {
+      squad: trajectoryPlayers,
+      starting_xi: trajectoryPlayers.slice(0, 11),
+      bench: trajectoryPlayers.slice(11),
+      captain,
+      vice_captain: viceCaptain,
+      formation: squad.formation,
+      gameweek_predictions: {
+        [squad.gameweek]: gameweekBreakdown
+      },
+      total_predicted_points: squad.predicted_points,
+      avg_weekly_points: squad.predicted_points,
+      total_cost: squad.total_cost,
+      remaining_budget: squad.remaining_budget,
+      horizon: 1,
+      fixture_blocks: [],
+      rationale: 'Default suggested squad. Generate a wildcard trajectory for optimized 8-gameweek planning.'
+    }
+  }
+
+  // Fetch suggested squad as fallback
+  const fetchDefaultSquad = async (): Promise<WildcardTrajectory | null> => {
+    try {
+      const response = await apiRequest<{ squad: SuggestedSquad }>('/api/suggested-squad?budget=100&method=combined')
+      if (response.squad) {
+        return convertSuggestedSquadToTrajectory(response.squad)
+      }
+    } catch (err) {
+      console.debug('Could not fetch default suggested squad:', err)
+    }
+    return null
+  }
+
   // Load saved trajectory and check for running tasks on mount
   useEffect(() => {
     const loadSavedTrajectoryAndCheckTasks = async () => {
       try {
-        // First, load saved trajectory immediately (if available) so it's visible right away
-        try {
-          const saved = await getLatestWildcardTrajectory()
-          if (saved && saved.squad && saved.squad.length > 0) {
-            setTrajectory(saved)
-            // Set first gameweek as selected
-            const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
-            if (gws.length > 0) setSelectedGw(gws[0])
+        // Check if we already have trajectory from localStorage (loaded in useState initializer)
+        let hasTrajectory = trajectory !== null && trajectory.squad && trajectory.squad.length > 0
+        
+        // If we have trajectory from localStorage, set loading to false immediately
+        if (hasTrajectory) {
+          setLoading(false)
+        }
+        
+        // If no trajectory from localStorage, try to load from database
+        if (!hasTrajectory) {
+          try {
+            const saved = await getLatestWildcardTrajectory()
+            if (saved && saved.squad && saved.squad.length > 0) {
+              setTrajectory(saved)
+              // Set first gameweek as selected if not already set
+              const gws = Object.keys(saved.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
+              if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
+              hasTrajectory = true
+            }
+          } catch (err) {
+            // No saved trajectory, that's okay
+            console.debug('No saved trajectory found:', err)
           }
-        } catch (err) {
-          // No saved trajectory, that's okay
-          console.debug('No saved trajectory found:', err)
+        }
+        
+        // If still no trajectory, fetch default suggested squad
+        if (!hasTrajectory) {
+          const defaultSquad = await fetchDefaultSquad()
+          if (defaultSquad) {
+            setTrajectory(defaultSquad)
+            const gws = Object.keys(defaultSquad.gameweek_predictions || {}).map(Number).sort((a, b) => a - b)
+            if (gws.length > 0 && selectedGw === null) setSelectedGw(gws[0])
+            hasTrajectory = true
+          }
+        }
+        
+        // If we have trajectory now, set loading to false
+        if (hasTrajectory) {
+          setLoading(false)
         }
         
         // Then check for running/pending wildcard tasks
@@ -146,8 +312,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
         if (runningWildcardTask) {
           // Found a running task - resume polling (keeps previous trajectory visible)
           resumePolling(runningWildcardTask.id)
-        } else {
-          // No running task - we're done
+        } else if (!hasTrajectory) {
+          // No running task and no trajectory - we're done
           setLoading(false)
         }
       } catch (err) {
@@ -156,7 +322,8 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek }) => {
       }
     }
     loadSavedTrajectoryAndCheckTasks()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount - trajectory and selectedGw are checked inside
 
   // Cleanup polling on unmount
   useEffect(() => {
