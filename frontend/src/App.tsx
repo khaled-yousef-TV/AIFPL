@@ -136,6 +136,9 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [notifications, setNotifications] = useState<Array<{ id: string; type: 'success' | 'error'; title: string; message: string; timestamp: number }>>([])
   const [taskStartedModal, setTaskStartedModal] = useState<{ taskId: string; title: string } | null>(null)
+  
+  // Ref to track if we need immediate poll (after task creation)
+  const needsImmediatePollRef = useRef(false)
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
   const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
@@ -346,6 +349,24 @@ function App() {
     loadTasksFromStorage()
   }, [])
 
+  // Helper to check if tasks are different (for avoiding unnecessary state updates)
+  const tasksAreEqual = (a: Task[], b: Task[]): boolean => {
+    if (a.length !== b.length) return false
+    const aMap = new Map(a.map(t => [t.id, t]))
+    for (const taskB of b) {
+      const taskA = aMap.get(taskB.id)
+      if (!taskA) return false
+      // Compare relevant fields that affect UI
+      if (taskA.status !== taskB.status || 
+          taskA.progress !== taskB.progress ||
+          taskA.completedAt !== taskB.completedAt ||
+          taskA.error !== taskB.error) {
+        return false
+      }
+    }
+    return true
+  }
+
   // Reusable function to poll and update tasks from backend
   const pollTasksFromBackend = useCallback(async () => {
     try {
@@ -366,7 +387,7 @@ function App() {
             error: t.error
           }))
 
-          // Update tasks state with latest status from backend
+          // Update tasks state with latest status from backend (only if changed)
           setTasks(prevTasks => {
             // Create a map of backend tasks by id for quick lookup
             const backendTaskMap = new Map(backendTasks.map(t => [t.id, t]))
@@ -389,6 +410,11 @@ function App() {
               }
             })
 
+            // Only update state if something actually changed
+            if (tasksAreEqual(prevTasks, updatedTasks)) {
+              return prevTasks // Return same reference to avoid re-render
+            }
+
             return updatedTasks
           })
         }
@@ -399,43 +425,48 @@ function App() {
     }
   }, [])
 
-  // Persist tasks to localStorage whenever they change
+  // Persist tasks to localStorage (debounced to avoid excessive writes)
   useEffect(() => {
-    try {
-      localStorage.setItem(TASKS_KEY, JSON.stringify(tasks))
-    } catch (err) {
-      console.error('Failed to save tasks to localStorage:', err)
-    }
+    const timeoutId = setTimeout(() => {
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(tasks))
+      } catch (err) {
+        console.error('Failed to save tasks to localStorage:', err)
+      }
+    }, 1000) // Debounce: only write 1 second after last change
+
+    return () => clearTimeout(timeoutId)
   }, [tasks])
 
-  // Poll for task status updates continuously to detect new tasks and status changes
+  // Handle immediate poll when task is created
   useEffect(() => {
-    const hasRunningTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
-    
-    // Use shorter interval (3s) when there are active tasks, longer (5s) when idle
-    // This ensures we always detect new tasks while being efficient
-    const pollInterval = hasRunningTasks ? 3000 : 5000
+    if (needsImmediatePollRef.current) {
+      needsImmediatePollRef.current = false
+      // Small delay to allow backend to process the new task
+      const timeoutId = setTimeout(() => {
+        pollTasksFromBackend()
+      }, 500)
+      return () => clearTimeout(timeoutId)
+    }
+  }, [tasks.length, pollTasksFromBackend]) // Trigger when task count changes
 
-    // Poll to check for task status updates and new tasks
+  // Poll for task status updates - only when there are active tasks
+  useEffect(() => {
+    const hasActiveTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
+    
+    // Don't poll if no active tasks (saves resources)
+    if (!hasActiveTasks) {
+      return
+    }
+
+    // Poll every 3 seconds when there are active tasks
+    const pollInterval = 3000
     const pollIntervalId = setInterval(pollTasksFromBackend, pollInterval)
 
     return () => {
       clearInterval(pollIntervalId)
     }
   }, [tasks, pollTasksFromBackend])
-
-  // Immediately poll when tasks are created or updated to get latest status
-  useEffect(() => {
-    // Only poll immediately if there are pending/running tasks (to avoid unnecessary calls)
-    const hasActiveTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
-    if (hasActiveTasks) {
-      // Small delay to allow backend to process the update
-      const timeoutId = setTimeout(() => {
-        pollTasksFromBackend()
-      }, 500)
-      return () => clearTimeout(timeoutId)
-    }
-  }, [tasks.length, pollTasksFromBackend]) // Trigger when task count changes (new task added)
 
   useEffect(() => {
     loadInitial()
@@ -608,20 +639,11 @@ function App() {
     
     setTasks(prev => {
       const updated = [...prev, newTask]
-      // Also persist to localStorage as backup
-      try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
-      } catch (err) {
-        console.error('Failed to save tasks to localStorage:', err)
-      }
       return updated
     })
     
-    // Immediately poll backend to get updated task status (in case backend changed it to 'running')
-    // Use a small delay to allow backend to process
-    setTimeout(() => {
-      pollTasksFromBackend()
-    }, 500)
+    // Mark that we need immediate poll (will be handled by polling effect)
+    needsImmediatePollRef.current = true
     
     // Show modal if requested
     if (showModal) {
