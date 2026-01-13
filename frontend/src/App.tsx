@@ -68,9 +68,13 @@ function App() {
   const [searchPosition, setSearchPosition] = useState<string>('')
   const [transferLoading, setTransferLoading] = useState(false)
 
-  // Wildcard state
+  // Wildcard state (for WildcardTab - trajectory optimization)
   const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(null)
   const [loadingWildcard, setLoadingWildcard] = useState(false)
+  
+  // Wildcard plan state (for TransfersTab - 4+ transfer suggestions)
+  const [wildcardPlan, setWildcardPlan] = useState<any>(null)
+  const [wildcardLoading, setWildcardLoading] = useState(false)
   
   // Expanded groups for transfer suggestions
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
@@ -1150,15 +1154,82 @@ function App() {
   }
 
   const loadWildcardTrajectory = async () => {
-    // Don't reload if we already have data and we're not forcing a refresh
-    if (wildcardTrajectory && !loadingWildcard) return
-    
+    // Always load when called (don't skip if already loaded - allows refresh)
     setLoadingWildcard(true)
     try {
       const response = await fetch(`${API_BASE}/api/chips/wildcard-trajectory/latest`)
       if (!response.ok) {
         if (response.status === 404) {
-          // No trajectory calculated yet
+          // No trajectory calculated yet - try to load default suggested squad
+          try {
+            const squadResponse = await fetch(`${API_BASE}/api/suggested-squad?budget=100&method=combined`)
+            if (squadResponse.ok) {
+              const squadData = await squadResponse.json()
+              if (squadData.squad) {
+                // Convert suggested squad to wildcard trajectory format
+                const allPlayers = [...squadData.squad.starting_xi, ...squadData.squad.bench]
+                const trajectoryPlayers = allPlayers.map((p: any) => ({
+                  id: p.id,
+                  name: p.name,
+                  team: p.team || '???',
+                  team_id: p.team_id || 0,
+                  position: p.position,
+                  position_id: p.position_id || 1,
+                  price: p.price,
+                  form: p.form || 0,
+                  total_points: p.total_points || 0,
+                  ownership: p.ownership || 0,
+                  predicted_points: p.predicted || p.predicted_points || 0,
+                  avg_fdr: p.avg_fdr || p.difficulty || 3.0,
+                  fixture_swing: 0,
+                  gameweek_predictions: {}
+                }))
+                
+                const captain = trajectoryPlayers.find((p: any) => p.id === squadData.squad.captain.id) || trajectoryPlayers[0]
+                const viceCaptain = trajectoryPlayers.find((p: any) => p.id === squadData.squad.vice_captain.id) || trajectoryPlayers[1] || trajectoryPlayers[0]
+                
+                const gameweekBreakdown = {
+                  gameweek: squadData.squad.gameweek,
+                  formation: squadData.squad.formation,
+                  predicted_points: squadData.squad.predicted_points,
+                  starting_xi: squadData.squad.starting_xi.map((p: any) => ({
+                    id: p.id,
+                    name: p.name,
+                    team: p.team || '???',
+                    position: p.position,
+                    predicted: p.predicted || p.predicted_points || 0,
+                    opponent: p.opponent || '???',
+                    fdr: p.fdr || p.difficulty || 3,
+                    is_home: p.is_home || false
+                  }))
+                }
+                
+                const defaultTrajectory = {
+                  squad: trajectoryPlayers,
+                  starting_xi: trajectoryPlayers.slice(0, 11),
+                  bench: trajectoryPlayers.slice(11),
+                  captain,
+                  vice_captain: viceCaptain,
+                  formation: squadData.squad.formation,
+                  gameweek_predictions: {
+                    [squadData.squad.gameweek]: gameweekBreakdown
+                  },
+                  total_predicted_points: squadData.squad.predicted_points,
+                  avg_weekly_points: squadData.squad.predicted_points,
+                  total_cost: squadData.squad.total_cost,
+                  remaining_budget: squadData.squad.remaining_budget,
+                  horizon: 1,
+                  fixture_blocks: [],
+                  rationale: 'Default suggested squad. Generate a wildcard trajectory for optimized 8-gameweek planning.'
+                }
+                setWildcardTrajectory(defaultTrajectory)
+                return
+              }
+            }
+          } catch (squadErr) {
+            console.debug('Could not load default suggested squad:', squadErr)
+          }
+          // No trajectory and no default squad - that's okay
           setWildcardTrajectory(null)
           return
         }
@@ -1260,7 +1331,10 @@ function App() {
     // Lazy-load heavy tabs only when the user opens them
     if (activeTab === 'picks') ensurePicksLoaded()
     if (activeTab === 'differentials') ensureDifferentialsLoaded()
-    if (activeTab === 'wildcard') loadWildcardTrajectory()
+    if (activeTab === 'wildcard') {
+      // Load immediately when tab is clicked
+      loadWildcardTrajectory()
+    }
     if (activeTab === 'triple-captain') {
       ensureTripleCaptainLoaded()
     } else {
