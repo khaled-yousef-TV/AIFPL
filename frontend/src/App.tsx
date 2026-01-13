@@ -69,21 +69,7 @@ function App() {
   const [transferLoading, setTransferLoading] = useState(false)
 
   // Wildcard state (for WildcardTab - trajectory optimization)
-  // Initialize from localStorage for instant display
-  const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(() => {
-    try {
-      const stored = localStorage.getItem('wildcard_trajectory')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (parsed && parsed.squad && parsed.squad.length > 0) {
-          return parsed
-        }
-      }
-    } catch (e) {
-      // Ignore localStorage errors
-    }
-    return null
-  })
+  const [wildcardTrajectory, setWildcardTrajectory] = useState<any>(null)
   const [loadingWildcard, setLoadingWildcard] = useState(false)
   
   // Wildcard plan state (for TransfersTab - 4+ transfer suggestions)
@@ -1207,107 +1193,28 @@ function App() {
   }
 
   const loadWildcardTrajectory = async () => {
-    // Don't reload if we already have data (unless explicitly refreshing)
-    if (wildcardTrajectory && !loadingWildcard) return
+    // Skip if already loading to avoid duplicate requests
+    if (loadingWildcard) return
     
     setLoadingWildcard(true)
     
     try {
-      // 1. First, try to load from database (source of truth)
+      // Load from database
       const response = await fetch(`${API_BASE}/api/chips/wildcard-trajectory/latest`)
       if (response.ok) {
         const data = await response.json()
         if (data && data.squad && data.squad.length > 0) {
           setWildcardTrajectory(data)
-          // Persist to localStorage for instant load next time
+          // Save to localStorage after loading
           try {
             localStorage.setItem('wildcard_trajectory', JSON.stringify(data))
           } catch (e) {
             // Ignore localStorage errors
           }
-          setLoadingWildcard(false)
-          return
         }
       }
-      
-      // 2. If no trajectory in database (404), load default suggested squad as fallback
-      const squadResponse = await fetch(`${API_BASE}/api/suggested-squad?budget=100&method=combined`)
-      if (squadResponse.ok) {
-        const squadData = await squadResponse.json()
-        if (squadData.squad) {
-          // Convert suggested squad to wildcard trajectory format
-          const allPlayers = [...squadData.squad.starting_xi, ...squadData.squad.bench]
-          const trajectoryPlayers = allPlayers.map((p: any) => ({
-            id: p.id,
-            name: p.name,
-            team: p.team || '???',
-            team_id: p.team_id || 0,
-            position: p.position,
-            position_id: p.position_id || 1,
-            price: p.price,
-            form: p.form || 0,
-            total_points: p.total_points || 0,
-            ownership: p.ownership || 0,
-            predicted_points: p.predicted || p.predicted_points || 0,
-            avg_fdr: p.avg_fdr || p.difficulty || 3.0,
-            fixture_swing: 0,
-            gameweek_predictions: {}
-          }))
-          
-          const captain = trajectoryPlayers.find((p: any) => p.id === squadData.squad.captain.id) || trajectoryPlayers[0]
-          const viceCaptain = trajectoryPlayers.find((p: any) => p.id === squadData.squad.vice_captain.id) || trajectoryPlayers[1] || trajectoryPlayers[0]
-          
-          const gameweekBreakdown = {
-            gameweek: squadData.squad.gameweek,
-            formation: squadData.squad.formation,
-            predicted_points: squadData.squad.predicted_points,
-            starting_xi: squadData.squad.starting_xi.map((p: any) => ({
-              id: p.id,
-              name: p.name,
-              team: p.team || '???',
-              position: p.position,
-              predicted: p.predicted || p.predicted_points || 0,
-              opponent: p.opponent || '???',
-              fdr: p.fdr || p.difficulty || 3,
-              is_home: p.is_home || false
-            }))
-          }
-          
-          const defaultTrajectory = {
-            squad: trajectoryPlayers,
-            starting_xi: trajectoryPlayers.slice(0, 11),
-            bench: trajectoryPlayers.slice(11),
-            captain,
-            vice_captain: viceCaptain,
-            formation: squadData.squad.formation,
-            gameweek_predictions: {
-              [squadData.squad.gameweek]: gameweekBreakdown
-            },
-            total_predicted_points: squadData.squad.predicted_points,
-            avg_weekly_points: squadData.squad.predicted_points,
-            total_cost: squadData.squad.total_cost,
-            remaining_budget: squadData.squad.remaining_budget,
-            horizon: 1,
-            fixture_blocks: [],
-            rationale: 'Default suggested squad. Generate a wildcard trajectory for optimized 8-gameweek planning.'
-          }
-          setWildcardTrajectory(defaultTrajectory)
-          // Persist to localStorage for instant load next time
-          try {
-            localStorage.setItem('wildcard_trajectory', JSON.stringify(defaultTrajectory))
-          } catch (e) {
-            // Ignore localStorage errors
-          }
-          setLoadingWildcard(false)
-          return
-        }
-      }
-      
-      // 3. If both fail, show empty state
-      setWildcardTrajectory(null)
     } catch (err) {
       console.error('Failed to load wildcard trajectory:', err)
-      setWildcardTrajectory(null)
     } finally {
       setLoadingWildcard(false)
     }
