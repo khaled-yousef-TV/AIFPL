@@ -27,7 +27,14 @@ from dotenv import load_dotenv
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
+from apscheduler import events
 from datetime import timedelta
+try:
+    import pytz
+    UTC = pytz.UTC
+except ImportError:
+    pytz = None
+    UTC = None
 
 # Configure logging first (needed for messages below)
 logging.basicConfig(
@@ -204,7 +211,20 @@ app.include_router(transfers_router.router, prefix="/api", tags=["transfers"])
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
 
-scheduler = BackgroundScheduler()
+# Configure scheduler with exception listener
+def scheduler_error_listener(event):
+    """Log scheduler job execution errors."""
+    if event.exception:
+        logger.error(f"Scheduler job {event.job_id} raised an exception: {event.exception}", exc_info=event.exception)
+    else:
+        logger.info(f"Scheduler job {event.job_id} executed successfully")
+
+# Initialize scheduler - use timezone if pytz is available
+if UTC:
+    scheduler = BackgroundScheduler(timezone=UTC)
+else:
+    scheduler = BackgroundScheduler()
+scheduler.add_listener(scheduler_error_listener, events.EVENT_JOB_EXECUTED | events.EVENT_JOB_ERROR)
 
 def save_selected_team_job():
     """Job to save selected team 30 minutes before deadline (sync wrapper for scheduler)."""
@@ -247,13 +267,15 @@ async def _save_selected_team_async():
 def save_daily_snapshot_job():
     """Job to save daily snapshot at midnight (sync wrapper for scheduler)."""
     import asyncio
+    logger.info(f"save_daily_snapshot_job triggered at {datetime.utcnow().isoformat()} UTC")
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_save_daily_snapshot_async())
         loop.close()
+        logger.info("save_daily_snapshot_job completed successfully")
     except Exception as e:
-        logger.error(f"Error in save_daily_snapshot_job: {e}")
+        logger.error(f"Error in save_daily_snapshot_job: {e}", exc_info=True)
 
 async def _save_daily_snapshot_async():
     """Async function to save daily snapshot."""
@@ -499,33 +521,68 @@ async def check_and_run_missed_saves():
 @app.on_event("startup")
 async def startup_event():
     """Start the scheduler on app startup."""
-    import asyncio
-    scheduler.start()
-    logger.info("Selected team scheduler started")
-    
-    # Check for missed saves when server wakes up (for Render free tier spin-down scenario)
-    await check_and_run_missed_saves()
-    
-    # Schedule the first save job (30 min before deadline)
-    schedule_next_save()
-    # Also schedule a check every 6 hours to reschedule if needed
-    from apscheduler.triggers.cron import CronTrigger
-    scheduler.add_job(
-        schedule_next_save,
-        CronTrigger(hour="*/6"),  # Every 6 hours
-        id="check_and_schedule_selected_team",
-        name="Check and Schedule Selected Team Save",
-        replace_existing=True
-    )
-    # Schedule daily snapshot at midnight (00:00)
-    scheduler.add_job(
-        save_daily_snapshot_job,
-        CronTrigger(hour=0, minute=0),  # Every day at midnight
-        id="save_daily_snapshot",
-        name="Save Daily Snapshot at Midnight",
-        replace_existing=True
-    )
-    logger.info("Scheduled daily snapshot job for midnight")
+    try:
+        # Start scheduler first
+        if not scheduler.running:
+            scheduler.start()
+            logger.info("Selected team scheduler started successfully")
+        else:
+            logger.warning("Scheduler was already running!")
+        
+        # Check for missed saves when server wakes up (for Render free tier spin-down scenario)
+        await check_and_run_missed_saves()
+        
+        # Schedule the first save job (30 min before deadline)
+        schedule_next_save()
+        
+        # Also schedule a check every 6 hours to reschedule if needed
+        from apscheduler.triggers.cron import CronTrigger
+        try:
+            # Use timezone if pytz is available, otherwise default (system timezone)
+            trigger_kwargs = {"hour": "*/6"}
+            if UTC:
+                trigger_kwargs["timezone"] = UTC
+            scheduler.add_job(
+                schedule_next_save,
+                CronTrigger(**trigger_kwargs),  # Every 6 hours
+                id="check_and_schedule_selected_team",
+                name="Check and Schedule Selected Team Save",
+                replace_existing=True
+            )
+            logger.info("Added check_and_schedule_selected_team job")
+        except Exception as e:
+            logger.error(f"Failed to add check_and_schedule_selected_team job: {e}", exc_info=True)
+        
+        # Schedule daily snapshot at midnight (00:00)
+        try:
+            trigger_kwargs = {"hour": 0, "minute": 0}
+            if UTC:
+                trigger_kwargs["timezone"] = UTC
+            scheduler.add_job(
+                save_daily_snapshot_job,
+                CronTrigger(**trigger_kwargs),  # Every day at midnight
+                id="save_daily_snapshot",
+                name="Save Daily Snapshot at Midnight",
+                replace_existing=True
+            )
+            logger.info("Added save_daily_snapshot job")
+        except Exception as e:
+            logger.error(f"Failed to add save_daily_snapshot job: {e}", exc_info=True)
+        
+        # Log scheduler status
+        logger.info(f"Scheduler is running: {scheduler.running}")
+        jobs = scheduler.get_jobs()
+        logger.info(f"Total scheduled jobs: {len(jobs)}")
+        for job in jobs:
+            logger.info(f"  - Job ID: {job.id}, Name: {job.name}, Next run: {job.next_run_time}")
+            
+        # Test trigger the daily snapshot job immediately for debugging (if it's past midnight)
+        # Comment this out after testing
+        # logger.info("TESTING: Manually triggering daily snapshot job...")
+        # save_daily_snapshot_job()
+        
+    except Exception as e:
+        logger.error(f"Error during scheduler startup: {e}", exc_info=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -648,6 +705,48 @@ async def wake_up():
             "message": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status():
+    """Get scheduler status and list of jobs for debugging."""
+    try:
+        jobs = scheduler.get_jobs()
+        return {
+            "running": scheduler.running,
+            "job_count": len(jobs),
+            "jobs": [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+                    "trigger": str(job.trigger)
+                }
+                for job in jobs
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {e}", exc_info=True)
+        return {
+            "running": False,
+            "error": str(e),
+            "job_count": 0,
+            "jobs": []
+        }
+
+@app.post("/api/scheduler/trigger-daily-snapshot")
+async def trigger_daily_snapshot_manually():
+    """Manually trigger the daily snapshot job for testing/debugging."""
+    try:
+        logger.info("Manually triggering daily snapshot job via API endpoint")
+        save_daily_snapshot_job()
+        return {
+            "success": True,
+            "message": "Daily snapshot job triggered",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error triggering daily snapshot job: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
