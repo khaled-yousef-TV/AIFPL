@@ -229,14 +229,34 @@ scheduler.add_listener(scheduler_error_listener, events.EVENT_JOB_EXECUTED | eve
 def save_selected_team_job():
     """Job to save selected team 30 minutes before deadline (sync wrapper for scheduler)."""
     import asyncio
+    import threading
+    import queue
     try:
-        # Run the async function
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_save_selected_team_async())
-        loop.close()
+        # Run async function in a separate thread with its own event loop
+        # This avoids conflicts with FastAPI's event loop
+        exception_queue = queue.Queue()
+        
+        def run_async():
+            try:
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                new_loop.run_until_complete(_save_selected_team_async())
+                new_loop.close()
+            except Exception as e:
+                exception_queue.put(e)
+        
+        thread = threading.Thread(target=run_async, daemon=False)
+        thread.start()
+        thread.join(timeout=60)  # 1 minute timeout
+        
+        if thread.is_alive():
+            logger.error("save_selected_team_job timed out after 1 minute")
+            return
+        
+        if not exception_queue.empty():
+            raise exception_queue.get()
     except Exception as e:
-        logger.error(f"Error in save_selected_team_job: {e}")
+        logger.error(f"Error in save_selected_team_job: {e}", exc_info=True)
 
 async def _save_selected_team_async():
     """Async function to save selected team."""
@@ -267,12 +287,34 @@ async def _save_selected_team_async():
 def save_daily_snapshot_job():
     """Job to save daily snapshot at midnight (sync wrapper for scheduler)."""
     import asyncio
+    import threading
+    import queue
     logger.info(f"save_daily_snapshot_job triggered at {datetime.utcnow().isoformat()} UTC")
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_save_daily_snapshot_async())
-        loop.close()
+        # Run async function in a separate thread with its own event loop
+        # This avoids conflicts with FastAPI's event loop
+        exception_queue = queue.Queue()
+        
+        def run_async():
+            try:
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                new_loop.run_until_complete(_save_daily_snapshot_async())
+                new_loop.close()
+            except Exception as e:
+                exception_queue.put(e)
+        
+        thread = threading.Thread(target=run_async, daemon=False)
+        thread.start()
+        thread.join(timeout=300)  # 5 minute timeout
+        
+        if thread.is_alive():
+            logger.error("save_daily_snapshot_job timed out after 5 minutes")
+            return
+        
+        if not exception_queue.empty():
+            raise exception_queue.get()
+        
         logger.info("save_daily_snapshot_job completed successfully")
     except Exception as e:
         logger.error(f"Error in save_daily_snapshot_job: {e}", exc_info=True)
