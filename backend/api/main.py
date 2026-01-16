@@ -44,6 +44,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Disable uvicorn access logs to reduce log noise
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 # Validate environment variables (after logging is set up)
 try:
     from .config import validate_env
@@ -797,4 +800,4 @@ async def trigger_daily_snapshot_manually():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, access_log=False)
