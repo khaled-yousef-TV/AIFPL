@@ -376,6 +376,41 @@ async def get_wildcard_trajectory(request: WildcardRequest, background_tasks: Ba
         )
 
 
+@router.get("/wildcard-trajectory/latest")
+async def get_latest_wildcard_trajectory():
+    """
+    Get the latest saved wildcard trajectory from database.
+    
+    Returns:
+        Latest wildcard trajectory or 404 if not found
+    """
+    try:
+        deps = get_dependencies()
+        db_manager = deps.db_manager
+        
+        logger.info("Fetching latest wildcard trajectory from database...")
+        trajectory = db_manager.get_wildcard_trajectory()
+        
+        if not trajectory:
+            logger.warning("No wildcard trajectory found in database")
+            raise HTTPException(
+                status_code=404,
+                detail="No wildcard trajectory found. Generate one first."
+            )
+        
+        logger.info(f"Successfully retrieved wildcard trajectory from database (has {len(trajectory.get('squad', []))} players in squad)")
+        return trajectory
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting latest wildcard trajectory: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get latest wildcard trajectory: {str(e)}"
+        )
+
+
 @router.get("/wildcard-trajectory/{task_id}")
 async def get_wildcard_trajectory_result(task_id: str):
     """
@@ -419,41 +454,6 @@ async def get_wildcard_trajectory_result(task_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get Wildcard trajectory result: {str(e)}"
-        )
-
-
-@router.get("/wildcard-trajectory/latest")
-async def get_latest_wildcard_trajectory():
-    """
-    Get the latest saved wildcard trajectory from database.
-    
-    Returns:
-        Latest wildcard trajectory or 404 if not found
-    """
-    try:
-        deps = get_dependencies()
-        db_manager = deps.db_manager
-        
-        logger.info("Fetching latest wildcard trajectory from database...")
-        trajectory = db_manager.get_wildcard_trajectory()
-        
-        if not trajectory:
-            logger.warning("No wildcard trajectory found in database")
-            raise HTTPException(
-                status_code=404,
-                detail="No wildcard trajectory found. Generate one first."
-            )
-        
-        logger.info(f"Successfully retrieved wildcard trajectory from database (has {len(trajectory.get('squad', []))} players in squad)")
-        return trajectory
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting latest wildcard trajectory: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get latest wildcard trajectory: {str(e)}"
         )
 
 
