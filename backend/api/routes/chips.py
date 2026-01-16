@@ -258,14 +258,24 @@ def _calculate_wildcard_background(task_id: str, budget: float, horizon: int, cu
         trajectory_dict = optimizer.trajectory_to_dict(trajectory)
         
         # Save to database (replaces any existing)
-        db_manager.save_wildcard_trajectory(trajectory_dict, budget, horizon)
+        save_success = db_manager.save_wildcard_trajectory(trajectory_dict, budget, horizon)
+        if not save_success:
+            logger.error(f"Failed to save wildcard trajectory to database (task_id={task_id})")
+            db_manager.update_task(
+                task_id,
+                status="failed",
+                error="Failed to save wildcard trajectory to database"
+            )
+            return
+        
+        logger.info(f"Wildcard trajectory saved to database successfully (task_id={task_id}, budget={budget}, horizon={horizon})")
         
         # Also store in cache for immediate retrieval
         cache.set("wildcard_results", task_id, trajectory_dict)
         
         # Mark task as completed
         db_manager.update_task(task_id, status="completed", progress=100)
-        logger.info(f"Wildcard trajectory task {task_id} completed successfully")
+        logger.info(f"Wildcard trajectory task {task_id} completed successfully and is available via /api/chips/wildcard-trajectory/latest")
         
     except Exception as e:
         logger.error(f"Error in background Wildcard calculation for task {task_id}: {e}", exc_info=True)
