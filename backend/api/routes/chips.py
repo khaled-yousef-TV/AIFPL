@@ -434,13 +434,17 @@ async def get_latest_wildcard_trajectory():
         deps = get_dependencies()
         db_manager = deps.db_manager
         
+        logger.info("Fetching latest wildcard trajectory from database...")
         trajectory = db_manager.get_wildcard_trajectory()
+        
         if not trajectory:
+            logger.warning("No wildcard trajectory found in database")
             raise HTTPException(
                 status_code=404,
                 detail="No wildcard trajectory found. Generate one first."
             )
         
+        logger.info(f"Successfully retrieved wildcard trajectory from database (has {len(trajectory.get('squad', []))} players in squad)")
         return trajectory
         
     except HTTPException:
