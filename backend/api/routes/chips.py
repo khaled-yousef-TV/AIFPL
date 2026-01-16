@@ -218,6 +218,7 @@ def _calculate_wildcard_background(task_id: str, budget: float, horizon: int, cu
     Background task to calculate Wildcard trajectory.
     This runs asynchronously so the API can return immediately.
     """
+    logger.info(f"Wildcard trajectory background calculation started (task_id={task_id}, budget={budget}, horizon={horizon})")
     try:
         deps = get_dependencies()
         db_manager = deps.db_manager
