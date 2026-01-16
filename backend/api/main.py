@@ -316,11 +316,15 @@ def save_daily_snapshot_job():
             return
         
         if not exception_queue.empty():
-            raise exception_queue.get()
+            exception = exception_queue.get()
+            logger.error(f"save_daily_snapshot_job failed: {exception}", exc_info=True)
+            raise exception
         
         logger.info("save_daily_snapshot_job completed successfully")
     except Exception as e:
         logger.error(f"Error in save_daily_snapshot_job: {e}", exc_info=True)
+        # Re-raise to ensure caller knows it failed
+        raise
 
 async def _save_daily_snapshot_async():
     """Async function to save daily snapshot."""
@@ -430,7 +434,9 @@ async def _save_daily_snapshot_async():
             logger.error(f"Error starting Wildcard trajectory calculation in daily snapshot job: {wc_error}", exc_info=True)
             # Don't fail the entire job if wildcard calculation fails
     except Exception as e:
-        logger.error(f"Error in _save_daily_snapshot_async: {e}")
+        logger.error(f"Error in _save_daily_snapshot_async: {e}", exc_info=True)
+        # Re-raise so the wrapper knows the job failed
+        raise
 
 def schedule_next_save():
     """Schedule the next selected team save job 30 minutes before deadline."""
