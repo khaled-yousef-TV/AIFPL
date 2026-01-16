@@ -139,21 +139,40 @@ class TripleCaptainOptimizer:
                     opponent_team_id = fixture.team_a if is_home else fixture.team_h
                     opponent_team_name = self._get_team_name(opponent_team_id)
                     
+                    # QUICK WIN: Calculate opponent-specific xGC per game
+                    opponent_xgc_per_game = self._calculate_opponent_xgc_per_game(
+                        opponent_team_id, current_gw
+                    )
+                    
                     # For DGW, get both opponents
                     opponents = [opponent_team_name]
+                    opponent_xgc_per_game_2 = None
                     if is_dgw and len(player_fixtures) > 1:
                         fixture2 = player_fixtures[1]
                         is_home2 = fixture2.team_h == player.team
                         opponent_team_id2 = fixture2.team_a if is_home2 else fixture2.team_h
                         opponent_team_name2 = self._get_team_name(opponent_team_id2)
                         opponents.append(opponent_team_name2)
+                        
+                        # Calculate opponent xGC for fixture 2
+                        opponent_xgc_per_game_2 = self._calculate_opponent_xgc_per_game(
+                            opponent_team_id2, current_gw
+                        )
                     
                     # Get clean sheet probability (for DEF/GK)
                     clean_sheet_prob = self._get_clean_sheet_probability(
                         player.element_type, player.team, fixture, features
                     )
                     
+                    # For DGW, use average of both opponents' xGC if available
+                    # TODO: In future, can pass separate xGC for each fixture
+                    opponent_xgc_used = opponent_xgc_per_game
+                    if is_dgw and opponent_xgc_per_game_2 is not None and opponent_xgc_per_game_2 > 0:
+                        # Use average of both opponents' xGC for DGW
+                        opponent_xgc_used = (opponent_xgc_per_game + opponent_xgc_per_game_2) / 2.0
+                    
                     # Calculate haul probability using RECENT xG/xA (4-6 week window)
+                    # QUICK WIN: Pass opponent-specific xGC for more accurate adjustment
                     haul_result = self.haul_calculator.calculate_haul_probability(
                         xg=recent_xg,  # Recent per-game xG from 4-6 week window
                         xa=recent_xa,  # Recent per-game xA from 4-6 week window
@@ -163,7 +182,8 @@ class TripleCaptainOptimizer:
                         clean_sheet_prob=clean_sheet_prob,
                         bonus_points_base=features.ict_index / 10.0,  # Rough BPS proxy
                         is_double_gameweek=is_dgw,
-                        start_probability=start_probability  # Probability of starting
+                        start_probability=start_probability,  # Probability of starting
+                        opponent_xgc_per_game=opponent_xgc_used  # Opponent-specific xGC (averaged for DGW)
                     )
                     
                     player_recommendations.append({
@@ -225,6 +245,58 @@ class TripleCaptainOptimizer:
         if gw:
             return gw.id
         return None
+    
+    def _calculate_opponent_xgc_per_game(self, opponent_team_id: int, current_gw: int) -> float:
+        """
+        Calculate opponent team's xGC (expected goals conceded) per game.
+        
+        QUICK WIN: Uses actual opponent defensive stats instead of generic FDR.
+        
+        Args:
+            opponent_team_id: Opponent team ID
+            current_gw: Current gameweek (to calculate games played)
+            
+        Returns:
+            Opponent team's xGC per game (0.0 if unable to calculate)
+        """
+        try:
+            # Get all players from opponent team
+            all_players = self.client.get_players()
+            opponent_players = [p for p in all_players if p.team == opponent_team_id]
+            
+            if not opponent_players:
+                return 0.0
+            
+            # Aggregate xGC from all players on opponent team
+            # Note: Each player's xGC is for their team (since xGC is team-based stat)
+            # We'll use the team's defensive players (GK/DEF) as they represent team defense
+            # But actually, xGC is already team-level, so we can use any player from that team
+            total_xgc = 0.0
+            total_minutes = 0
+            
+            # Use first player's xGC (it's team-level stat, same for all players on team)
+            # But we need to normalize per game, so calculate games played
+            team_player = opponent_players[0]
+            
+            # Calculate games played (approximate: minutes / 90)
+            games_played = max(1.0, team_player.minutes / 90.0)
+            
+            # Get total xGC for the team (from any player, it's team-level)
+            team_xgc = float(team_player.expected_goals_conceded)
+            
+            # Calculate xGC per game
+            if games_played > 0:
+                xgc_per_game = team_xgc / games_played
+            else:
+                # Fallback: if no games played, estimate based on season average
+                # Typical team xGC per game is 1.2-1.5
+                xgc_per_game = 1.35  # League average
+            
+            return xgc_per_game
+            
+        except Exception as e:
+            logger.warning(f"Error calculating opponent xGC for team {opponent_team_id}: {e}")
+            return 0.0
     
     def _get_fixtures_by_gameweek(
         self,

@@ -49,7 +49,8 @@ class HaulProbabilityCalculator:
         clean_sheet_prob: float = 0.0,
         bonus_points_base: float = 0.0,
         is_double_gameweek: bool = False,
-        start_probability: float = 1.0
+        start_probability: float = 1.0,
+        opponent_xgc_per_game: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Calculate haul probability for a single gameweek.
@@ -73,12 +74,14 @@ class HaulProbabilityCalculator:
             # For DGW, simulate both fixtures and sum points
             return self._calculate_dgw_haul_probability(
                 xg, xa, position, fixture_difficulty, is_home,
-                clean_sheet_prob, bonus_points_base, start_probability
+                clean_sheet_prob, bonus_points_base, start_probability,
+                opponent_xgc_per_game
             )
         else:
             return self._calculate_single_fixture_haul_probability(
                 xg, xa, position, fixture_difficulty, is_home,
-                clean_sheet_prob, bonus_points_base, start_probability
+                clean_sheet_prob, bonus_points_base, start_probability,
+                opponent_xgc_per_game
             )
     
     def _calculate_single_fixture_haul_probability(
@@ -90,7 +93,8 @@ class HaulProbabilityCalculator:
         is_home: bool,
         clean_sheet_prob: float,
         bonus_points_base: float,
-        start_probability: float = 1.0
+        start_probability: float = 1.0,
+        opponent_xgc_per_game: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Calculate haul probability for a single fixture.
@@ -101,8 +105,10 @@ class HaulProbabilityCalculator:
         haul_count = 0
         total_points_samples = []
         
-        # Adjust xG/xA based on fixture difficulty and home advantage
-        difficulty_factor = self._get_difficulty_factor(fixture_difficulty, is_home)
+        # Adjust xG/xA based on opponent-specific xGC (or fallback to generic FDR)
+        difficulty_factor = self._get_difficulty_factor(
+            fixture_difficulty, is_home, opponent_xgc_per_game
+        )
         adjusted_xg = xg * difficulty_factor
         adjusted_xa = xa * difficulty_factor
         
@@ -173,7 +179,8 @@ class HaulProbabilityCalculator:
         is_home: bool,
         clean_sheet_prob: float,
         bonus_points_base: float,
-        start_probability: float = 1.0
+        start_probability: float = 1.0,
+        opponent_xgc_per_game: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Calculate haul probability for a double gameweek (two fixtures).
@@ -184,9 +191,14 @@ class HaulProbabilityCalculator:
         total_points_samples = []
         
         # For DGW, we simulate both fixtures
-        # Assume second fixture has similar difficulty (can be improved with actual fixture data)
-        difficulty_factor_1 = self._get_difficulty_factor(fixture_difficulty, is_home)
-        difficulty_factor_2 = self._get_difficulty_factor(fixture_difficulty, not is_home)  # Assume away for second
+        # Use opponent xGC for both fixtures (assumes same opponent or similar difficulty)
+        # TODO: In future, can pass separate opponent_xgc_per_game for fixture 2
+        difficulty_factor_1 = self._get_difficulty_factor(
+            fixture_difficulty, is_home, opponent_xgc_per_game
+        )
+        difficulty_factor_2 = self._get_difficulty_factor(
+            fixture_difficulty, not is_home, opponent_xgc_per_game  # Assume away for second
+        )
         
         for _ in range(self.MONTE_CARLO_ITERATIONS):
             # PHASE 1 FIX: Check if player starts in fixture 1
@@ -265,23 +277,47 @@ class HaulProbabilityCalculator:
             "is_double_gameweek": True
         }
     
-    def _get_difficulty_factor(self, difficulty: int, is_home: bool) -> float:
+    def _get_difficulty_factor(
+        self, 
+        difficulty: int, 
+        is_home: bool, 
+        opponent_xgc_per_game: Optional[float] = None
+    ) -> float:
         """
-        Get difficulty adjustment factor.
+        Get difficulty adjustment factor using opponent-specific xGC.
         
-        FDR: 1=easiest, 5=hardest
-        Returns multiplier for xG/xA (higher for easier fixtures)
+        Args:
+            difficulty: FDR (1=easiest, 5=hardest) - used as fallback
+            is_home: Whether player is playing at home
+            opponent_xgc_per_game: Opponent's xGC per game (if available)
+            
+        Returns:
+            Multiplier for xG/xA (higher for easier fixtures)
         """
-        # Base factors: easier fixtures = higher multiplier
-        base_factors = {
-            1: 1.3,  # Very easy
-            2: 1.15,  # Easy
-            3: 1.0,   # Medium
-            4: 0.85,  # Hard
-            5: 0.7,   # Very hard
-        }
-        
-        factor = base_factors.get(difficulty, 1.0)
+        # QUICK WIN: Use opponent-specific xGC instead of generic FDR
+        if opponent_xgc_per_game is not None and opponent_xgc_per_game > 0:
+            # League average xGC is typically around 1.2-1.5 per game
+            # Higher opponent xGC = weaker defense = easier fixture = higher multiplier
+            league_avg_xgc = 1.35  # Typical league average
+            
+            # Calculate adjustment: +0.15 factor per 0.1 xGC above league average
+            # Example: opponent xGC = 1.6 (weak) -> factor = 1.0 + (1.6-1.35)*1.5 = 1.375
+            # Example: opponent xGC = 1.0 (strong) -> factor = 1.0 + (1.0-1.35)*1.5 = 0.475
+            xgc_diff = opponent_xgc_per_game - league_avg_xgc
+            factor = 1.0 + (xgc_diff * 1.5)  # 1.5x multiplier for xGC difference
+            
+            # Cap factor between reasonable bounds (0.6 to 1.5)
+            factor = max(0.6, min(1.5, factor))
+        else:
+            # Fallback to generic FDR if opponent xGC not available
+            base_factors = {
+                1: 1.3,  # Very easy
+                2: 1.15,  # Easy
+                3: 1.0,   # Medium
+                4: 0.85,  # Hard
+                5: 0.7,   # Very hard
+            }
+            factor = base_factors.get(difficulty, 1.0)
         
         # Home advantage adds ~10%
         if is_home:
