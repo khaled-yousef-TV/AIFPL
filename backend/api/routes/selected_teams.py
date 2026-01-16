@@ -26,9 +26,11 @@ async def get_selected_teams():
         # Get current/next gameweek
         next_gw = fpl_client.get_next_gameweek()
         current_gw_id = next_gw.id if next_gw else None
+        logger.info(f"get_selected_teams: current_gw_id={current_gw_id}")
         
         # Get all final teams (30 min before deadline)
         final_teams = db_manager.get_all_selected_teams()
+        logger.info(f"get_selected_teams: found {len(final_teams)} final teams")
         
         # Build response: use daily snapshot for current gameweek, final team for past
         teams_result = []
@@ -43,11 +45,13 @@ async def get_selected_teams():
             if current_gw_id and gw >= current_gw_id:
                 daily_snapshot = db_manager.get_latest_daily_snapshot(gw)
                 if daily_snapshot:
+                    logger.info(f"get_selected_teams: GW{gw} - using daily snapshot (saved_at={daily_snapshot.get('saved_at')}) instead of final team")
                     teams_result.append({
                         **daily_snapshot,
                         "type": "daily_snapshot"
                     })
                 else:
+                    logger.info(f"get_selected_teams: GW{gw} - no daily snapshot found, using final team")
                     teams_result.append({
                         **team,
                         "type": "final"
@@ -62,6 +66,7 @@ async def get_selected_teams():
         if current_gw_id and current_gw_id not in processed_gameweeks:
             daily_snapshot = db_manager.get_latest_daily_snapshot(current_gw_id)
             if daily_snapshot:
+                logger.info(f"get_selected_teams: GW{current_gw_id} - found daily snapshot (no final team)")
                 teams_result.append({
                     **daily_snapshot,
                     "type": "daily_snapshot"
