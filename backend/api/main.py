@@ -543,24 +543,9 @@ async def check_and_run_missed_saves():
                 logger.info(f"No daily snapshot exists for GW{next_gw.id}. Creating one now.")
                 await _save_daily_snapshot_async()
             
-            # Also check if wildcard trajectory exists, generate if missing
-            wildcard_trajectory = db_manager.get_wildcard_trajectory()
-            if not wildcard_trajectory:
-                logger.info(f"No wildcard trajectory exists. Generating one now as part of startup check.")
-                # Generate wildcard trajectory in background thread
-                try:
-                    import threading
-                    import uuid
-                    task_id = f"wildcard_startup_{uuid.uuid4().hex[:12]}"
-                    thread = threading.Thread(
-                        target=chips_router._calculate_wildcard_background,
-                        args=(task_id, 100.0, 8, None),  # budget=100, horizon=8, current_squad=None
-                        daemon=True
-                    )
-                    thread.start()
-                    logger.info(f"Wildcard trajectory generation started in background thread on startup")
-                except Exception as wc_error:
-                    logger.error(f"Error starting Wildcard trajectory calculation on startup: {wc_error}")
+            # Note: Wildcard trajectory is not generated on startup (takes too long)
+            # The last generated trajectory is kept in DB and will be shown in UI
+            # New trajectory is generated automatically by daily snapshot job at midnight
         except Exception as snapshot_error:
             logger.error(f"Error checking daily snapshot: {snapshot_error}")
             
