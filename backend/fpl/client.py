@@ -87,22 +87,34 @@ class FPLClient:
         else:
             session = self._session
         
-        try:
-            response = session.get(url, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 503:
-                logger.warning(f"FPL API temporarily unavailable (503): {url}. This may be rate limiting or maintenance.")
-                # Return empty result instead of crashing for 503s
-                if "fixtures" in endpoint:
-                    return []
-                return {}
-            logger.error(f"API request failed: {e}")
-            raise
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed: {e}")
-            raise
+        # Retry logic for transient connection errors
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+                return response.json()
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"API request failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"API request failed after {max_retries} attempts: {e}")
+                    raise
+            except requests.exceptions.HTTPError as e:
+                if response.status_code == 503:
+                    logger.warning(f"FPL API temporarily unavailable (503): {url}. This may be rate limiting or maintenance.")
+                    # Return empty result instead of crashing for 503s
+                    if "fixtures" in endpoint:
+                        return []
+                    return {}
+                logger.error(f"API request failed: {e}")
+                raise
+            except requests.exceptions.RequestException as e:
+                logger.error(f"API request failed: {e}")
+                raise
     
     def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
