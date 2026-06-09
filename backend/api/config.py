@@ -27,6 +27,15 @@ def validate_env() -> None:
         "THE_ODDS_API_KEY": "Betting odds integration",
         "DATABASE_URL": "Database connection",
         "CORS_ORIGINS": "CORS configuration",
+        # Hermes LLM orchestrator (any OpenAI-compatible provider)
+        "LLM_BASE_URL": "Hermes LLM endpoint (Nous/OpenRouter/DeepSeek)",
+        "LLM_MODEL": "Hermes LLM model id",
+        "LLM_API_KEY": "Hermes LLM API key",
+        # News agent web search (Phase 3)
+        "TAVILY_API_KEY": "News agent web search",
+        # Telegram notifications (Phase 3)
+        "TELEGRAM_BOT_TOKEN": "Telegram pre-deadline notifications",
+        "TELEGRAM_CHAT_ID": "Telegram chat target",
     }
     
     for var, description in optional_vars.items():

@@ -280,6 +280,38 @@ class WildcardTrajectory(Base):
         return f"<WildcardTrajectory(id={self.id}, budget={self.budget}, horizon={self.horizon}, created_at={self.created_at})>"
 
 
+class HermesRun(Base):
+    """Store Hermes orchestrator runs: signals, LLM adjustments, optimizer results."""
+    __tablename__ = "hermes_runs"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(100), nullable=False, unique=True, index=True)
+    gameweek = Column(Integer, nullable=False, index=True)
+    run_type = Column(String(30), nullable=False, index=True)  # briefing, squad, wildcard, ...
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending/running/completed/degraded/failed
+    fpl_team_id = Column(Integer, nullable=True)
+
+    # Payloads
+    signals = Column(JSON, nullable=True)       # dict of AgentReport dumps
+    adjustments = Column(JSON, nullable=True)   # validated HermesAdjustments dump
+    result = Column(JSON, nullable=True)        # optimizer outputs keyed by rec type
+    evaluation = Column(JSON, nullable=True)    # post-GW scoring (filled by learning loop)
+    narrative = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+
+    # LLM accounting
+    model = Column(String(100), nullable=True)
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<HermesRun(run_id='{self.run_id}', type='{self.run_type}', gw={self.gameweek}, status='{self.status}')>"
+
+
 def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.

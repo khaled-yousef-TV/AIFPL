@@ -1,0 +1,178 @@
+"""
+Variability agent.
+
+Computes per-player score volatility from gameweek history
+(element-summary endpoint): variance, ceiling/floor percentiles, haul and
+blank rates. High-ceiling players are captaincy/Triple Captain material;
+high-consistency players are squad core material.
+
+The element-summary endpoint is one HTTP call per player, so we restrict
+to a candidate pool and cache results per day.
+"""
+
+import logging
+import os
+from datetime import date
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from pydantic import BaseModel
+
+from .base import AgentContext, BaseAgent
+from .schemas import VariabilityEntry, VariabilitySignals
+
+logger = logging.getLogger(__name__)
+
+# Pool size is capped to keep first-run latency and API load sane
+# (each player costs one rate-limited HTTP call).
+DEFAULT_POOL_SIZE = int(os.getenv("HERMES_VARIABILITY_POOL", "120"))
+# Minimum appearances for stats to be meaningful
+MIN_APPEARANCES = 5
+# Thresholds
+HAUL_POINTS = 10
+BLANK_POINTS = 2
+
+# Daily cache: {player_id: VariabilityEntry-dict}, keyed by ISO date
+_cache: Dict[str, Dict[int, dict]] = {}
+
+
+def compute_variability_stats(points: List[int]) -> Optional[dict]:
+    """
+    Compute volatility stats from a list of per-GW points (appearances only).
+
+    Returns None when there are too few appearances to be meaningful.
+    """
+    if len(points) < MIN_APPEARANCES:
+        return None
+
+    arr = np.array(points, dtype=float)
+    mean = float(np.mean(arr))
+    stddev = float(np.std(arr))
+    cv = stddev / mean if mean > 0 else 0.0
+
+    return {
+        "n_gws": len(points),
+        "mean_pts": round(mean, 2),
+        "stddev": round(stddev, 2),
+        "cv": round(cv, 3),
+        "ceiling_p90": round(float(np.percentile(arr, 90)), 1),
+        "floor_p10": round(float(np.percentile(arr, 10)), 1),
+        "haul_rate": round(float(np.mean(arr >= HAUL_POINTS)), 3),
+        "blank_rate": round(float(np.mean(arr <= BLANK_POINTS)), 3),
+        # 1 at perfectly steady output, decaying as volatility grows
+        "consistency_score": round(1.0 / (1.0 + cv), 3),
+    }
+
+
+class VariabilityAgent(BaseAgent):
+    name = "variability"
+
+    def _candidate_pool(self, ctx: AgentContext) -> List[int]:
+        """Top players by season points + top predicted + user team, deduped."""
+        client = ctx.fpl_client
+        pool_size = DEFAULT_POOL_SIZE
+
+        by_points = client.get_top_players(n=pool_size)
+        ids = [p.id for p in by_points]
+        seen = set(ids)
+
+        try:
+            from services.prediction_service import compute_predictions
+            for p in compute_predictions()[:pool_size // 2]:
+                if p["id"] not in seen:
+                    ids.append(p["id"])
+                    seen.add(p["id"])
+        except Exception as e:
+            logger.warning(f"Variability pool: predictions unavailable ({e})")
+
+        for pid in ctx.user_player_ids:
+            if pid not in seen:
+                ids.append(pid)
+                seen.add(pid)
+
+        return ids[:pool_size + len(ctx.user_player_ids)]
+
+    def _build(self, ctx: AgentContext) -> Tuple[str, BaseModel, str]:
+        client = ctx.fpl_client
+        players_by_id = {p.id: p for p in client.get_players()}
+        teams = {t.id: t.short_name for t in client.get_teams()}
+
+        pool = self._candidate_pool(ctx)
+
+        cache_key = date.today().isoformat()
+        day_cache = _cache.setdefault(cache_key, {})
+        # Drop stale days
+        for key in [k for k in _cache if k != cache_key]:
+            del _cache[key]
+
+        entries: List[VariabilityEntry] = []
+        fetch_errors = 0
+        for pid in pool:
+            pl = players_by_id.get(pid)
+            if not pl:
+                continue
+
+            if pid in day_cache:
+                cached = day_cache[pid]
+                if cached is not None:
+                    entries.append(VariabilityEntry(**cached))
+                continue
+
+            try:
+                details = client.get_player_details(pid)
+                history = details.get("history", [])
+            except Exception as e:
+                fetch_errors += 1
+                logger.warning(f"Variability: failed to fetch history for {pl.web_name}: {e}")
+                continue
+
+            # Appearances only: variability of output when actually playing
+            points = [
+                h.get("total_points", 0) for h in history
+                if h.get("minutes", 0) > 0
+            ]
+            stats = compute_variability_stats(points)
+            if stats is None:
+                day_cache[pid] = None  # cached negative: too few appearances
+                continue
+
+            entry_dict = {
+                "id": pid,
+                "name": pl.web_name,
+                "team": teams.get(pl.team, "???"),
+                "position": pl.position,
+                **stats,
+            }
+            day_cache[pid] = entry_dict
+            entries.append(VariabilityEntry(**entry_dict))
+
+        # High ceiling among genuinely good players -> captaincy material
+        good = [e for e in entries if e.mean_pts >= 4.0]
+        captaincy = [
+            e.id for e in sorted(good, key=lambda e: e.ceiling_p90, reverse=True)[:10]
+        ]
+        core = [
+            e.id for e in sorted(good, key=lambda e: e.consistency_score, reverse=True)[:10]
+        ]
+
+        entries.sort(key=lambda e: e.ceiling_p90, reverse=True)
+
+        payload = VariabilitySignals(
+            pool_size=len(pool),
+            covered=len(entries),
+            players=entries,
+            captaincy_candidates=captaincy,
+            core_candidates=core,
+        )
+
+        status = "degraded" if fetch_errors > 0 else "ok"
+        names_by_id = {e.id: e.name for e in entries}
+        cap_names = ", ".join(names_by_id.get(i, "?") for i in captaincy[:3])
+        core_names = ", ".join(names_by_id.get(i, "?") for i in core[:3])
+        summary = (
+            f"Volatility computed for {len(entries)}/{len(pool)} pool players. "
+            f"Highest ceilings: {cap_names or 'none'}. "
+            f"Most consistent: {core_names or 'none'}."
+            + (f" ({fetch_errors} fetch errors.)" if fetch_errors else "")
+        )
+        return summary, payload, status

@@ -189,6 +189,8 @@ from api.routes import selected_teams as selected_teams_router
 from api.routes import predictions as predictions_router
 from api.routes import suggested_squad as suggested_squad_router
 from api.routes import transfers as transfers_router
+from api.routes import hermes as hermes_router
+from api.routes import notifications as notifications_router
 
 # Initialize dependencies for routes
 from services.dependencies import init_dependencies
@@ -210,6 +212,8 @@ app.include_router(selected_teams_router.router, prefix="/api/selected-teams", t
 app.include_router(predictions_router.router, prefix="/api", tags=["predictions"])
 app.include_router(suggested_squad_router.router, prefix="/api", tags=["squad"])
 app.include_router(transfers_router.router, prefix="/api", tags=["transfers"])
+app.include_router(hermes_router.router, prefix="/api/hermes", tags=["hermes"])
+app.include_router(notifications_router.router, prefix="/api/notifications", tags=["notifications"])
 
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
@@ -368,9 +372,9 @@ async def _save_daily_snapshot_async():
                 if chance is not None and chance < 50:
                     invalid_players.append(f"{player.web_name} {player.second_name} (chance: {chance}%)")
                     continue
-                # Check news field
-                news_lower = (player.news or "").lower()
-                if any(keyword in news_lower for keyword in ["injured", "injury", "suspended", "unavailable", "ruled out", "will miss", "out for"]):
+                # Check news field (keyword logic lives in the availability agent)
+                from agents.availability_agent import has_negative_news
+                if has_negative_news(player.news):
                     invalid_players.append(f"{player.web_name} {player.second_name} (news: {player.news[:50]})")
             
             if not invalid_players:
@@ -497,6 +501,135 @@ def schedule_next_save():
     except Exception as e:
         logger.error(f"Error scheduling selected team save: {e}")
 
+def send_telegram_squad_job():
+    """Send the suggested squad via Telegram (runs 60 minutes before deadline)."""
+    import asyncio
+    import threading
+    import queue
+    try:
+        from notifications.telegram import TelegramNotifier
+        notifier = TelegramNotifier()
+        if not notifier.enabled:
+            logger.info("Telegram not configured — skipping pre-deadline message")
+            return
+
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
+            logger.warning("No next gameweek found for Telegram squad message")
+            return
+
+        # Send-once guard per gameweek
+        sent_key = f"telegram_squad_sent_gw_{next_gw.id}"
+        if db_manager.get_setting(sent_key):
+            logger.info(f"Telegram squad message for GW{next_gw.id} already sent, skipping")
+            return
+
+        # Build the suggested squad in a worker thread (same pattern as other jobs)
+        result_queue = queue.Queue()
+
+        def run_async():
+            try:
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                squad = new_loop.run_until_complete(
+                    build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0)
+                )
+                new_loop.close()
+                result_queue.put(("ok", squad))
+            except Exception as e:
+                result_queue.put(("error", e))
+
+        thread = threading.Thread(target=run_async, daemon=False)
+        thread.start()
+        thread.join(timeout=120)
+        if thread.is_alive() or result_queue.empty():
+            logger.error("Telegram squad job: squad build timed out")
+            return
+        status, squad_data = result_queue.get()
+        if status == "error":
+            raise squad_data
+
+        # Attach the latest Hermes narrative for this GW if one exists
+        hermes_narrative = None
+        try:
+            latest = db_manager.get_latest_hermes_run(
+                gameweek=next_gw.id, statuses=["completed", "degraded"]
+            )
+            if latest:
+                hermes_narrative = latest.get("narrative")
+        except Exception as e:
+            logger.warning(f"Could not fetch Hermes narrative for Telegram message: {e}")
+
+        from notifications.telegram import format_squad_message
+        message = format_squad_message(squad_data, next_gw.id, hermes_narrative=hermes_narrative)
+        if notifier.send(message):
+            db_manager.set_setting(sent_key, datetime.utcnow().isoformat())
+            logger.info(f"Telegram squad message sent for GW{next_gw.id}")
+        else:
+            logger.error(f"Telegram squad message failed for GW{next_gw.id}")
+    except Exception as e:
+        logger.error(f"Error in send_telegram_squad_job: {e}", exc_info=True)
+
+
+def schedule_next_telegram_notification():
+    """Schedule the Telegram squad message 60 minutes before the next deadline."""
+    try:
+        from notifications.telegram import TelegramNotifier
+        if not TelegramNotifier().enabled:
+            return
+
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw or not next_gw.deadline_time:
+            return
+
+        deadline = next_gw.deadline_time
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+
+        send_time = deadline - timedelta(minutes=60)
+        now = datetime.now(deadline.tzinfo) if getattr(deadline, 'tzinfo', None) else datetime.now()
+
+        if send_time <= now < deadline:
+            # Inside the window (e.g. server just woke up): send immediately
+            logger.info(f"Within 60-min window for GW{next_gw.id} — sending Telegram message now")
+            send_telegram_squad_job()
+            return
+        if now >= deadline:
+            return
+
+        scheduler.add_job(
+            send_telegram_squad_job,
+            DateTrigger(run_date=send_time),
+            id="send_telegram_squad",
+            name="Send Telegram Squad 60min Before Deadline",
+            replace_existing=True,
+        )
+        logger.info(f"Scheduled Telegram squad message for GW{next_gw.id} at {send_time}")
+    except Exception as e:
+        logger.error(f"Error scheduling Telegram notification: {e}")
+
+
+def run_hermes_briefing_job():
+    """Daily Hermes briefing (03:30 UTC, after the midnight snapshot + chip calcs)."""
+    try:
+        from hermes.config import load_hermes_config
+        config = load_hermes_config()
+        if not (config.daily_briefing and config.llm_configured):
+            logger.debug("Hermes daily briefing disabled or LLM unconfigured — skipping")
+            return
+
+        from services.hermes_service import start_hermes_run
+        outcome = start_hermes_run("briefing")  # serves today's cached run if it exists
+        if outcome.get("cached"):
+            logger.info("Hermes daily briefing already exists for today")
+        else:
+            logger.info(f"Hermes daily briefing started: {outcome['run_id']}")
+    except RuntimeError as e:
+        logger.info(f"Hermes briefing already in progress: {e}")
+    except Exception as e:
+        logger.error(f"Error in run_hermes_briefing_job: {e}", exc_info=True)
+
+
 async def check_and_run_missed_saves():
     """Check if we missed any saves while the server was down and run them."""
     try:
@@ -574,6 +707,12 @@ async def startup_event():
         
         # Schedule the first save job (30 min before deadline)
         schedule_next_save()
+
+        # Schedule the Telegram squad message (60 min before deadline)
+        schedule_next_telegram_notification()
+
+        # Backfill today's Hermes briefing if enabled and missed (Render spin-down)
+        run_hermes_briefing_job()
         
         # Also schedule a check every 6 hours to reschedule if needed
         from apscheduler.triggers.cron import CronTrigger
@@ -587,6 +726,13 @@ async def startup_event():
                 CronTrigger(**trigger_kwargs),  # Every 6 hours
                 id="check_and_schedule_selected_team",
                 name="Check and Schedule Selected Team Save",
+                replace_existing=True
+            )
+            scheduler.add_job(
+                schedule_next_telegram_notification,
+                CronTrigger(**trigger_kwargs),  # Every 6 hours
+                id="check_and_schedule_telegram",
+                name="Check and Schedule Telegram Squad Message",
                 replace_existing=True
             )
             logger.info("Added check_and_schedule_selected_team job")
@@ -608,6 +754,23 @@ async def startup_event():
             logger.info("Added save_daily_snapshot job")
         except Exception as e:
             logger.error(f"Failed to add save_daily_snapshot job: {e}", exc_info=True)
+
+        # Schedule daily Hermes briefing at 03:30 UTC (after snapshot + chip calcs).
+        # The job itself is gated on HERMES_DAILY_BRIEFING + LLM config.
+        try:
+            trigger_kwargs = {"hour": 3, "minute": 30}
+            if UTC:
+                trigger_kwargs["timezone"] = UTC
+            scheduler.add_job(
+                run_hermes_briefing_job,
+                CronTrigger(**trigger_kwargs),
+                id="hermes_daily_briefing",
+                name="Hermes Daily Briefing",
+                replace_existing=True
+            )
+            logger.info("Added hermes_daily_briefing job")
+        except Exception as e:
+            logger.error(f"Failed to add hermes_daily_briefing job: {e}", exc_info=True)
         
         # Log scheduler status
         logger.info(f"Scheduler is running: {scheduler.running}")

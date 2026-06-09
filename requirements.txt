@@ -18,8 +18,14 @@ python-dotenv>=1.0.0
 # HTTP requests (if used by FPL client)
 requests>=2.31.0
 
+# Hermes LLM orchestrator (OpenAI-compatible client: Nous/OpenRouter/DeepSeek)
+openai>=1.40.0
+
 # Date parsing (optional, for better date handling)
 python-dateutil>=2.8.0
+
+# Testing
+pytest>=7.4.0
 
 # Machine learning dependencies
 numpy>=1.24.0
