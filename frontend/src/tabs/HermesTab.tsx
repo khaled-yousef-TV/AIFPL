@@ -42,6 +42,35 @@ const AGENT_LABELS: Record<string, string> = {
   news: 'News & Sentiment',
 }
 
+/** Render inline **bold** within a line of text. */
+function renderInline(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? (
+      <strong key={i} className="text-content font-semibold">{part.slice(2, -2)}</strong>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    ),
+  )
+}
+
+/** Minimal, dependency-free markdown renderer for Hermes' narrative. */
+function Narrative({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <div className="space-y-1.5 text-sm text-content-muted leading-relaxed">
+      {lines.map((line, i) => {
+        const t = line.trim()
+        if (!t) return <div key={i} className="h-1" />
+        if (t.startsWith('### ')) return <h4 key={i} className="text-content font-semibold mt-3">{renderInline(t.slice(4))}</h4>
+        if (t.startsWith('## ')) return <h3 key={i} className="text-content font-semibold text-base mt-3">{renderInline(t.slice(3))}</h3>
+        if (t.startsWith('# ')) return <h3 key={i} className="text-content font-semibold text-base mt-3">{renderInline(t.slice(2))}</h3>
+        if (/^[-*]\s/.test(t)) return <div key={i} className="flex gap-2 pl-1"><span className="text-primary">•</span><span>{renderInline(t.slice(2))}</span></div>
+        return <p key={i}>{renderInline(t)}</p>
+      })}
+    </div>
+  )
+}
+
 const HermesTab: React.FC = () => {
   const [status, setStatus] = useState<HermesStatus | null>(null)
   const [runType, setRunType] = useState<HermesRunType>('briefing')
@@ -115,10 +144,10 @@ const HermesTab: React.FC = () => {
       <div className="card">
         <div className="card-header">
           <div className="flex items-center gap-2">
-            <Brain className="w-5 h-5 text-purple-400" />
+            <Brain className="w-5 h-5 text-magenta" />
             <span>Ask Hermes</span>
             {status?.model && (
-              <span className="text-xs text-gray-500 ml-2">({status.model})</span>
+              <span className="text-xs text-content-subtle ml-2">({status.model})</span>
             )}
           </div>
         </div>
@@ -130,12 +159,12 @@ const HermesTab: React.FC = () => {
               onClick={() => setRunType(rt.value)}
               className={`text-left p-3 rounded-lg border transition-colors ${
                 runType === rt.value
-                  ? 'border-purple-500 bg-purple-500/10'
-                  : 'border-[#2a2a4a] bg-[#0f0f1a] hover:border-purple-500/50'
+                  ? 'border-magenta bg-magenta/10'
+                  : 'border-border bg-bg hover:border-magenta/50'
               }`}
             >
               <div className="text-sm font-medium text-white">{rt.label}</div>
-              <div className="text-xs text-gray-400 mt-0.5">{rt.description}</div>
+              <div className="text-xs text-content-muted mt-0.5">{rt.description}</div>
             </button>
           ))}
         </div>
@@ -144,7 +173,7 @@ const HermesTab: React.FC = () => {
           <button
             onClick={() => handleAsk(false)}
             disabled={starting || isRunning}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white font-medium disabled:opacity-50 hover:from-purple-500 hover:to-purple-400 transition-colors"
+            className="btn btn-hermes flex items-center gap-2"
           >
             {starting || isRunning ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -157,7 +186,7 @@ const HermesTab: React.FC = () => {
             <button
               onClick={() => handleAsk(true)}
               disabled={starting || isRunning}
-              className="text-sm text-gray-400 hover:text-white transition-colors"
+              className="text-sm text-content-muted hover:text-content transition-colors"
             >
               Re-run fresh
             </button>
@@ -177,7 +206,7 @@ const HermesTab: React.FC = () => {
           <div className="card-header">
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
-                <Bot className="w-5 h-5 text-cyan-400" />
+                <Bot className="w-5 h-5 text-accent" />
                 <span>
                   {RUN_TYPES.find((r) => r.value === run.run_type)?.label || run.run_type} — GW
                   {run.gameweek}
@@ -191,7 +220,7 @@ const HermesTab: React.FC = () => {
                     ? 'bg-yellow-500/20 text-yellow-400'
                     : run.status === 'failed'
                     ? 'bg-red-500/20 text-red-400'
-                    : 'bg-cyan-500/20 text-cyan-400'
+                    : 'bg-cyan-500/20 text-accent'
                 }`}
               >
                 {run.status}
@@ -200,8 +229,8 @@ const HermesTab: React.FC = () => {
           </div>
 
           {isRunning && (
-            <div className="text-center py-10 text-gray-400">
-              <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-purple-400" />
+            <div className="text-center py-10 text-content-muted">
+              <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-magenta" />
               <p>Running agents and reasoning over the signals…</p>
               <p className="text-xs mt-1">This can take a minute (LLM + 7 agents).</p>
             </div>
@@ -213,20 +242,20 @@ const HermesTab: React.FC = () => {
 
           {/* Narrative */}
           {run.narrative && !isRunning && (
-            <div className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4 mb-4 whitespace-pre-wrap text-sm text-gray-200">
-              {run.narrative}
+            <div className="bg-bg rounded-lg border border-border p-4 mb-4">
+              <Narrative text={run.narrative} />
             </div>
           )}
 
           {/* Captain ranking */}
           {run.result?.captain_ranking?.length > 0 && !isRunning && (
             <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">Captaincy ranking</h4>
+              <h4 className="text-sm font-medium text-content-muted mb-2">Captaincy ranking</h4>
               <ol className="space-y-1">
                 {run.result.captain_ranking.slice(0, 5).map((c: any, i: number) => (
-                  <li key={c.id} className="text-sm text-gray-200">
-                    <span className="text-purple-400 font-medium">{i + 1}.</span> {c.name}
-                    {i === 0 && <span className="ml-2 text-xs text-purple-300">(C)</span>}
+                  <li key={c.id} className="text-sm text-content">
+                    <span className="text-magenta font-medium">{i + 1}.</span> {c.name}
+                    {i === 0 && <span className="ml-2 text-xs text-magenta">(C)</span>}
                   </li>
                 ))}
               </ol>
@@ -236,33 +265,33 @@ const HermesTab: React.FC = () => {
           {/* Optimized squad */}
           {run.result?.squad && !isRunning && (
             <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">
+              <h4 className="text-sm font-medium text-content-muted mb-2">
                 Optimized squad ({run.result.squad.formation}) —{' '}
                 {run.result.squad.predicted_points} projected pts
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <div className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-3">
-                  <p className="text-xs text-gray-500 mb-2">Starting XI</p>
+                <div className="bg-bg rounded-lg border border-border p-3">
+                  <p className="text-xs text-content-subtle mb-2">Starting XI</p>
                   {run.result.squad.starting_xi?.map((p: any) => (
-                    <div key={p.id} className="text-sm text-gray-200 flex justify-between">
+                    <div key={p.id} className="text-sm text-content flex justify-between">
                       <span>
                         {p.name}
-                        {p.is_captain && <span className="text-purple-300"> (C)</span>}
-                        {p.is_vice_captain && <span className="text-gray-400"> (V)</span>}
+                        {p.is_captain && <span className="text-magenta"> (C)</span>}
+                        {p.is_vice_captain && <span className="text-content-muted"> (V)</span>}
                       </span>
-                      <span className="text-gray-500">{Number(p.predicted).toFixed(1)}</span>
+                      <span className="text-content-subtle">{Number(p.predicted).toFixed(1)}</span>
                     </div>
                   ))}
                 </div>
-                <div className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-3">
-                  <p className="text-xs text-gray-500 mb-2">Bench</p>
+                <div className="bg-bg rounded-lg border border-border p-3">
+                  <p className="text-xs text-content-subtle mb-2">Bench</p>
                   {run.result.squad.bench?.map((p: any) => (
-                    <div key={p.id} className="text-sm text-gray-400 flex justify-between">
+                    <div key={p.id} className="text-sm text-content-muted flex justify-between">
                       <span>{p.name}</span>
-                      <span className="text-gray-600">{Number(p.predicted).toFixed(1)}</span>
+                      <span className="text-content-subtle">{Number(p.predicted).toFixed(1)}</span>
                     </div>
                   ))}
-                  <p className="text-xs text-gray-500 mt-3">
+                  <p className="text-xs text-content-subtle mt-3">
                     Cost: £{run.result.squad.total_cost}m · Bank: £{run.result.squad.remaining_budget}m
                   </p>
                 </div>
@@ -273,19 +302,19 @@ const HermesTab: React.FC = () => {
           {/* Chip advice */}
           {run.result?.chip_advice && !isRunning && (
             <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">Chip advice</h4>
-              <p className="text-sm text-gray-200">{run.result.chip_advice.reason}</p>
+              <h4 className="text-sm font-medium text-content-muted mb-2">Chip advice</h4>
+              <p className="text-sm text-content">{run.result.chip_advice.reason}</p>
             </div>
           )}
 
           {/* Transfer priorities */}
           {run.result?.transfer_priorities?.length > 0 && !isRunning && (
             <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">Transfer priorities</h4>
+              <h4 className="text-sm font-medium text-content-muted mb-2">Transfer priorities</h4>
               {run.result.transfer_priorities.map((t: any, i: number) => (
-                <p key={i} className="text-sm text-gray-200">
+                <p key={i} className="text-sm text-content">
                   {t.out_name} → {t.in_name}{' '}
-                  <span className="text-xs text-gray-500">({t.urgency})</span> — {t.reason}
+                  <span className="text-xs text-content-subtle">({t.urgency})</span> — {t.reason}
                 </p>
               ))}
             </div>
@@ -294,21 +323,21 @@ const HermesTab: React.FC = () => {
           {/* Agent signals (collapsible) */}
           {run.signals && !isRunning && (
             <div>
-              <h4 className="text-sm font-medium text-gray-300 mb-2">Agent signals</h4>
+              <h4 className="text-sm font-medium text-content-muted mb-2">Agent signals</h4>
               <div className="space-y-1">
                 {Object.entries(run.signals).map(([name, report]) => {
                   const r = report as AgentReport
                   const open = openAgents[name]
                   return (
-                    <div key={name} className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                    <div key={name} className="bg-bg rounded-lg border border-border">
                       <button
                         onClick={() => setOpenAgents((s) => ({ ...s, [name]: !s[name] }))}
                         className="w-full flex items-center gap-2 p-3 text-left"
                       >
                         {open ? (
-                          <ChevronDown className="w-4 h-4 text-gray-500" />
+                          <ChevronDown className="w-4 h-4 text-content-subtle" />
                         ) : (
-                          <ChevronRight className="w-4 h-4 text-gray-500" />
+                          <ChevronRight className="w-4 h-4 text-content-subtle" />
                         )}
                         <span className="text-sm text-white">{AGENT_LABELS[name] || name}</span>
                         {r.status === 'ok' ? (
@@ -320,10 +349,10 @@ const HermesTab: React.FC = () => {
                             }`}
                           />
                         )}
-                        <span className="text-xs text-gray-500 ml-auto">{r.elapsed_ms}ms</span>
+                        <span className="text-xs text-content-subtle ml-auto">{r.elapsed_ms}ms</span>
                       </button>
                       {open && (
-                        <div className="px-3 pb-3 text-sm text-gray-300">{r.summary}</div>
+                        <div className="px-3 pb-3 text-sm text-content-muted">{r.summary}</div>
                       )}
                     </div>
                   )
