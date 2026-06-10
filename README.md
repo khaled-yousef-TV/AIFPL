@@ -10,6 +10,17 @@ Built for **manual decision support** (no login required): it uses public FPL da
 
 ## ✨ Features
 
+### 🧠 Hermes — AI orchestrator (new)
+- **Seven domain agents** (data, game mechanics, availability, form, variability, betting market, news & sentiment) emit structured signals.
+- **Hermes**, an LLM "brain" (Nous Hermes / DeepSeek / any OpenAI-compatible API), synthesizes them into squad / captaincy / chip / transfer / differential recommendations.
+- **MILP firewall**: the LLM never builds squads directly — it emits bounded per-player adjustments that feed the existing optimizer, which alone enforces budget/formation/3-per-club. Hallucinations can't produce an illegal squad.
+- **News agent** hunts injuries *and* player incentives ("mental goals" — record chases, Golden Boot races, contract years) via live web search.
+- **Learning loop**: scores its own calls each gameweek, builds a calibration profile + lessons, and trust-weights its influence — it gets sharper over the season.
+- **Cold-start ready**: archives the finished season so GW1 of the next one has real priors. Backtestable on past data (`/api/hermes/backtest`).
+- **Telegram**: pre-deadline squad + captain + Hermes briefing pushed to your phone.
+
+See [HERMES.md](HERMES.md) for architecture, endpoints and the **pre-GW1 runbook**.
+
 ### Prediction Methods
 - **🧠 Multi-method predictions**: 
   - **Statistics-based**: Heuristic / Form-focused / Fixture-focused + **Combined average**
@@ -195,6 +206,14 @@ AIFPL/
 - `POST /api/wildcard` – coordinated multi-transfer plan (4+ transfers, considers future fixtures)
 - `POST /api/saved-squads` – save/load/edit squads (server-side)
 - `GET /api/players/search?q=&position=&limit=` – search by player or team; includes EU badges
+
+### Hermes (AI orchestrator) — see [HERMES.md](HERMES.md)
+- `GET /api/hermes/signals?agents=&top_n=` – run the agents (individually testable), no LLM needed
+- `POST /api/hermes/run` `{run_type, fpl_team_id?}` – synthesize a recommendation (background; poll the run)
+- `GET /api/hermes/runs/{id}` · `GET /api/hermes/latest` · `GET /api/hermes/status`
+- `POST /api/hermes/archive-season` · `GET /api/hermes/backtest?season=` – cold-start archive + historical validation
+- `GET /api/hermes/calibration` · `POST /api/hermes/learning-cycle` – track record + post-GW evaluation
+- `POST /api/notifications/test` – verify Telegram setup
 
 ### Utility
 - `GET /api/team-trends` – debug trend reversal scores
