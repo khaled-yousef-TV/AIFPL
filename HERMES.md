@@ -119,3 +119,13 @@ python3 -m pytest backend/tests/ -v
 Covers: variability math, DGW/BGW detection, schemas, news keywords,
 LLM-output validation (hallucinated ids, clamping, truncated-JSON repair),
 Telegram formatting, evaluation/trust math, backtest reconstruction.
+
+## Database schema
+Hermes adds three tables — `hermes_runs`, `season_archive`, `hermes_lessons`
+(see `backend/database/models.py`). They are created by SQLAlchemy
+`init_db()` / `create_all` on startup, which only *adds* missing tables and
+never alters existing ones. There is no migration framework (e.g. Alembic)
+in this project, so if a Hermes table's columns change later, that change
+must be applied to existing databases by hand (or by dropping the affected
+Hermes table and letting `create_all` recreate it — the data is
+regenerable from runs/archives).

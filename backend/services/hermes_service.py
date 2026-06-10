@@ -75,25 +75,33 @@ def start_hermes_run(
             raise RuntimeError(f"A Hermes '{run_type}' run is already in progress")
         _running_types.add(run_type)
 
-    run_id = f"hermes_{run_type}_{uuid.uuid4().hex[:12]}"
-    task_id = f"task_{run_id}"
+    # From here the run_type is "claimed". If setup or thread start fails, the
+    # background thread's finally never runs, so release the claim explicitly —
+    # otherwise this run_type would be permanently wedged at 409 until restart.
+    try:
+        run_id = f"hermes_{run_type}_{uuid.uuid4().hex[:12]}"
+        task_id = f"task_{run_id}"
 
-    db.save_hermes_run(run_id, gameweek, run_type, status="pending", fpl_team_id=fpl_team_id)
-    db.create_task(
-        task_id=task_id,
-        task_type="hermes_run",
-        title=f"Hermes {run_type} (GW{gameweek})",
-        description=f"Hermes orchestrator run: {run_type}",
-        status="pending",
-    )
+        db.save_hermes_run(run_id, gameweek, run_type, status="pending", fpl_team_id=fpl_team_id)
+        db.create_task(
+            task_id=task_id,
+            task_type="hermes_run",
+            title=f"Hermes {run_type} (GW{gameweek})",
+            description=f"Hermes orchestrator run: {run_type}",
+            status="pending",
+        )
 
-    thread = threading.Thread(
-        target=_execute_run,
-        args=(run_id, task_id, run_type, fpl_team_id, user_player_ids, budget),
-        daemon=False,
-        name=f"HermesRun-{run_id}",
-    )
-    thread.start()
+        thread = threading.Thread(
+            target=_execute_run,
+            args=(run_id, task_id, run_type, fpl_team_id, user_player_ids, budget),
+            daemon=False,
+            name=f"HermesRun-{run_id}",
+        )
+        thread.start()
+    except Exception:
+        with _running_lock:
+            _running_types.discard(run_type)
+        raise
 
     return {"task_id": task_id, "run_id": run_id, "cached": False}
 
@@ -131,8 +139,11 @@ def _execute_run(
             from services.hermes_evaluation_service import (
                 get_calibration_profile, get_memory_digest,
             )
-            memory_digest = get_memory_digest() or None
-            trust_weights = get_calibration_profile().get("trust_weights") or None
+            # Build the calibration profile once and reuse it for both the
+            # prompt digest and the trust weights (avoids a duplicate query).
+            profile = get_calibration_profile()
+            memory_digest = get_memory_digest(profile) or None
+            trust_weights = profile.get("trust_weights") or None
 
             # Plan continuity: briefing/season_plan runs see the previous plan
             if run_type in ("briefing", "season_plan"):

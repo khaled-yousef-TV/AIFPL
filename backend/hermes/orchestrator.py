@@ -214,6 +214,10 @@ class HermesOrchestrator:
             if adjustments:
                 multipliers = {}
                 for adj in adjustments.adjustments:
+                    # Trust shrinks the continuous multiplier toward 1.0. The
+                    # binary actions (exclude/lock) are applied as-is — a
+                    # low-confidence "exclude" still removes the player; trust
+                    # only governs how hard the soft boost/fade pushes the MILP.
                     effective = apply_trust(adj.multiplier, trust.get(adj.action, 1.0))
                     if adj.action == "exclude":
                         excluded.append(adj.player_id)

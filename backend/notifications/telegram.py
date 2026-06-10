@@ -31,25 +31,44 @@ class TelegramNotifier:
             )
 
     def send(self, text: str) -> bool:
-        """Send a Markdown message. Returns True on success."""
+        """
+        Send a message, preferring Markdown but never losing it to a parse error.
+
+        Legacy Markdown is strict: unbalanced `*`/`_`/`[` in LLM-generated
+        narrative or player names (e.g. "O'Brien") makes Telegram reject the
+        whole message with HTTP 400. So we try Markdown once and, on a 4xx,
+        retry the same content as plain text rather than dropping the alert.
+        """
         if not self.enabled:
             logger.debug("Telegram disabled — message not sent")
             return False
+
+        body = text[:4096]  # Telegram hard limit
+        if self._post(body, parse_mode="Markdown"):
+            return True
+        # Markdown was rejected (or another transient error) — fall back to
+        # plain text so the user still gets the message.
+        logger.warning("Telegram Markdown send failed — retrying as plain text")
+        return self._post(body, parse_mode=None)
+
+    def _post(self, text: str, parse_mode: Optional[str]) -> bool:
+        payload = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         try:
             response = requests.post(
                 f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-                json={
-                    "chat_id": self.chat_id,
-                    "text": text[:4096],  # Telegram hard limit
-                    "parse_mode": "Markdown",
-                    "disable_web_page_preview": True,
-                },
+                json=payload,
                 timeout=15,
             )
             response.raise_for_status()
             return True
         except Exception as e:
-            logger.error(f"Telegram send failed: {e}")
+            logger.error(f"Telegram send failed (parse_mode={parse_mode}): {e}")
             return False
 
 

@@ -79,6 +79,7 @@ def evaluate_gameweek(gameweek: int) -> Dict:
                 result=run.get("result"),
                 actual_points=actual_points,
                 signals=run.get("signals"),
+                run_type=run.get("run_type"),
             )
             if db.update_hermes_run(run["run_id"], evaluation=evaluation):
                 evaluated += 1
@@ -96,10 +97,16 @@ def get_calibration_profile() -> Dict:
     return build_calibration_profile([r["evaluation"] for r in runs if r.get("evaluation")])
 
 
-def get_memory_digest() -> str:
-    """Calibration + active lessons, formatted for the Hermes prompt."""
+def get_memory_digest(profile: Optional[Dict] = None) -> str:
+    """
+    Calibration + active lessons, formatted for the Hermes prompt.
+
+    Pass `profile` to reuse an already-built calibration profile and avoid a
+    second DB query + aggregation when the caller also needs trust weights.
+    """
     deps = get_dependencies()
-    profile = get_calibration_profile()
+    if profile is None:
+        profile = get_calibration_profile()
     lessons = deps.db_manager.get_active_lessons()
     return calibration_digest(profile, lessons)
 

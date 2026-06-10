@@ -73,6 +73,18 @@ def test_evaluate_degraded_run_without_adjustments():
     assert ev["scored_players"] == 5
 
 
+def test_triple_captain_run_triples_the_captain():
+    squad = {"squad": {
+        "starting_xi": [{"id": 1, "is_captain": True}, {"id": 3}],
+        "predicted_points": 30,
+    }}
+    # Default (x2): captain 12*2 + 6 = 30
+    assert evaluate_run(ADJUSTMENTS, squad, ACTUAL)["squad"]["actual_points"] == 30
+    # Triple captain (x3): captain 12*3 + 6 = 42
+    ev = evaluate_run(ADJUSTMENTS, squad, ACTUAL, run_type="triple_captain")
+    assert ev["squad"]["actual_points"] == 42
+
+
 def test_calibration_profile_and_trust():
     ev1 = evaluate_run(ADJUSTMENTS, None, ACTUAL)
     profile = build_calibration_profile([ev1, ev1])

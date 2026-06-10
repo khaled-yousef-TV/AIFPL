@@ -23,6 +23,7 @@ def evaluate_run(
     result: Optional[Dict],
     actual_points: Dict[int, int],
     signals: Optional[Dict] = None,
+    run_type: Optional[str] = None,
 ) -> Dict:
     """
     Score one Hermes run against actual GW points.
@@ -32,6 +33,7 @@ def evaluate_run(
         result: stored optimizer result dict
         actual_points: {player_id: actual_gw_points}
         signals: stored agent reports (for per-agent calibration)
+        run_type: the run type — triple_captain runs apply a 3x captain multiplier
 
     Returns evaluation dict (JSON-serializable).
     """
@@ -44,7 +46,8 @@ def evaluate_run(
         evaluation["differentials"] = _score_differentials(adjustments.get("differentials", []), actual_points)
 
     if result and result.get("squad"):
-        evaluation["squad"] = _score_squad(result["squad"], actual_points)
+        captain_multiplier = 3 if run_type == "triple_captain" else 2
+        evaluation["squad"] = _score_squad(result["squad"], actual_points, captain_multiplier)
 
     if signals:
         evaluation["agents"] = _score_agents(signals, actual_points)
@@ -121,8 +124,8 @@ def _score_differentials(differentials: List[int], actual: Dict[int, int]) -> Op
     }
 
 
-def _score_squad(squad: Dict, actual: Dict[int, int]) -> Optional[Dict]:
-    """Actual points of the recommended XI (captain doubled), vs projection."""
+def _score_squad(squad: Dict, actual: Dict[int, int], captain_multiplier: int = 2) -> Optional[Dict]:
+    """Actual points of the recommended XI (captain x2, or x3 for triple captain), vs projection."""
     xi = squad.get("starting_xi", [])
     if not xi:
         return None
@@ -133,7 +136,7 @@ def _score_squad(squad: Dict, actual: Dict[int, int]) -> Optional[Dict]:
         if pid in actual:
             pts = actual[pid]
             if p.get("is_captain"):
-                pts *= 2
+                pts *= captain_multiplier
             total += pts
             covered += 1
     return {

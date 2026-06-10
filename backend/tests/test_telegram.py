@@ -1,5 +1,7 @@
 """Unit tests for Telegram message formatting (no network)."""
 
+import requests
+
 from notifications.telegram import TelegramNotifier, format_squad_message
 
 SQUAD = {
@@ -64,3 +66,50 @@ def test_notifier_requires_all_three_vars(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     assert TelegramNotifier().enabled is False
+
+
+def _enabled_notifier(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat")
+    return TelegramNotifier()
+
+
+def test_send_falls_back_to_plain_text_on_markdown_error(monkeypatch):
+    """A Markdown 400 must not drop the message — it retries as plain text."""
+    notifier = _enabled_notifier(monkeypatch)
+    calls = []
+
+    class FakeResp:
+        def __init__(self, ok):
+            self._ok = ok
+
+        def raise_for_status(self):
+            if not self._ok:
+                raise requests.HTTPError("400 Bad Request: can't parse entities")
+
+    def fake_post(url, json, timeout):
+        calls.append(json.get("parse_mode"))
+        # First (Markdown) attempt fails; plain-text retry succeeds.
+        return FakeResp(ok="parse_mode" not in json)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    assert notifier.send("*unbalanced markdown") is True
+    assert calls == ["Markdown", None]  # tried Markdown, then plain text
+
+
+def test_send_uses_markdown_when_it_succeeds(monkeypatch):
+    notifier = _enabled_notifier(monkeypatch)
+    calls = []
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json, timeout):
+        calls.append(json.get("parse_mode"))
+        return FakeResp()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    assert notifier.send("clean message") is True
+    assert calls == ["Markdown"]  # no fallback needed
