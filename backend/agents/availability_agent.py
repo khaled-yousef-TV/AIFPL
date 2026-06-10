@@ -109,7 +109,12 @@ class AvailabilityAgent(BaseAgent):
             PlayerStatus.UNAVAILABLE: 0, PlayerStatus.NOT_AVAILABLE: 0,
             PlayerStatus.DOUBTFUL: 1,
         }
-        flagged.sort(key=lambda f: (status_order.get(f.status, 2), -(100 - (f.chance_of_playing or 100))))
+        def _urgency(f):
+            # 0% chance is "more out" than 50% — don't treat falsy 0 as 100
+            chance = f.chance_of_playing if f.chance_of_playing is not None else 100
+            return (status_order.get(f.status, 2), chance)
+
+        flagged.sort(key=_urgency)
 
         high_rotation = sorted(
             t for t, r in rotation_cache.items() if r.risk_level == "high"

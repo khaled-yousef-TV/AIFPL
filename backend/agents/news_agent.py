@@ -176,14 +176,20 @@ class NewsAgent(BaseAgent):
             if not isinstance(entry, dict) or not entry.get("headline"):
                 continue
             player_id = None
-            name = (entry.get("player_name") or "").lower()
+            name = (entry.get("player_name") or "").strip().lower()
             if name:
+                # Exact match on web_name or full_name only. A loose substring
+                # match mis-attributes ("Son" -> "Anderson"); leaving player_id
+                # None (team-level item) is safer than a wrong attribution.
                 player_id = by_name.get(name)
-                if player_id is None:  # partial match on web_name
-                    for known, pid in by_name.items():
-                        if name in known or known in name:
-                            player_id = pid
-                            break
+                if player_id is None and len(name) >= 4:
+                    # Allow a full-token match (e.g. "bruno" within "bruno fernandes")
+                    matches = {
+                        pid for known, pid in by_name.items()
+                        if name in known.split()
+                    }
+                    if len(matches) == 1:  # unambiguous only
+                        player_id = matches.pop()
             try:
                 items.append(NewsItem(
                     player_id=player_id,

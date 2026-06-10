@@ -228,10 +228,16 @@ class HermesOrchestrator:
                     for p in predictions
                 ]
 
-            result["squad"] = assemble_squad_result(
-                predictions, budget, "hermes", gameweek,
-                locked_ids=locked or None, excluded_ids=excluded or None,
-            )
+            try:
+                result["squad"] = assemble_squad_result(
+                    predictions, budget, "hermes", gameweek,
+                    locked_ids=locked or None, excluded_ids=excluded or None,
+                )
+            except ValueError as e:
+                # Over-constrained (too many excludes / tiny budget): keep the
+                # rest of the recommendation rather than failing the whole run.
+                logger.warning(f"Squad assembly skipped: {e}")
+                result["squad_error"] = str(e)
 
         if adjustments:
             result["captain_ranking"] = [

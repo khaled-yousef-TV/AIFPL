@@ -48,7 +48,7 @@ def find_newly_finished_gameweek() -> Optional[int]:
     deps = get_dependencies()
     finished = [
         gw for gw in deps.fpl_client.get_gameweeks()
-        if getattr(gw, "finished", False) and getattr(gw, "data_checked", True)
+        if getattr(gw, "finished", False) and getattr(gw, "data_checked", False)
     ]
     return max((gw.id for gw in finished), default=None)
 

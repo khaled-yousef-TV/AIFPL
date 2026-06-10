@@ -91,33 +91,46 @@ def build_optimal_squad(
 
     if LpStatus[prob.status] != "Optimal":
         logger.warning(f"Squad optimization status: {LpStatus[prob.status]}")
-        # Fallback: return top predicted players by position
-        return _greedy_fallback(players, budget)
+        # Fallback: return top predicted players by position (honoring locks)
+        return _greedy_fallback(players, budget, locked_ids)
 
     # Extract selected squad
     squad = [p for p in players if player_vars[p["id"]].varValue == 1]
     return squad
 
 
-def _greedy_fallback(players: List[Dict], budget: float) -> List[Dict]:
-    """Greedy fallback when MILP fails."""
+def _greedy_fallback(
+    players: List[Dict], budget: float, locked_ids: Optional[List[int]] = None
+) -> List[Dict]:
+    """Greedy fallback when MILP fails. Seeds the squad with any locked players."""
     squad = []
     remaining = budget
-    
+
+    # Seed locked players first so Hermes 'lock' overrides survive the fallback
+    locked = set(locked_ids or [])
+    if locked:
+        for p in players:
+            if p["id"] in locked:
+                squad.append(p)
+                remaining -= p["price"]
+
+    def pos_filled(pos_id):
+        return len([s for s in squad if s["position_id"] == pos_id])
+
     for pos_id, count in [(1, 2), (2, 5), (3, 5), (4, 3)]:
         pos_players = sorted(
-            [p for p in players if p["position_id"] == pos_id],
+            [p for p in players if p["position_id"] == pos_id and p["id"] not in locked],
             key=lambda x: x["predicted"],
             reverse=True
         )
         for p in pos_players:
-            if len([s for s in squad if s["position_id"] == pos_id]) < count:
+            if pos_filled(pos_id) < count:
                 if p["price"] <= remaining:
                     team_count = len([s for s in squad if s["team_id"] == p["team_id"]])
                     if team_count < 3:
                         squad.append(p)
                         remaining -= p["price"]
-    
+
     return squad
 
 
@@ -213,8 +226,17 @@ def assemble_squad_result(
     )
     starting_xi, bench, formation = optimize_lineup(squad)
 
-    captain = max(starting_xi, key=lambda x: x["predicted"])
-    vice_captain = sorted(starting_xi, key=lambda x: x["predicted"], reverse=True)[1]
+    if not starting_xi:
+        # Over-constrained inputs (e.g. too many excludes / tiny budget) left
+        # no valid XI — degrade instead of crashing the whole run.
+        raise ValueError(
+            "Could not assemble a valid starting XI from the given constraints "
+            "(check excludes/locks/budget)."
+        )
+
+    ranked = sorted(starting_xi, key=lambda x: x["predicted"], reverse=True)
+    captain = ranked[0]
+    vice_captain = ranked[1] if len(ranked) > 1 else captain
 
     total_cost = sum(p["price"] for p in squad)
     total_predicted = sum(p["predicted"] for p in starting_xi) + captain["predicted"]
