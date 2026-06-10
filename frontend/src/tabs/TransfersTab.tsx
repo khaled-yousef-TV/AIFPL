@@ -92,8 +92,8 @@ interface TransfersTabProps {
   
   // FPL Import
   savedFplTeams: SavedFplTeam[]
-  selectedSavedFplTeamId: number | string
-  setSelectedSavedFplTeamId: (id: number | string) => void
+  selectedSavedFplTeamId: number | ''
+  setSelectedSavedFplTeamId: (id: number | '') => void
   fplTeamId: string
   setFplTeamId: (id: string) => void
   importingFplTeam: boolean
@@ -111,7 +111,7 @@ interface TransfersTabProps {
     transfersOut: Player[],
     transfersIn: Player[]
   ) => React.ReactNode
-  parseFormation: (formation: string) => { DEF: number; MID: number; FWD: number }
+  parseFormation: (formation: string) => { def: number; mid: number; fwd: number; gk: number }
   
   // API
   API_BASE: string
@@ -248,15 +248,15 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
     <>
       <div className={`space-y-6 transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-gradient-to-br from-purple-900/5 to-indigo-900/5 rounded-lg p-1' : ''}`}>
         {/* Instructions */}
-        <div className={`card transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-[#0f0f1a]/80 border-purple-500/20' : ''}`}>
+        <div className={`card transition-colors duration-300 ${freeTransfers >= 4 ? 'bg-bg/80 border-purple-500/20' : ''}`}>
           <div className={`card-header transition-colors duration-300 ${freeTransfers >= 4 ? 'border-purple-500/30' : ''}`}>
-            <ArrowRightLeft className={`w-5 h-5 transition-colors duration-300 ${freeTransfers >= 4 ? 'text-purple-400' : 'text-[#00ff87]'}`} />
+            <ArrowRightLeft className={`w-5 h-5 transition-colors duration-300 ${freeTransfers >= 4 ? 'text-purple-400' : 'text-primary'}`} />
             Transfers
             {freeTransfers >= 4 && (
               <span className="ml-2 text-xs text-purple-400 font-medium">Wildcard Mode</span>
             )}
           </div>
-          <p className="text-gray-400 text-sm mb-4">
+          <p className="text-content-muted text-sm mb-4">
             {freeTransfers <= 3 
               ? 'Add your current squad below and get AI-powered transfer suggestions (1-3 transfers) considering both short-term (next GW) and long-term (next 5 GWs) fixtures.'
               : 'Get a coordinated multi-transfer plan (4+ transfers) optimized for total points gain. All transfers work together as a cohesive unit, enforcing formation constraints.'
@@ -264,13 +264,13 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
           </p>
           
           {/* FPL Team Import */}
-          <div className="mt-4 p-3 sm:p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+          <div className="mt-4 p-3 sm:p-4 bg-bg rounded-lg border border-border">
             <div className="space-y-3">
               {/* Previously imported teams */}
               {savedFplTeams.length > 0 && (
                 <div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <span className="text-xs text-gray-400 whitespace-nowrap">Your teams</span>
+                    <span className="text-xs text-content-muted whitespace-nowrap">Your teams</span>
                     <select
                       value={selectedSavedFplTeamId}
                       onChange={(e) => {
@@ -281,7 +281,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                         }
                       }}
                       disabled={importingFplTeam}
-                      className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 px-3 py-1.5 sm:py-1 bg-bg border border-border rounded text-sm focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="">— Select a team to refresh —</option>
                       {savedFplTeams.map((team) => (
@@ -291,22 +291,22 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                       ))}
                     </select>
                   </div>
-                  <div className="text-[10px] text-gray-500 mt-1.5">
+                  <div className="text-[10px] text-content-subtle mt-1.5">
                     Select a previously imported team to fetch the latest squad from FPL
                   </div>
                 </div>
               )}
               
               {/* Import new team */}
-              <div className={savedFplTeams.length > 0 ? "pt-3 border-t border-[#2a2a4a]" : ""}>
+              <div className={savedFplTeams.length > 0 ? "pt-3 border-t border-border" : ""}>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">Import team</span>
+                  <span className="text-xs text-content-muted whitespace-nowrap">Import team</span>
                   <input
                     type="number"
                     value={fplTeamId}
                     onChange={(e) => setFplTeamId(e.target.value)}
                     disabled={importingFplTeam}
-                    className="flex-1 px-3 py-1.5 sm:py-1 bg-[#0b0b14] border border-[#2a2a4a] rounded text-sm focus:border-[#00ff87] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 px-3 py-1.5 sm:py-1 bg-bg border border-border rounded text-sm focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter FPL Team ID"
                   />
                   <button
@@ -324,12 +324,12 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                     )}
                   </button>
                 </div>
-                <div className="text-[10px] text-gray-500 mt-1.5">
+                <div className="text-[10px] text-content-subtle mt-1.5">
                   Enter your FPL Team ID to import your squad. Find it in your FPL profile URL (e.g., fantasy.premierleague.com/entry/<strong>123456</strong>/event/1).
                 </div>
               </div>
             </div>
-            <div className="text-[10px] sm:text-[11px] text-gray-500 mt-2">
+            <div className="text-[10px] sm:text-[11px] text-content-subtle mt-2">
               Your squad is auto-saved locally. Importing will fetch the latest data from FPL.
             </div>
           </div>
@@ -340,7 +340,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             <div ref={searchResultsRef} className="scroll-mt-4">
               <h3 className="font-medium mb-3">Add Players to Squad</h3>
               <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-content-muted" />
                 <input
                   type="text"
                   value={searchQuery}
@@ -349,7 +349,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                     searchPlayers(e.target.value, searchPosition)
                   }}
                   placeholder="Search player name or team (e.g., Spurs / TOT)..."
-                  className="w-full pl-10 pr-4 py-2 bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg focus:border-[#00ff87] focus:outline-none"
+                  className="w-full pl-10 pr-4 py-2 bg-bg border border-border rounded-lg focus:border-primary focus:outline-none"
                 />
               </div>
               
@@ -368,10 +368,10 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                       }}
                       className={`px-3 py-1 rounded text-sm relative ${
                         searchPosition === pos 
-                          ? 'bg-[#00ff87] text-[#0f0f1a]' 
+                          ? 'bg-primary text-primary-fg' 
                           : isFull
-                            ? 'bg-[#2a2a4a] text-gray-500 opacity-60'
-                            : 'bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a]'
+                            ? 'bg-surface-2 text-content-subtle opacity-60'
+                            : 'bg-surface-2 text-content-muted hover:bg-surface-3'
                       }`}
                       title={isFull ? `${pos} position full (${count}/${limit})` : ''}
                     >
@@ -386,7 +386,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
               
               {/* Search Results */}
               {searchResults.length > 0 && (
-                <div className="bg-[#0f0f1a] border border-[#2a2a4a] rounded-lg max-h-60 overflow-y-auto">
+                <div className="bg-bg border border-border rounded-lg max-h-60 overflow-y-auto">
                   {searchResults.map(player => {
                     const alreadyInSquad = mySquad.find(p => p.id === player.id) !== undefined
                     const positionFull = isPositionFull(player.position)
@@ -399,10 +399,10 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                         key={player.id}
                         onClick={() => addToSquad(player)}
                         disabled={disabled}
-                        className={`w-full flex items-center justify-between p-3 border-b border-[#2a2a4a] last:border-0 transition-all ${
+                        className={`w-full flex items-center justify-between p-3 border-b border-border last:border-0 transition-all ${
                           disabled 
-                            ? 'opacity-50 cursor-not-allowed bg-[#0b0b14]' 
-                            : 'hover:bg-[#1f1f3a] cursor-pointer'
+                            ? 'opacity-50 cursor-not-allowed bg-bg' 
+                            : 'hover:bg-surface-2 cursor-pointer'
                         }`}
                         title={positionFull ? `${player.position} position full (${positionCount}/${positionLimit})` : alreadyInSquad ? 'Already in squad' : ''}
                       >
@@ -412,7 +412,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                           </span>
                           <div className="text-left min-w-0 flex-1">
                             <div className="font-medium truncate">{player.name}</div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-content-muted">
                               <span>{player.team}</span>
                               {player.european_comp && (
                                 <span className={`ml-2 px-1 py-0.5 rounded text-[10px] font-bold ${
@@ -424,7 +424,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                                 </span>
                               )}
                               {typeof (player as any).minutes === 'number' && (
-                                <span className="text-gray-500"> • {(player as any).minutes}m</span>
+                                <span className="text-content-subtle"> • {(player as any).minutes}m</span>
                               )}
                               {(player as any).status && (player as any).status !== 'a' && (
                                 <span className="text-orange-400"> • {String((player as any).status).toUpperCase()}</span>
@@ -440,9 +440,9 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <span className="text-sm font-mono">£{player.price}m</span>
                           {disabled ? (
-                            <X className="w-4 h-4 text-gray-500" />
+                            <X className="w-4 h-4 text-content-subtle" />
                           ) : (
-                            <Plus className="w-4 h-4 text-[#00ff87]" />
+                            <Plus className="w-4 h-4 text-primary" />
                           )}
                         </div>
                       </button>
@@ -453,9 +453,9 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             </div>
             
             {/* Bank & Free Transfers */}
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-[#2a2a4a]">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 pt-4 border-t border-border">
               <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-400 whitespace-nowrap">Bank (£m)</label>
+                <label className="text-sm text-content-muted whitespace-nowrap">Bank (£m)</label>
                 <input
                   type="number"
                   step="0.1"
@@ -484,11 +484,11 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                       setBank(numVal)
                     }
                   }}
-                  className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
+                  className="w-24 px-3 py-1.5 sm:py-1 bg-bg border border-border rounded focus:border-primary focus:outline-none text-sm"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-400 whitespace-nowrap">Free Transfers</label>
+                <label className="text-sm text-content-muted whitespace-nowrap">Free Transfers</label>
                 <select
                   value={freeTransfers}
                   onChange={(e) => {
@@ -497,7 +497,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                     setTransferSuggestions([])
                     setWildcardPlan(null)
                   }}
-                  className="w-24 px-3 py-1.5 sm:py-1 bg-[#0f0f1a] border border-[#2a2a4a] rounded focus:border-[#00ff87] focus:outline-none text-sm"
+                  className="w-24 px-3 py-1.5 sm:py-1 bg-bg border border-border rounded focus:border-primary focus:outline-none text-sm"
                 >
                   {Array.from({ length: 15 }, (_, i) => i + 1).map(num => (
                     <option key={num} value={num}>{num}</option>
@@ -518,7 +518,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                       title={mySquad.length < 15 ? `Squad incomplete (${mySquad.length}/15 players). Add all 15 players to generate suggestions.` : ''}
                       className={`btn text-xs sm:text-sm transition-colors duration-300 ${
                         mySquad.length < 15
-                          ? 'bg-gray-600 text-gray-400 cursor-not-allowed border-gray-500'
+                          ? 'bg-gray-600 text-content-muted cursor-not-allowed border-gray-500'
                           : freeTransfers >= 4 
                             ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500' 
                             : 'btn-primary'
@@ -545,9 +545,9 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                 </div>
                 
                 <div className="mb-4">
-                  <div className="text-xs text-gray-500 mb-2">
-                    Prices from search are <span className="text-gray-300">current FPL prices</span>. Your in-game
-                    <span className="text-gray-300"> selling price</span> can be different (e.g. you bought before a price rise).
+                  <div className="text-xs text-content-subtle mb-2">
+                    Prices from search are <span className="text-content-muted">current FPL prices</span>. Your in-game
+                    <span className="text-content-muted"> selling price</span> can be different (e.g. you bought before a price rise).
                     Click a player to edit price or remove.
                   </div>
                   {renderTransfersPitch()}
@@ -555,15 +555,15 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
 
                 {/* Player list for editing prices */}
                 {mySquad.length > 0 && (
-                  <div className="space-y-2 max-h-60 overflow-y-auto border-t border-[#2a2a4a] pt-4">
+                  <div className="space-y-2 max-h-60 overflow-y-auto border-t border-border pt-4">
                     {mySquad.map(player => (
-                      <div key={player.id} className="flex items-center justify-between p-2 bg-[#0f0f1a] rounded mb-1">
+                      <div key={player.id} className="flex items-center justify-between p-2 bg-bg rounded mb-1">
                         <div className="flex items-center gap-2">
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
                             {player.position}
                           </span>
                           <span className="text-sm">{player.name}</span>
-                          <span className="text-xs text-gray-500">{player.team}</span>
+                          <span className="text-xs text-content-subtle">{player.team}</span>
                           {player.european_comp && (
                             <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
                               player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
@@ -575,7 +575,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 text-xs font-mono text-gray-400">
+                          <div className="flex items-center gap-1 text-xs font-mono text-content-muted">
                             <span>£</span>
                             <input
                               type="number"
@@ -583,7 +583,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                               min="0"
                               value={Number.isFinite(player.price) ? player.price : 0}
                               onChange={(e) => updateSquadPrice(player.id, parseFloat(e.target.value))}
-                              className="w-16 px-2 py-0.5 bg-[#0b0b14] border border-[#2a2a4a] rounded text-right focus:border-[#00ff87] focus:outline-none"
+                              className="w-16 px-2 py-0.5 bg-bg border border-border rounded text-right focus:border-primary focus:outline-none"
                             />
                             <span>m</span>
                           </div>
@@ -604,26 +604,26 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
         {groupedTransferSuggestions && (
           <div ref={resultsSectionRef} className="card">
             <div className="card-header">
-              <TrendingUp className="w-5 h-5 text-[#00ff87]" />
+              <TrendingUp className="w-5 h-5 text-primary" />
               Transfer Suggestions
             </div>
             
             <div className="space-y-4">
               {/* Hold Suggestions */}
               {groupedTransferSuggestions.holdSuggestions.map((suggestion, i) => (
-                <div key={`hold-${i}`} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                <div key={`hold-${i}`} className="p-4 bg-bg rounded-lg border border-border">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-lg font-bold text-[#00ff87]">✅ Hold</span>
+                    <span className="text-lg font-bold text-primary">✅ Hold</span>
                     <span className="px-2 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-300">
                       Save FT
                     </span>
                   </div>
 
-                  <div className="text-sm text-gray-200 mb-2">
+                  <div className="text-sm text-content mb-2">
                     {(suggestion as any).reason || 'Hold / Save transfer'}
                   </div>
                   {Array.isArray((suggestion as any).why) && (suggestion as any).why.length > 0 && (
-                    <ul className="text-xs text-gray-400 space-y-1 list-disc pl-4">
+                    <ul className="text-xs text-content-muted space-y-1 list-disc pl-4">
                       {(suggestion as any).why.slice(0, 4).map((w: string, idx: number) => (
                         <li key={idx}>{w}</li>
                       ))}
@@ -631,15 +631,15 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                   )}
 
                   {(suggestion as any).best_alternative && (
-                    <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
-                      <div className="text-[11px] text-gray-400 mb-2">Best alternative if you still want to move:</div>
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <div className="text-[11px] text-content-muted mb-2">Best alternative if you still want to move:</div>
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-red-400 font-semibold">OUT</span>
-                        <span className="text-gray-200">{(suggestion as any).best_alternative.out?.name}</span>
-                        <span className="text-gray-500">→</span>
-                        <span className="text-[#00ff87] font-semibold">IN</span>
-                        <span className="text-gray-200">{(suggestion as any).best_alternative.in?.name}</span>
-                        <span className="text-gray-500 text-xs">
+                        <span className="text-content">{(suggestion as any).best_alternative.out?.name}</span>
+                        <span className="text-content-subtle">→</span>
+                        <span className="text-primary font-semibold">IN</span>
+                        <span className="text-content">{(suggestion as any).best_alternative.in?.name}</span>
+                        <span className="text-content-subtle text-xs">
                           ({((suggestion as any).best_alternative.points_gain ?? 0)} pts, hit {(suggestion as any).hit_cost ?? 0})
                         </span>
                       </div>
@@ -656,9 +656,9 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                 const otherOptions = group.suggestions.slice(1)
                 
                 return (
-                  <div key={groupKey} className="p-4 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                  <div key={groupKey} className="p-4 bg-bg rounded-lg border border-border">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-lg font-bold text-[#00ff87]">#{groupIndex + 1}</span>
+                      <span className="text-lg font-bold text-primary">#{groupIndex + 1}</span>
                       {otherOptions.length > 0 && (
                         <button
                           onClick={() => {
@@ -670,7 +670,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                             }
                             setExpandedGroups(newExpanded)
                           }}
-                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#00ff87] transition-colors"
+                          className="flex items-center gap-1 text-xs text-content-muted hover:text-primary transition-colors"
                         >
                           {isExpanded ? (
                             <>
@@ -709,8 +709,8 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="text-sm text-gray-400 mt-1">{group.outPlayer.team} • £{group.outPlayer.price}m</div>
-                      <div className="text-xs text-gray-500 mt-1">
+                      <div className="text-sm text-content-muted mt-1">{group.outPlayer.team} • £{group.outPlayer.price}m</div>
+                      <div className="text-xs text-content-subtle mt-1">
                         vs {group.outPlayer.fixture} (FDR {group.outPlayer.fixture_difficulty}) • Form: {group.outPlayer.form}
                       </div>
                     </div>
@@ -747,7 +747,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             {/* Summary Card */}
             <div className="card">
               <div className="card-header">
-                <TrendingUp className="w-5 h-5 text-[#00ff87]" />
+                <TrendingUp className="w-5 h-5 text-primary" />
                 Rebuild Summary
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -758,34 +758,34 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                   </div>
                 </div>
                 <div>
-                  <div className="text-gray-400 text-sm mb-1">After Total</div>
-                  <div className="text-xl font-bold text-[#00ff87]">
+                  <div className="text-content-muted text-sm mb-1">After Total</div>
+                  <div className="text-xl font-bold text-primary">
                     {wildcardPlan.after_total_points?.toFixed(1) || '0.0'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-gray-400 text-sm mb-1">Points Gain</div>
-                  <div className="text-xl font-bold text-[#00ff87]">
+                  <div className="text-content-muted text-sm mb-1">Points Gain</div>
+                  <div className="text-xl font-bold text-primary">
                     +{wildcardPlan.total_points_gain?.toFixed(1) || '0.0'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-gray-400 text-sm mb-1">Net Cost</div>
-                  <div className={`text-xl font-bold ${wildcardPlan.total_cost && wildcardPlan.total_cost < 0 ? 'text-green-400' : wildcardPlan.total_cost && wildcardPlan.total_cost > 0 ? 'text-red-400' : 'text-gray-300'}`}>
+                  <div className="text-content-muted text-sm mb-1">Net Cost</div>
+                  <div className={`text-xl font-bold ${wildcardPlan.total_cost && wildcardPlan.total_cost < 0 ? 'text-green-400' : wildcardPlan.total_cost && wildcardPlan.total_cost > 0 ? 'text-red-400' : 'text-content-muted'}`}>
                     {wildcardPlan.total_cost && wildcardPlan.total_cost > 0 ? '+' : ''}£{wildcardPlan.total_cost?.toFixed(1) || '0.0'}m
                   </div>
                 </div>
               </div>
-              <div className="mt-3 pt-3 border-t border-[#2a2a4a]">
-                <div className="text-xs text-gray-400">
+              <div className="mt-3 pt-3 border-t border-border">
+                <div className="text-xs text-content-muted">
                   Transfers: {wildcardPlan.transfers_out?.length || 0} • 
                   Kept: {wildcardPlan.kept_players?.length || (mySquad.length - (wildcardPlan.transfers_out?.length || 0))}
                 </div>
               </div>
               {wildcardPlan.combined_rationale && (
-                <div className="mt-4 p-3 bg-gradient-to-br from-[#1a1a2e]/60 to-[#0f0f1a] rounded-lg border border-[#00ff87]/20">
-                  <div className="text-sm font-semibold text-gray-300 mb-2">Why This Combination Works</div>
-                  <div className="text-xs text-gray-400 leading-relaxed">
+                <div className="mt-4 p-3 bg-gradient-to-br from-surface/60 to-bg rounded-lg border border-primary/20">
+                  <div className="text-sm font-semibold text-content-muted mb-2">Why This Combination Works</div>
+                  <div className="text-xs text-content-muted leading-relaxed">
                     {wildcardPlan.combined_rationale}
                   </div>
                 </div>
@@ -796,7 +796,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
             {wildcardPlan.resulting_squad?.squad && (
               <div className="card">
                 <div className="card-header">
-                  <Users className="w-5 h-5 text-[#00ff87]" />
+                  <Users className="w-5 h-5 text-primary" />
                   Squad Comparison
                 </div>
                 {(() => {
@@ -848,15 +848,15 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {wildcardPlan.kept_players.map((player: any) => (
-                      <div key={player.id} className="p-2 bg-[#0f0f1a] rounded border border-[#2a2a4a]">
+                      <div key={player.id} className="p-2 bg-bg rounded border border-border">
                         <div className="flex flex-col">
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="font-medium text-xs truncate">{player.name}</span>
-                            <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">£{player.price}m</span>
+                            <span className="text-[10px] text-content-muted flex-shrink-0 ml-1">£{player.price}m</span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-gray-500">{player.team}</span>
-                            <span className="text-[10px] text-[#00ff87] font-mono">{player.predicted?.toFixed(1) || '0.0'}</span>
+                            <span className="text-[10px] text-content-subtle">{player.team}</span>
+                            <span className="text-[10px] text-primary font-mono">{player.predicted?.toFixed(1) || '0.0'}</span>
                           </div>
                         </div>
                       </div>
@@ -868,29 +868,29 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
               {wildcardPlan.individual_breakdowns && wildcardPlan.individual_breakdowns.length > 0 && (
                 <div className="card">
                   <div className="card-header">
-                    <ArrowRightLeft className="w-5 h-5 text-[#00ff87]" />
+                    <ArrowRightLeft className="w-5 h-5 text-primary" />
                     Transfer Breakdown ({wildcardPlan.individual_breakdowns.length})
                   </div>
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
                     {wildcardPlan.individual_breakdowns.map((transfer: any, i: number) => (
-                      <div key={i} className="p-2.5 bg-[#0f0f1a] rounded-lg border border-[#2a2a4a]">
+                      <div key={i} className="p-2.5 bg-bg rounded-lg border border-border">
                         <div className="flex items-center gap-1.5 mb-1.5">
-                          <span className="text-xs font-semibold text-[#00ff87]">#{i + 1}</span>
+                          <span className="text-xs font-semibold text-primary">#{i + 1}</span>
                           <span className="text-[10px] text-red-400">OUT:</span>
                           <span className="text-xs font-medium truncate">{transfer.out?.name}</span>
-                          <ArrowRightLeft className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                          <ArrowRightLeft className="w-3 h-3 text-content-subtle flex-shrink-0" />
                           <span className="text-[10px] text-green-400">IN:</span>
                           <span className="text-xs font-medium truncate">{transfer.in?.name}</span>
                         </div>
                         {transfer.reason && (
-                          <div className="text-[10px] text-gray-400 leading-tight">{transfer.reason}</div>
+                          <div className="text-[10px] text-content-muted leading-tight">{transfer.reason}</div>
                         )}
                         <div className="flex items-center gap-2 mt-1.5 text-[10px]">
-                          <span className={`${transfer.points_gain > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                          <span className={`${transfer.points_gain > 0 ? 'text-green-400' : 'text-content-muted'}`}>
                             {transfer.points_gain > 0 ? '+' : ''}{transfer.points_gain} pts
                           </span>
-                          <span className="text-gray-500">•</span>
-                          <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-gray-400'}>
+                          <span className="text-content-subtle">•</span>
+                          <span className={transfer.cost > 0 ? 'text-red-400' : transfer.cost < 0 ? 'text-green-400' : 'text-content-muted'}>
                             {transfer.cost > 0 ? '+' : ''}£{transfer.cost}m
                           </span>
                         </div>
@@ -914,7 +914,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-gray-400 border-b border-[#2a2a4a]">
+                <tr className="text-left text-content-muted border-b border-border">
                   <th className="pb-2">Player</th>
                   <th className="pb-2">Fixture</th>
                   <th className="pb-2 text-right">Pred</th>
@@ -925,12 +925,12 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
               </thead>
               <tbody>
                 {squadAnalysis.map((player: any) => (
-                  <tr key={player.id} className={`border-b border-[#2a2a4a]/50 ${
+                  <tr key={player.id} className={`border-b border-border/50 ${
                     player.keep_score < 3 ? 'bg-red-500/10' : ''
                   }`}>
                     <td className="py-2">
                       <span className="font-medium">{player.name}</span>
-                      <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                      <span className="text-content-subtle text-xs ml-1">({player.team})</span>
                     </td>
                     <td className="py-2">
                       <span className={`px-1.5 py-0.5 rounded text-xs ${

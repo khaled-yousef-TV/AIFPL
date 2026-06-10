@@ -28,6 +28,31 @@ PRICE_CANDIDATES = 8
 MIN_TRANSFER_BALANCE = 50_000
 
 
+def determine_season_phase(gameweeks) -> tuple:
+    """
+    Classify where we are in the season from the gameweek list.
+
+    Returns (phase, finished_count):
+    - preseason: nothing finished, GW1 not started
+    - early: 1-4 GWs finished (cold-start blending window)
+    - mid: 5-29 finished
+    - run_in: 30+ finished, season not over
+    - off_season: all 38 finished
+    """
+    finished = sum(1 for gw in gameweeks if getattr(gw, "finished", False))
+    total = len(gameweeks) or 38
+
+    if finished == 0:
+        return "preseason", 0
+    if finished >= total:
+        return "off_season", finished
+    if finished <= 4:
+        return "early", finished
+    if finished >= 30:
+        return "run_in", finished
+    return "mid", finished
+
+
 def detect_fixture_load(gameweek_ids, fixtures, team_short_names):
     """
     Detect double and blank gameweeks from fixture counts per team per GW.
@@ -131,9 +156,26 @@ class MechanicsAgent(BaseAgent):
         if not guidance:
             guidance.append("No confirmed double or blank gameweeks in scheduled fixtures.")
 
+        season_phase, finished_count = determine_season_phase(gameweeks)
+
+        # Fixture-swing matrix: avg FDR per team over the next 6 scheduled GWs
+        team_next6_fdr = {}
+        horizon = set(remaining_ids[:6])
+        fdr_acc: dict = {}
+        for f in fixtures:
+            if f.event in horizon:
+                fdr_acc.setdefault(f.team_h, []).append(f.team_h_difficulty or 3)
+                fdr_acc.setdefault(f.team_a, []).append(f.team_a_difficulty or 3)
+        for tid, fdrs in fdr_acc.items():
+            if tid in short_names and fdrs:
+                team_next6_fdr[short_names[tid]] = round(sum(fdrs) / len(fdrs), 2)
+
         payload = MechanicsSignals(
             current_gameweek=current_gw.id if current_gw else 0,
             next_gameweek=next_gw_id,
+            season_phase=season_phase,
+            finished_gameweeks=finished_count,
+            team_next6_fdr=team_next6_fdr,
             next_deadline=deadline,
             hours_to_deadline=hours_to_deadline,
             fixture_load=fixture_load,
@@ -146,6 +188,7 @@ class MechanicsAgent(BaseAgent):
         dgws = [fl.gameweek for fl in fixture_load if fl.double_teams]
         bgws = [fl.gameweek for fl in fixture_load if fl.blank_teams]
         summary = (
+            f"Season phase: {season_phase} ({finished_count} GWs finished). "
             f"Next deadline GW{next_gw_id}"
             + (f" in {hours_to_deadline}h. " if hours_to_deadline is not None else ". ")
             + (f"DGWs: {dgws}. " if dgws else "No confirmed DGWs. ")

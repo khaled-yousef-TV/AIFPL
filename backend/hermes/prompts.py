@@ -53,18 +53,51 @@ RUN_TYPE_INSTRUCTIONS = {
     "triple_captain": "Focus on the triple captain decision: rank captain candidates by ceiling (haul probability), not floor. Recommend whether to play TC now or target a later gameweek (double gameweeks are prime targets).",
     "differentials": "Focus on differentials: low-ownership players with strong underlying signals. Fill the differentials list with your best low-owned picks.",
     "my_team": "Signals mark the user's current squad (in_user_team=true). Give personalized advice: transfer_priorities (out->in with urgency), captain_ranking from their squad, and chip timing for their specific situation.",
+    "season_plan": (
+        "Produce a SEASON PLAN: a rolling strategy for the remaining gameweeks. In chip_advice."
+        "target_gameweeks, map every remaining chip (wildcard, free_hit, bench_boost, "
+        "triple_captain) to a target GW (use DGW/BGW signals; if none are confirmed yet, pick "
+        "provisional windows and say so). In the narrative: fixture swings to buy into early, "
+        "team-value strategy, and key watchpoints. If a previous plan is included in your "
+        "track-record section, output a DIFF against it (what changed and why), not a rewrite."
+    ),
+}
+
+
+SEASON_PHASE_GUIDANCE = {
+    "preseason": (
+        "SEASON PHASE: PRESEASON — no current-season data exists yet. Current form/points are "
+        "meaningless. Base reasoning on: last-season priors (prior_ppg column), fixtures, news "
+        "(transfers, preseason fitness), and ownership (community wisdom). Be cautious with "
+        "promoted-team players and new signings (no PL prior). Set confidence to LOW or MEDIUM."
+    ),
+    "early": (
+        "SEASON PHASE: EARLY (1-4 GWs played) — current-season samples are tiny. Blend "
+        "last-season priors (prior_ppg) with early signals; do not overreact to one-week hauls "
+        "or blanks. Moderate your multipliers."
+    ),
+    "off_season": (
+        "SEASON PHASE: OFF-SEASON — the season has ended. Recommendations are exploratory/"
+        "planning only; note this in your narrative."
+    ),
 }
 
 
 def render_players(players: List[dict], limit: int) -> str:
-    """One compact line per player: id|name|team|pos|price|xPts|own%|form."""
-    lines = ["id|name|team|pos|price|xPts|own%|form"]
+    """One compact line per player: id|name|team|pos|price|xPts|own%|form[|priorPPG]."""
+    has_prior = any(p.get("prior_ppg") is not None for p in players[:limit])
+    header = "id|name|team|pos|price|xPts|own%|form" + ("|priorPPG" if has_prior else "")
+    lines = [header]
     for p in players[:limit]:
-        lines.append(
+        line = (
             f"{p['id']}|{p['name']}|{p['team']}|{p['position']}|{p['price']}"
             f"|{round(p.get('predicted_points', 0), 1)}|{round(p.get('ownership', 0), 1)}"
             f"|{round(p.get('form', 0), 1)}"
         )
+        if has_prior:
+            prior = p.get("prior_ppg")
+            line += f"|{round(prior, 1) if prior is not None else '-'}"
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -85,6 +118,12 @@ def assemble_user_prompt(
         f"# Gameweek {gameweek} — task: {run_type}",
         RUN_TYPE_INSTRUCTIONS.get(run_type, RUN_TYPE_INSTRUCTIONS["briefing"]),
     ]
+
+    # Season-phase guidance (cold start / off-season awareness)
+    mech_payload = reports.get("mechanics").payload if reports.get("mechanics") else {}
+    phase = mech_payload.get("season_phase", "mid")
+    if phase in SEASON_PHASE_GUIDANCE:
+        sections.append(f"## Important context\n{SEASON_PHASE_GUIDANCE[phase]}")
 
     if memory_digest:
         sections.append(f"## Your track record & lessons\n{memory_digest}")

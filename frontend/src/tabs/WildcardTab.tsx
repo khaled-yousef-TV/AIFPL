@@ -22,7 +22,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek, trajectory, loading
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['squad', 'fixtures']))
   const [generating, setGenerating] = useState(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Set selected GW when trajectory changes
   useEffect(() => {
@@ -179,7 +179,7 @@ const WildcardTab: React.FC<WildcardTabProps> = ({ gameweek, trajectory, loading
       'MID': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
       'FWD': 'bg-red-500/20 text-red-400 border-red-500/30'
     }
-    return classes[pos] || 'bg-gray-500/20 text-gray-400'
+    return classes[pos] || 'bg-gray-500/20 text-content-muted'
   }
 
   const parseFormation = (formation: string) => {

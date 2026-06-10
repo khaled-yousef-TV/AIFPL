@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 RUN_TYPES = [
     "briefing", "squad", "wildcard", "free_hit",
-    "triple_captain", "differentials", "my_team",
+    "triple_captain", "differentials", "my_team", "season_plan",
 ]
 
 # Run types whose result includes an optimizer-built squad
@@ -46,6 +46,7 @@ class HermesOrchestrator:
         user_player_ids: Optional[List[int]] = None,
         top_n: int = 40,
         memory_digest: Optional[str] = None,
+        trust_weights: Optional[Dict[str, float]] = None,
         progress_cb=None,
     ) -> Dict:
         """
@@ -108,7 +109,10 @@ class HermesOrchestrator:
 
         # 3. Apply adjustments through the existing optimizers
         progress(75, "Optimizing with adjusted predictions")
-        result = self._apply(run_type, adjustments, deps, budget, gameweek, reports)
+        result = self._apply(
+            run_type, adjustments, deps, budget, gameweek, reports,
+            trust_weights=trust_weights,
+        )
 
         progress(95, "Finalizing")
         return {
@@ -187,12 +191,21 @@ class HermesOrchestrator:
         budget: float,
         gameweek: int,
         reports: Dict[str, AgentReport],
+        trust_weights: Optional[Dict[str, float]] = None,
     ) -> Dict:
-        """Feed Hermes adjustments into the deterministic optimizers."""
+        """
+        Feed Hermes adjustments into the deterministic optimizers.
+
+        trust_weights (per action, from the learning loop) shrink the LLM's
+        multipliers toward 1.0 when its historical hit-rate is poor — a
+        badly calibrated Hermes automatically loses influence over the MILP.
+        """
+        from hermes.evaluation import apply_trust
         from services.squad_service import assemble_squad_result, compute_player_predictions
 
         result: Dict = {}
         names = {p.id: p.web_name for p in deps.fpl_client.get_players()}
+        trust = trust_weights or {}
 
         if run_type in SQUAD_RUN_TYPES:
             predictions = compute_player_predictions(deps.predictor_heuristic)
@@ -201,13 +214,14 @@ class HermesOrchestrator:
             if adjustments:
                 multipliers = {}
                 for adj in adjustments.adjustments:
+                    effective = apply_trust(adj.multiplier, trust.get(adj.action, 1.0))
                     if adj.action == "exclude":
                         excluded.append(adj.player_id)
                     elif adj.action == "lock":
                         locked.append(adj.player_id)
-                        multipliers[adj.player_id] = adj.multiplier
+                        multipliers[adj.player_id] = effective
                     else:
-                        multipliers[adj.player_id] = adj.multiplier
+                        multipliers[adj.player_id] = effective
 
                 predictions = [
                     {**p, "predicted": p["predicted"] * multipliers.get(p["id"], 1.0)}

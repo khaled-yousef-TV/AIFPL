@@ -21,9 +21,20 @@ class DataAgent(BaseAgent):
     name = "data"
 
     def _build(self, ctx: AgentContext) -> Tuple[str, BaseModel, str]:
+        from agents.mechanics_agent import determine_season_phase
         from services.prediction_service import compute_predictions
 
         predictions = compute_predictions()
+
+        # Cold-start: attach last-season baselines during preseason/early GWs
+        season_phase, _ = determine_season_phase(ctx.fpl_client.get_gameweeks())
+        prior_by_name = {}
+        if season_phase in ("preseason", "early"):
+            try:
+                from services.season_archive_service import load_prior_by_name
+                prior_by_name = load_prior_by_name()
+            except Exception as e:
+                logger.warning(f"Data agent: prior archive unavailable ({e})")
 
         # Top-N by predicted points, plus every user-team player
         selected = list(predictions[:ctx.top_n])
@@ -41,7 +52,13 @@ class DataAgent(BaseAgent):
         snapshots = []
         for p in selected:
             pl = players_by_id.get(p["id"])
+            prior = None
+            if prior_by_name and pl:
+                prior = (prior_by_name.get(pl.full_name.lower())
+                         or prior_by_name.get(pl.web_name.lower()))
             snapshots.append(PlayerSnapshot(
+                prior_ppg=prior["points_per_game"] if prior else None,
+                prior_total_points=prior["total_points"] if prior else None,
                 id=p["id"],
                 name=p["name"],
                 team=p["team"],
@@ -66,6 +83,8 @@ class DataAgent(BaseAgent):
         next_gw = ctx.fpl_client.get_next_gameweek()
         payload = DataSignals(
             gameweek_deadline=next_gw.deadline_time if next_gw else None,
+            season_phase=season_phase,
+            prior_season_available=bool(prior_by_name),
             players=snapshots,
         )
 
@@ -75,5 +94,7 @@ class DataAgent(BaseAgent):
         summary = (
             f"{len(snapshots)} candidate players for GW{ctx.gameweek} "
             f"(top {ctx.top_n} predicted + user team). Top picks: {top3}."
+            + (f" Cold-start: last-season priors attached ({season_phase})."
+               if prior_by_name else "")
         )
         return summary, payload, "ok"

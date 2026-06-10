@@ -99,6 +99,17 @@ class VariabilityAgent(BaseAgent):
 
         pool = self._candidate_pool(ctx)
 
+        # Cold-start: last-season archive for players with too few appearances
+        prior_by_name = {}
+        try:
+            from agents.mechanics_agent import determine_season_phase
+            phase, _ = determine_season_phase(client.get_gameweeks())
+            if phase in ("preseason", "early"):
+                from services.season_archive_service import load_prior_by_name
+                prior_by_name = load_prior_by_name()
+        except Exception as e:
+            logger.warning(f"Variability: prior archive unavailable ({e})")
+
         cache_key = date.today().isoformat()
         day_cache = _cache.setdefault(cache_key, {})
         # Drop stale days
@@ -132,6 +143,14 @@ class VariabilityAgent(BaseAgent):
                 if h.get("minutes", 0) > 0
             ]
             stats = compute_variability_stats(points)
+            source = "current"
+            if stats is None and prior_by_name:
+                # Cold-start: fall back to last season's archived variability
+                prior = (prior_by_name.get(pl.full_name.lower())
+                         or prior_by_name.get(pl.web_name.lower()))
+                if prior and prior.get("variability"):
+                    stats = prior["variability"]
+                    source = "prior"
             if stats is None:
                 day_cache[pid] = None  # cached negative: too few appearances
                 continue
@@ -141,6 +160,7 @@ class VariabilityAgent(BaseAgent):
                 "name": pl.web_name,
                 "team": teams.get(pl.team, "???"),
                 "position": pl.position,
+                "source": source,
                 **stats,
             }
             day_cache[pid] = entry_dict

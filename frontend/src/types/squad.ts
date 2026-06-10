@@ -26,6 +26,11 @@ export interface SquadPlayer {
   team?: string
   rotation_risk?: string
   european_comp?: string
+  // Optional enrichments shown in the transfers squad analysis
+  status?: string
+  form?: number | string
+  fixture?: string
+  fixture_difficulty?: number
 }
 
 export interface SelectedTeam {

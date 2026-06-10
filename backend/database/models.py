@@ -312,6 +312,63 @@ class HermesRun(Base):
         return f"<HermesRun(run_id='{self.run_id}', type='{self.run_type}', gw={self.gameweek}, status='{self.status}')>"
 
 
+class SeasonArchive(Base):
+    """
+    Per-player season archive: full GW history + summary stats, snapshotted
+    before the FPL API resets for the new season. Used as the cold-start
+    prior for the first gameweeks of the following season and as the data
+    source for backtesting.
+    """
+    __tablename__ = "season_archive"
+
+    id = Column(Integer, primary_key=True)
+    season = Column(String(10), nullable=False, index=True)   # e.g. "2025-26"
+    player_id = Column(Integer, nullable=False, index=True)   # FPL element id (per-season!)
+    player_name = Column(String(100), nullable=False, index=True)
+    full_name = Column(String(200), nullable=True)            # for cross-season matching
+    team_short = Column(String(10), nullable=True)
+    position_id = Column(Integer, nullable=False)
+
+    # Season totals (from bootstrap at archive time)
+    total_points = Column(Integer, default=0)
+    minutes = Column(Integer, default=0)
+    goals = Column(Integer, default=0)
+    assists = Column(Integer, default=0)
+    points_per_game = Column(Float, default=0.0)
+    end_price = Column(Float, default=0.0)
+    ownership = Column(Float, default=0.0)
+    xGI = Column(Float, default=0.0)
+    xGC = Column(Float, default=0.0)
+
+    # Full per-GW history (element-summary "history" list) for backtesting
+    gw_history = Column(JSON, nullable=True)
+
+    # Pre-computed variability stats (same shape as VariabilityEntry payload)
+    variability = Column(JSON, nullable=True)
+
+    archived_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<SeasonArchive(season='{self.season}', player='{self.player_name}', pts={self.total_points})>"
+
+
+class HermesLesson(Base):
+    """Distilled lessons from post-GW evaluations, fed into future Hermes prompts."""
+    __tablename__ = "hermes_lessons"
+
+    id = Column(Integer, primary_key=True)
+    gameweek_learned = Column(Integer, nullable=False, index=True)
+    category = Column(String(30), nullable=False, index=True)  # captaincy/adjustments/transfers/news/chips
+    lesson = Column(Text, nullable=False)
+    evidence = Column(JSON, nullable=True)
+    weight = Column(Float, default=1.0)   # decays over time
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<HermesLesson(gw={self.gameweek_learned}, category='{self.category}', active={self.active})>"
+
+
 def init_db(db_url: Optional[str] = None):
     """
     Initialize the database.

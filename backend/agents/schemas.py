@@ -52,10 +52,15 @@ class PlayerSnapshot(BaseModel):
     fixture_difficulty: int = 3
     status: str = "a"
     in_user_team: bool = False
+    # Cold-start: last season's baseline (None outside early-season blending)
+    prior_ppg: Optional[float] = None
+    prior_total_points: Optional[int] = None
 
 
 class DataSignals(BaseModel):
     gameweek_deadline: Optional[datetime] = None
+    season_phase: str = "mid"  # preseason/early/mid/run_in/off_season
+    prior_season_available: bool = False
     players: List[PlayerSnapshot] = Field(default_factory=list)
 
 
@@ -129,9 +134,13 @@ class SquadRules(BaseModel):
 class MechanicsSignals(BaseModel):
     current_gameweek: int
     next_gameweek: int
+    season_phase: Literal["preseason", "early", "mid", "run_in", "off_season"] = "mid"
+    finished_gameweeks: int = 0
     next_deadline: Optional[datetime] = None
     hours_to_deadline: Optional[float] = None
     fixture_load: List[GameweekFixtureLoad] = Field(default_factory=list)
+    # Season planning: avg FDR per team over the next 6 GWs (lower = easier run)
+    team_next6_fdr: Dict[str, float] = Field(default_factory=dict)
     price_rise_candidates: List[PriceChangeCandidate] = Field(default_factory=list)
     price_fall_candidates: List[PriceChangeCandidate] = Field(default_factory=list)
     squad_rules: SquadRules = Field(default_factory=SquadRules)
@@ -191,6 +200,7 @@ class VariabilityEntry(BaseModel):
     name: str
     team: str
     position: str
+    source: Literal["current", "prior"] = "current"  # prior = last-season archive (cold start)
     n_gws: int
     mean_pts: float
     stddev: float

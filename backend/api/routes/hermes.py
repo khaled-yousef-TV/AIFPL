@@ -185,3 +185,78 @@ async def get_status():
     except Exception as e:
         logger.error(f"Error fetching Hermes status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/archive-season")
+async def archive_season():
+    """
+    Snapshot the current season's per-player GW history into the archive.
+    Run this BEFORE the FPL API resets for the new season — the archive is
+    the cold-start prior for early gameweeks and the backtest data source.
+    """
+    try:
+        from services.season_archive_service import start_archive_run
+        return start_archive_run()
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error starting season archive: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/archive-status")
+async def archive_status():
+    """List archived seasons and player counts."""
+    try:
+        deps = get_dependencies()
+        return {"seasons": deps.db_manager.get_archived_seasons()}
+    except Exception as e:
+        logger.error(f"Error fetching archive status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backtest")
+async def backtest(
+    season: str = Query(..., description="Archived season, e.g. 2025-26"),
+    start_gw: int = Query(default=6, ge=2, le=38),
+    end_gw: int = Query(default=38, ge=2, le=38),
+    include_gameweeks: bool = Query(default=False, description="Include per-GW detail"),
+):
+    """
+    Replay past gameweeks from the season archive and score the core
+    agent heuristics (captaincy-by-ceiling, hot-form picks, consistency
+    core) against actual results.
+    """
+    try:
+        if end_gw < start_gw:
+            raise HTTPException(status_code=400, detail="end_gw must be >= start_gw")
+
+        deps = get_dependencies()
+        archive = deps.db_manager.get_season_archive(season)
+        if not archive:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No archive for season '{season}'. Run POST /api/hermes/archive-season first.",
+            )
+
+        from hermes.backtest import run_backtest
+        result = run_backtest(archive, start_gw, end_gw)
+        if not include_gameweeks:
+            result.pop("gameweeks", None)
+        return {"season": season, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error running backtest: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/learning-cycle")
+async def trigger_learning_cycle():
+    """Manually trigger the post-GW learning cycle (normally a daily cron)."""
+    try:
+        from services.hermes_evaluation_service import run_learning_cycle
+        return run_learning_cycle()
+    except Exception as e:
+        logger.error(f"Error running learning cycle: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

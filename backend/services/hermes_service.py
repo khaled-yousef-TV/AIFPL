@@ -124,11 +124,37 @@ def _execute_run(
         from hermes.config import load_hermes_config
         from hermes.orchestrator import HermesOrchestrator
 
+        # Learning loop inputs: track record digest + per-action trust weights
+        memory_digest = None
+        trust_weights = None
+        try:
+            from services.hermes_evaluation_service import (
+                get_calibration_profile, get_memory_digest,
+            )
+            memory_digest = get_memory_digest() or None
+            trust_weights = get_calibration_profile().get("trust_weights") or None
+
+            # Plan continuity: briefing/season_plan runs see the previous plan
+            if run_type in ("briefing", "season_plan"):
+                previous_plan = db.get_latest_hermes_run(
+                    run_type="season_plan", statuses=["completed", "degraded"]
+                )
+                if previous_plan and previous_plan.get("narrative"):
+                    plan_digest = (
+                        "## Current season plan (output a DIFF against this, not a rewrite)\n"
+                        + previous_plan["narrative"][:1200]
+                    )
+                    memory_digest = f"{memory_digest}\n\n{plan_digest}" if memory_digest else plan_digest
+        except Exception as e:
+            logger.warning(f"[{run_id}] learning-loop inputs unavailable: {e}")
+
         orchestrator = HermesOrchestrator(load_hermes_config())
         outcome = orchestrator.run(
             run_type=run_type,
             budget=budget,
             user_player_ids=user_player_ids,
+            memory_digest=memory_digest,
+            trust_weights=trust_weights,
             progress_cb=progress,
         )
 

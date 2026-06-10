@@ -346,37 +346,12 @@ async def _save_daily_snapshot_async():
         squad_data = await build_squad_with_predictor(deps.predictor_heuristic, "combined", budget=100.0, force_refresh=True)
         
         # Validate squad doesn't contain unavailable/doubtful players and regenerate if needed
-        # (max 2 attempts to avoid infinite loop)
+        # (max 2 attempts to avoid infinite loop). Validation rules live in snapshot_service.
+        from services.snapshot_service import find_invalid_squad_players
         max_attempts = 2
         for attempt in range(max_attempts):
-            invalid_players = []
-            all_player_ids = []
-            for player in squad_data.get("starting_xi", []) + squad_data.get("bench", []):
-                all_player_ids.append(player.get("id"))
-            
-            # Get fresh player data to validate
-            players = fpl_client.get_players()
-            player_dict = {p.id: p for p in players}
-            
-            for pid in all_player_ids:
-                player = player_dict.get(pid)
-                if not player:
-                    continue
-                # Check status (exclude injured, suspended, unavailable, not available, AND doubtful)
-                if player.status in [PlayerStatus.INJURED, PlayerStatus.SUSPENDED, 
-                                    PlayerStatus.UNAVAILABLE, PlayerStatus.NOT_AVAILABLE, PlayerStatus.DOUBTFUL]:
-                    invalid_players.append(f"{player.web_name} {player.second_name} (status: {player.status})")
-                    continue
-                # Check chance of playing
-                chance = player.chance_of_playing_next_round
-                if chance is not None and chance < 50:
-                    invalid_players.append(f"{player.web_name} {player.second_name} (chance: {chance}%)")
-                    continue
-                # Check news field (keyword logic lives in the availability agent)
-                from agents.availability_agent import has_negative_news
-                if has_negative_news(player.news):
-                    invalid_players.append(f"{player.web_name} {player.second_name} (news: {player.news[:50]})")
-            
+            invalid_players = find_invalid_squad_players(squad_data, fpl_client.get_players())
+
             if not invalid_players:
                 # Squad is valid, break out of validation loop
                 break
@@ -609,6 +584,19 @@ def schedule_next_telegram_notification():
         logger.error(f"Error scheduling Telegram notification: {e}")
 
 
+def run_hermes_learning_job():
+    """Daily Hermes learning cycle: evaluate finished-GW runs, update lessons."""
+    try:
+        from hermes.config import load_hermes_config
+        if not load_hermes_config().enabled:
+            return
+        from services.hermes_evaluation_service import run_learning_cycle
+        result = run_learning_cycle()
+        logger.info(f"Hermes learning cycle: {result}")
+    except Exception as e:
+        logger.error(f"Error in run_hermes_learning_job: {e}", exc_info=True)
+
+
 def run_hermes_briefing_job():
     """Daily Hermes briefing (03:30 UTC, after the midnight snapshot + chip calcs)."""
     try:
@@ -771,6 +759,23 @@ async def startup_event():
             logger.info("Added hermes_daily_briefing job")
         except Exception as e:
             logger.error(f"Failed to add hermes_daily_briefing job: {e}", exc_info=True)
+
+        # Daily Hermes learning cycle at 06:00 UTC (after final bonus/data checks).
+        # Idempotent: skips GWs whose runs are already evaluated.
+        try:
+            trigger_kwargs = {"hour": 6, "minute": 0}
+            if UTC:
+                trigger_kwargs["timezone"] = UTC
+            scheduler.add_job(
+                run_hermes_learning_job,
+                CronTrigger(**trigger_kwargs),
+                id="hermes_learning_cycle",
+                name="Hermes Learning Cycle",
+                replace_existing=True
+            )
+            logger.info("Added hermes_learning_cycle job")
+        except Exception as e:
+            logger.error(f"Failed to add hermes_learning_cycle job: {e}", exc_info=True)
         
         # Log scheduler status
         logger.info(f"Scheduler is running: {scheduler.running}")
