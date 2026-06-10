@@ -19,6 +19,7 @@ import {
   fetchLatestHermesRun,
   startHermesRun,
 } from '../api/hermes'
+import HermesInsights from './HermesInsights'
 
 const RUN_TYPES: { value: HermesRunType; label: string; description: string }[] = [
   { value: 'briefing', label: 'Weekly Briefing', description: 'Full analysis: squad, captaincy, chips, differentials' },
@@ -362,6 +363,9 @@ const HermesTab: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Track record + backtest insights */}
+      <HermesInsights />
     </div>
   )
 }

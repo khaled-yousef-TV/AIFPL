@@ -95,3 +95,38 @@ export async function fetchLatestHermesRun(runType?: HermesRunType): Promise<Her
   const params = runType ? `?run_type=${runType}` : ''
   return apiRequest<HermesRun>(`/api/hermes/latest${params}`)
 }
+
+export interface CalibrationProfile {
+  runs_scored: number
+  action_hit_rates: Record<string, number>
+  action_samples: Record<string, number>
+  captain_regret_avg: number | null
+  trust_weights: Record<string, number>
+}
+
+export interface CalibrationResponse {
+  profile: CalibrationProfile
+  lessons: Array<{ id: number; gameweek_learned: number; category: string; lesson: string; weight: number }>
+}
+
+export interface BacktestSummary {
+  season: string
+  summary: {
+    gameweeks_scored: number
+    captaincy: Record<string, number>
+    form_signal: Record<string, number>
+    consistency_signal: Record<string, number>
+  }
+}
+
+export async function fetchCalibration(): Promise<CalibrationResponse> {
+  return apiRequest<CalibrationResponse>('/api/hermes/calibration')
+}
+
+export async function fetchArchiveStatus(): Promise<{ seasons: Array<{ season: string; players: number }> }> {
+  return apiRequest('/api/hermes/archive-status')
+}
+
+export async function fetchBacktest(season: string): Promise<BacktestSummary> {
+  return apiRequest<BacktestSummary>(`/api/hermes/backtest?season=${encodeURIComponent(season)}`)
+}

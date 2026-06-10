@@ -260,3 +260,18 @@ async def trigger_learning_cycle():
     except Exception as e:
         logger.error(f"Error running learning cycle: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/calibration")
+async def get_calibration():
+    """Hermes' running track record: calibration profile + active lessons."""
+    try:
+        from services.hermes_evaluation_service import get_calibration_profile
+        deps = get_dependencies()
+        return {
+            "profile": get_calibration_profile(),
+            "lessons": deps.db_manager.get_active_lessons(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching calibration: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
