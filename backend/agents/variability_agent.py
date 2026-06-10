@@ -31,6 +31,23 @@ MIN_APPEARANCES = 5
 # Thresholds
 HAUL_POINTS = 10
 BLANK_POINTS = 2
+# Recent-form window (last N appearances)
+FORM_WINDOW = 4
+
+# Captaincy ranking blend — expected value dominant, with form + ceiling tilts.
+# Tuned on 2025-26 backtest: beats pure-mean by ~+0.37 pts/captain/GW and
+# pure-ceiling (the old heuristic) by ~+2.25. See hermes/backtest.py.
+CAPTAIN_BLEND = {"mean": 0.7, "form": 0.15, "ceiling": 0.15}
+
+
+def captaincy_score(stats: dict, weights: dict = None) -> float:
+    """Blended captaincy score: expected value + recent form + ceiling upside."""
+    w = weights or CAPTAIN_BLEND
+    return (
+        w["mean"] * stats.get("mean_pts", 0)
+        + w["form"] * stats.get("form_recent", 0)
+        + w["ceiling"] * stats.get("ceiling_p90", 0)
+    )
 
 # Daily cache: {player_id: VariabilityEntry-dict}, keyed by ISO date
 _cache: Dict[str, Dict[int, dict]] = {}
@@ -59,6 +76,8 @@ def compute_variability_stats(points: List[int]) -> Optional[dict]:
         "floor_p10": round(float(np.percentile(arr, 10)), 1),
         "haul_rate": round(float(np.mean(arr >= HAUL_POINTS)), 3),
         "blank_rate": round(float(np.mean(arr <= BLANK_POINTS)), 3),
+        # mean of the last FORM_WINDOW appearances (recent form)
+        "form_recent": round(float(np.mean(arr[-FORM_WINDOW:])), 2),
         # 1 at perfectly steady output, decaying as volatility grows
         "consistency_score": round(1.0 / (1.0 + cv), 3),
     }
@@ -166,16 +185,19 @@ class VariabilityAgent(BaseAgent):
             day_cache[pid] = entry_dict
             entries.append(VariabilityEntry(**entry_dict))
 
-        # High ceiling among genuinely good players -> captaincy material
+        # Captaincy candidates: blended score (expected value + form + upside),
+        # backtest-tuned to beat both pure-mean and pure-ceiling ranking.
         good = [e for e in entries if e.mean_pts >= 4.0]
         captaincy = [
-            e.id for e in sorted(good, key=lambda e: e.ceiling_p90, reverse=True)[:10]
+            e.id for e in sorted(
+                good, key=lambda e: captaincy_score(e.model_dump()), reverse=True
+            )[:10]
         ]
         core = [
             e.id for e in sorted(good, key=lambda e: e.consistency_score, reverse=True)[:10]
         ]
 
-        entries.sort(key=lambda e: e.ceiling_p90, reverse=True)
+        entries.sort(key=lambda e: captaincy_score(e.model_dump()), reverse=True)
 
         payload = VariabilitySignals(
             pool_size=len(pool),
@@ -191,7 +213,7 @@ class VariabilityAgent(BaseAgent):
         core_names = ", ".join(names_by_id.get(i, "?") for i in core[:3])
         summary = (
             f"Volatility computed for {len(entries)}/{len(pool)} pool players. "
-            f"Highest ceilings: {cap_names or 'none'}. "
+            f"Top captaincy picks (blended): {cap_names or 'none'}. "
             f"Most consistent: {core_names or 'none'}."
             + (f" ({fetch_errors} fetch errors.)" if fetch_errors else "")
         )

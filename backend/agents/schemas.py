@@ -209,6 +209,7 @@ class VariabilityEntry(BaseModel):
     floor_p10: float
     haul_rate: float         # share of GWs with >= 10 pts
     blank_rate: float        # share of GWs with <= 2 pts
+    form_recent: float = 0.0  # mean of last few appearances
     consistency_score: float  # 0..1, higher = more consistent
 
 

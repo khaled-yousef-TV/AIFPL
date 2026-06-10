@@ -4,10 +4,37 @@ import pytest
 
 from agents.variability_agent import (
     BLANK_POINTS,
+    CAPTAIN_BLEND,
     HAUL_POINTS,
     MIN_APPEARANCES,
+    captaincy_score,
     compute_variability_stats,
 )
+
+
+def test_captaincy_score_is_mean_dominant():
+    # A high-mean steady player should outrank a low-mean high-ceiling punt
+    steady = {"mean_pts": 7.0, "form_recent": 7.0, "ceiling_p90": 10.0}
+    punt = {"mean_pts": 3.0, "form_recent": 3.0, "ceiling_p90": 18.0}
+    assert captaincy_score(steady) > captaincy_score(punt)
+
+
+def test_captaincy_blend_weights_sum_to_one():
+    assert abs(sum(CAPTAIN_BLEND.values()) - 1.0) < 1e-9
+
+
+def test_captaincy_score_rewards_form_and_ceiling_as_tiebreak():
+    base = {"mean_pts": 6.0, "form_recent": 4.0, "ceiling_p90": 8.0}
+    hotter = {"mean_pts": 6.0, "form_recent": 9.0, "ceiling_p90": 8.0}
+    higher_ceiling = {"mean_pts": 6.0, "form_recent": 4.0, "ceiling_p90": 15.0}
+    assert captaincy_score(hotter) > captaincy_score(base)
+    assert captaincy_score(higher_ceiling) > captaincy_score(base)
+
+
+def test_compute_stats_includes_form_recent():
+    stats = compute_variability_stats([2, 4, 6, 8, 10, 12])
+    # last 4 of [2,4,6,8,10,12] -> [6,8,10,12] mean 9.0
+    assert stats["form_recent"] == 9.0
 
 
 def test_too_few_appearances_returns_none():
