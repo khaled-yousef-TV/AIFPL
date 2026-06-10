@@ -74,6 +74,54 @@ def test_run_backtest_aggregates():
     assert "edge_vs_league" in summary["form_signal"]
 
 
+def test_backtest_reports_naive_baseline_and_verdict():
+    """The smart picks must be measured against naive baselines + a verdict."""
+    result = run_backtest(_synthetic_archive(), start_gw=8, end_gw=12)
+    cap = result["summary"]["captaincy"]
+
+    # "Captain your best player so far" baseline is always available (uses points)
+    assert cap["naive_by_season_points_avg"] is not None
+    h2h = cap["blend_vs_best_player"]
+    assert h2h is not None
+    # Win/loss/tie counts cover every scored GW
+    assert h2h["smart_wins"] + h2h["naive_wins"] + h2h["ties"] == 5
+    assert h2h["avg_edge_per_gw"] == round(h2h["smart_avg"] - h2h["naive_avg"], 2)
+
+    # Form/consistency signals are compared vs the naive top-10, not just league avg
+    assert "edge_vs_naive_best" in result["summary"]["form_signal"]
+    assert "edge_vs_naive_best" in result["summary"]["consistency_signal"]
+
+    verdict = result["summary"]["verdict"]
+    assert set(verdict) >= {
+        "captaincy_beats_naive", "form_signal_real",
+        "consistency_signal_real", "has_measurable_edge", "notes",
+    }
+    assert isinstance(verdict["notes"], list) and verdict["notes"]
+
+
+def test_price_and_ownership_baselines_use_pointintime_data():
+    """When the archive carries per-GW value/selected, those baselines populate."""
+    archive = []
+    for i in range(40):
+        history = [
+            {
+                "round": r, "total_points": (i % 6) + (r % 4), "minutes": 90,
+                "value": 40 + i,          # point-in-time price (tenths of £m)
+                "selected": 1000 * (i + 1),  # point-in-time ownership
+            }
+            for r in range(1, 13)
+        ]
+        archive.append({"player_name": f"P{i}", "gw_history": history})
+
+    gw = backtest_gameweek(archive, gw=10)
+    assert gw["captain_by_price"] is not None
+    assert gw["captain_by_ownership"] is not None
+
+    summary = run_backtest(archive, start_gw=8, end_gw=12)["summary"]["captaincy"]
+    assert summary["naive_by_price_avg"] is not None
+    assert summary["blend_vs_template"] is not None
+
+
 def test_previous_season_helper():
     import os, sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

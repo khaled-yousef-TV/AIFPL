@@ -69,8 +69,20 @@ curl "localhost:8001/api/hermes/backtest?season=2025-26&start_gw=6&end_gw=38"
 ```
 Replays each GW using only data knowable beforehand and scores the core
 heuristics: captaincy-by-ceiling vs by-mean vs best-possible, hot-form
-top-10 vs league average, consistency core vs league average.
-Not covered (no historical data exists): ownership, odds, news, the LLM.
+top-10 and consistency core.
+
+**Does it actually beat naive play?** Every heuristic is measured against
+the baselines a real manager would use — "captain your best player so far",
+"captain your most expensive", "captain the template", and "just pick the
+best players" — using point-in-time price/ownership from the GW history (no
+lookahead). `summary.captaincy.blend_vs_best_player` (and `_vs_price`,
+`_vs_template`) report the **average edge AND the head-to-head win-rate**
+per GW, because one haul can flatter an average. `summary.verdict` distills
+this into `captaincy_beats_naive` / `form_signal_real` /
+`consistency_signal_real` / `has_measurable_edge` with plain-English notes —
+a strategy only "wins" if it beats the baseline on both average and win-rate.
+
+Not covered (no historical data exists): odds, news, the LLM layer.
 
 ## Endpoints
 | Endpoint | Purpose |
@@ -118,7 +130,8 @@ python3 -m pytest backend/tests/ -v
 ```
 Covers: variability math, DGW/BGW detection, schemas, news keywords,
 LLM-output validation (hallucinated ids, clamping, truncated-JSON repair),
-Telegram formatting, evaluation/trust math, backtest reconstruction.
+Telegram formatting (incl. plain-text fallback), evaluation/trust math,
+backtest reconstruction + naive-baseline comparison & verdict.
 
 ## Database schema
 Hermes adds three tables — `hermes_runs`, `season_archive`, `hermes_lessons`

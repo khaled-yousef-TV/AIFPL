@@ -59,6 +59,32 @@ def actual_points_at(gw_history: List[Dict], gw: int) -> Optional[int]:
     return sum(h.get("total_points", 0) for h in rows)  # DGW: both fixtures
 
 
+def reconstruct_market(gw_history: List[Dict], before_gw: int) -> Optional[Dict]:
+    """
+    Point-in-time market state a manager would have seen BEFORE before_gw
+    (no lookahead). Drives the naive baselines:
+
+    - season_pts: cumulative points so far -> "captain your best player"
+    - price_at:   latest GW price (tenths of £m) -> "captain your most expensive"
+    - owned_at:   latest GW ownership count -> "captain the template"
+
+    price/ownership come from the element-summary history rows (`value`,
+    `selected`) and may be absent in synthetic/partial archives -> None.
+    """
+    prior = sorted(
+        (h for h in gw_history if h.get("round", 0) < before_gw),
+        key=lambda h: h.get("round", 0),
+    )
+    if not prior:
+        return None
+    latest = prior[-1]
+    return {
+        "season_pts": sum(h.get("total_points", 0) for h in prior),
+        "price_at": latest.get("value"),
+        "owned_at": latest.get("selected"),
+    }
+
+
 def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
     """Score the strategies for one gameweek. None if too few players appeared."""
     candidates = []
@@ -70,7 +96,14 @@ def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
         stats = reconstruct_player_stats(history, gw)
         if stats is None:
             continue
-        candidates.append({"name": row["player_name"], "actual": actual, **stats})
+        market = reconstruct_market(history, gw) or {}
+        candidates.append({
+            "name": row["player_name"], "actual": actual,
+            "season_pts": market.get("season_pts", 0),
+            "price_at": market.get("price_at"),
+            "owned_at": market.get("owned_at"),
+            **stats,
+        })
 
     if len(candidates) < 30:
         return None
@@ -78,10 +111,22 @@ def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
     league_avg = round(sum(c["actual"] for c in candidates) / len(candidates), 2)
 
     def top_by(key: str) -> List[Dict]:
-        return sorted(candidates, key=lambda c: c[key], reverse=True)[:TOP_N_STRATEGY]
+        # None sinks to the bottom so absent price/ownership doesn't crash sorting
+        return sorted(
+            candidates,
+            key=lambda c: (c.get(key) if c.get(key) is not None else float("-inf")),
+            reverse=True,
+        )[:TOP_N_STRATEGY]
 
     def avg_actual(bucket: List[Dict]) -> float:
         return round(sum(c["actual"] for c in bucket) / len(bucket), 2)
+
+    def pick(key: str) -> Optional[Dict]:
+        """Top-1 naive captain pick by `key`; None if no candidate has the data."""
+        ranked = top_by(key)
+        if not ranked or ranked[0].get(key) is None:
+            return None
+        return {"name": ranked[0]["name"], "actual": ranked[0]["actual"]}
 
     for c in candidates:
         c["blend"] = captaincy_score(c)
@@ -99,9 +144,15 @@ def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
         "captain_by_mean": {"name": mean_pick["name"], "actual": mean_pick["actual"]},
         "captain_by_blend": {"name": blend_pick["name"], "actual": blend_pick["actual"]},
         "best_possible_captain": {"name": best_possible["name"], "actual": best_possible["actual"]},
+        # Naive manager baselines (no lookahead): the bar the smart heuristics must beat
+        "captain_by_season_points": pick("season_pts"),   # "captain your best player so far"
+        "captain_by_price": pick("price_at"),             # "captain your most expensive"
+        "captain_by_ownership": pick("owned_at"),         # "captain the template"
         "hot_form_top10_avg": avg_actual(top_by("form_recent")),
         "consistency_top10_avg": avg_actual(top_by("consistency_score")),
         "ceiling_top10_avg": avg_actual(top_by("ceiling_p90")),
+        # "Just pick the obvious best players" baseline for the form/consistency signals
+        "naive_best10_avg": avg_actual(top_by("season_pts")),
     }
 
 
@@ -124,28 +175,157 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
     league = [g["league_avg_points"] for g in per_gw]
     hot = [g["hot_form_top10_avg"] for g in per_gw]
     consistency = [g["consistency_top10_avg"] for g in per_gw]
+    naive_best = [g["naive_best10_avg"] for g in per_gw]
 
     def avg(xs):
         return round(sum(xs) / len(xs), 2)
 
+    # Naive captain baselines, aligned per-GW with the smart picks. season_pts
+    # is always available; price/ownership only when the archive carries them.
+    def naive_series(key: str) -> Optional[List[int]]:
+        vals = [g[key]["actual"] for g in per_gw if g.get(key)]
+        return vals if len(vals) == n else None
+
+    def head_to_head(smart: List[int], naive: Optional[List[int]]) -> Optional[Dict]:
+        """Per-GW comparison: avg edge + win/loss/tie counts. Averages alone hide
+        that one haul can carry a strategy, so we report how OFTEN it wins too."""
+        if not naive:
+            return None
+        wins = sum(1 for s, b in zip(smart, naive) if s > b)
+        losses = sum(1 for s, b in zip(smart, naive) if s < b)
+        return {
+            "smart_avg": avg(smart),
+            "naive_avg": avg(naive),
+            "avg_edge_per_gw": round(avg(smart) - avg(naive), 2),
+            "smart_wins": wins,
+            "naive_wins": losses,
+            "ties": n - wins - losses,
+        }
+
+    season_caps = naive_series("captain_by_season_points")
+    price_caps = naive_series("captain_by_price")
+    owned_caps = naive_series("captain_by_ownership")
+
+    # Primary bar = "captain your best player so far" (season points); the
+    # toughest naive heuristic and always available.
+    blend_vs_best_player = head_to_head(blend_caps, season_caps)
+    blend_vs_price = head_to_head(blend_caps, price_caps)
+    blend_vs_template = head_to_head(blend_caps, owned_caps)
+
+    captaincy = {
+        "by_ceiling_avg": avg(ceiling_caps),
+        "by_mean_avg": avg(mean_caps),
+        "by_blend_avg": avg(blend_caps),
+        "best_possible_avg": avg(best_caps),
+        "blend_beats_mean": sum(1 for b, m in zip(blend_caps, mean_caps) if b > m),
+        "blend_beats_ceiling": sum(1 for b, c in zip(blend_caps, ceiling_caps) if b > c),
+        # vs the naive baselines a real manager would use
+        "naive_by_season_points_avg": avg(season_caps) if season_caps else None,
+        "naive_by_price_avg": avg(price_caps) if price_caps else None,
+        "naive_by_ownership_avg": avg(owned_caps) if owned_caps else None,
+        "blend_vs_best_player": blend_vs_best_player,
+        "blend_vs_price": blend_vs_price,
+        "blend_vs_template": blend_vs_template,
+    }
+
+    form_signal = {
+        "hot_top10_avg": avg(hot),
+        "league_avg": avg(league),
+        "edge_vs_league": round(avg(hot) - avg(league), 2),
+        # The honest bar: do hot-form picks beat just picking the best players?
+        "naive_best10_avg": avg(naive_best),
+        "edge_vs_naive_best": round(avg(hot) - avg(naive_best), 2),
+    }
+    consistency_signal = {
+        "consistency_top10_avg": avg(consistency),
+        "edge_vs_league": round(avg(consistency) - avg(league), 2),
+        "naive_best10_avg": avg(naive_best),
+        "edge_vs_naive_best": round(avg(consistency) - avg(naive_best), 2),
+    }
+
     summary = {
         "gameweeks_scored": n,
-        "captaincy": {
-            "by_ceiling_avg": avg(ceiling_caps),
-            "by_mean_avg": avg(mean_caps),
-            "by_blend_avg": avg(blend_caps),
-            "best_possible_avg": avg(best_caps),
-            "blend_beats_mean": sum(1 for b, m in zip(blend_caps, mean_caps) if b > m),
-            "blend_beats_ceiling": sum(1 for b, c in zip(blend_caps, ceiling_caps) if b > c),
-        },
-        "form_signal": {
-            "hot_top10_avg": avg(hot),
-            "league_avg": avg(league),
-            "edge_vs_league": round(avg(hot) - avg(league), 2),
-        },
-        "consistency_signal": {
-            "consistency_top10_avg": avg(consistency),
-            "edge_vs_league": round(avg(consistency) - avg(league), 2),
-        },
+        "captaincy": captaincy,
+        "form_signal": form_signal,
+        "consistency_signal": consistency_signal,
+        "verdict": _build_verdict(
+            n, blend_vs_best_player, form_signal, consistency_signal
+        ),
     }
     return {"gameweeks": per_gw, "summary": summary}
+
+
+# Edge thresholds for the verdict: small enough to detect a real signal,
+# large enough not to call sampling noise a "win". FPL captaincy swings are
+# big, so ~0.4 pts/GW sustained over a season is a meaningful captaincy edge.
+_CAPTAINCY_EDGE_PTS = 0.4
+_SIGNAL_EDGE_PTS = 0.3
+
+
+def _build_verdict(
+    n: int,
+    blend_vs_best_player: Optional[Dict],
+    form_signal: Dict,
+    consistency_signal: Dict,
+) -> Dict:
+    """
+    Turn the numbers into an honest read. Conservative by design: a strategy
+    only "beats" the naive baseline if it wins on BOTH average points AND the
+    head-to-head win-rate, so a single lucky haul can't earn a pass.
+    """
+    notes: List[str] = []
+
+    captaincy_beats_naive = False
+    if blend_vs_best_player:
+        edge = blend_vs_best_player["avg_edge_per_gw"]
+        wins, losses = blend_vs_best_player["smart_wins"], blend_vs_best_player["naive_wins"]
+        captaincy_beats_naive = edge >= _CAPTAINCY_EDGE_PTS and wins > losses
+        if captaincy_beats_naive:
+            notes.append(
+                f"Blend captaincy beats 'captain your best player' by {edge} pts/GW "
+                f"(won {wins}/{n}) — a real, if modest, edge."
+            )
+        elif abs(edge) < _CAPTAINCY_EDGE_PTS:
+            notes.append(
+                f"Blend captaincy is within noise of just captaining your best player "
+                f"(edge {edge} pts/GW, won {wins} lost {losses} of {n}). The ceiling "
+                f"heuristic isn't buying captaincy edge on this data."
+            )
+        else:
+            notes.append(
+                f"Blend captaincy UNDERPERFORMS the naive baseline here "
+                f"(edge {edge} pts/GW, won {wins} lost {losses}). Prefer the simple pick."
+            )
+
+    form_real = form_signal["edge_vs_naive_best"] >= _SIGNAL_EDGE_PTS
+    notes.append(
+        f"Hot-form picks {'beat' if form_real else 'do NOT beat'} just picking the "
+        f"best players ({form_signal['edge_vs_naive_best']:+} pts/GW vs naive top-10)."
+    )
+
+    consistency_real = consistency_signal["edge_vs_naive_best"] >= _SIGNAL_EDGE_PTS
+    notes.append(
+        f"Consistency core {'beats' if consistency_real else 'does NOT beat'} the naive "
+        f"top-10 ({consistency_signal['edge_vs_naive_best']:+} pts/GW)."
+    )
+
+    any_edge = captaincy_beats_naive or form_real or consistency_real
+    notes.append(
+        "Bottom line: the deterministic core shows measurable edge over naive play."
+        if any_edge else
+        "Bottom line: on this season the deterministic core does not clearly beat naive "
+        "play. Treat Hermes as decision-support/explanation, not as alpha — and re-run "
+        "across more seasons before trusting it."
+    )
+
+    return {
+        "captaincy_beats_naive": captaincy_beats_naive,
+        "form_signal_real": form_real,
+        "consistency_signal_real": consistency_real,
+        "has_measurable_edge": any_edge,
+        "caveat": (
+            "Single-season, deterministic core only (no betting/news/LLM, no ownership "
+            "for differential value). Small samples — read win-rates, not just averages."
+        ),
+        "notes": notes,
+    }

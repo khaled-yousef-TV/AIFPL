@@ -225,7 +225,11 @@ async def backtest(
     """
     Replay past gameweeks from the season archive and score the core
     agent heuristics (captaincy-by-ceiling, hot-form picks, consistency
-    core) against actual results.
+    core) against actual results AND against naive manager baselines
+    ("captain your best/most-expensive/most-owned player", "just pick the
+    best players"). `summary.verdict` reports whether the heuristics show
+    a measurable edge over naive play, using head-to-head win-rates rather
+    than averages alone.
     """
     try:
         if end_gw < start_gw:
