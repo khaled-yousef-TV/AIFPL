@@ -115,6 +115,7 @@ class GameWeek(BaseModel):
     is_next: bool = False
     is_previous: bool = False
     finished: bool = False
+    data_checked: bool = False  # True once final scores incl. bonus are confirmed
     
     # Stats
     average_entry_score: Optional[int] = None

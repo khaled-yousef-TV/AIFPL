@@ -18,22 +18,18 @@ from data.european_teams import assess_rotation_risk
 logger = logging.getLogger(__name__)
 
 
-async def get_predictions(position: Optional[int] = None, top_n: int = 100) -> Dict[str, Any]:
+def compute_predictions() -> List[Dict[str, Any]]:
     """
-    Get player predictions for next gameweek.
-    
-    Args:
-        position: Filter by position_id (1=GK, 2=DEF, 3=MID, 4=FWD)
-        top_n: Number of predictions to return
-        
-    Returns:
-        Dict with 'predictions' list
+    Compute (or fetch cached) player predictions for the next gameweek.
+
+    Synchronous core shared by the API service functions and the Hermes
+    data agent. Returns the full sorted prediction list.
     """
     deps = get_dependencies()
     fpl_client = deps.fpl_client
     feature_eng = deps.feature_engineer
     predictor_heuristic = deps.predictor_heuristic
-    
+
     next_gw = fpl_client.get_next_gameweek()
     gw_id = next_gw.id if next_gw else 0
 
@@ -136,7 +132,21 @@ async def get_predictions(position: Optional[int] = None, top_n: int = 100) -> D
         all_predictions = predictions
         cache.set("predictions", cache_key, all_predictions)
 
-    filtered = all_predictions
+    return all_predictions
+
+
+async def get_predictions(position: Optional[int] = None, top_n: int = 100) -> Dict[str, Any]:
+    """
+    Get player predictions for next gameweek.
+
+    Args:
+        position: Filter by position_id (1=GK, 2=DEF, 3=MID, 4=FWD)
+        top_n: Number of predictions to return
+
+    Returns:
+        Dict with 'predictions' list
+    """
+    filtered = compute_predictions()
     if position is not None:
         filtered = [p for p in filtered if p.get("position_id") == position]
 

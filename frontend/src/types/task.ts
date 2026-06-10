@@ -4,13 +4,16 @@
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
 
-export type TaskType = 
-  | 'daily_snapshot' 
-  | 'triple_captain' 
-  | 'refresh_picks' 
-  | 'refresh_differentials' 
-  | 'refresh_transfers' 
+export type TaskType =
+  | 'daily_snapshot'
+  | 'triple_captain'
+  | 'refresh_picks'
+  | 'refresh_differentials'
+  | 'refresh_transfers'
   | 'refresh_wildcard'
+  | 'wildcard'
+  | 'hermes_run'
+  | 'season_archive'
 
 export interface Task {
   id: string

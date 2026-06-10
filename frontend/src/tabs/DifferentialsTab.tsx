@@ -14,13 +14,13 @@ const DifferentialsTab: React.FC<DifferentialsTabProps> = ({ differentials, getP
         <Flame className="w-5 h-5 text-orange-400" />
         Differentials (Under 10% Owned)
       </div>
-      <p className="text-gray-400 text-sm mb-4">
+      <p className="text-content-muted text-sm mb-4">
         Low-ownership players with high predicted points - great for climbing ranks!
       </p>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
+            <tr className="text-left text-content-muted text-sm border-b border-border">
               <th className="pb-3">#</th>
               <th className="pb-3">Player</th>
               <th className="pb-3">Fixture</th>
@@ -33,11 +33,11 @@ const DifferentialsTab: React.FC<DifferentialsTabProps> = ({ differentials, getP
           </thead>
           <tbody>
             {differentials.map((player, i) => (
-              <tr key={player.id} className="border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors">
-                <td className="py-3 text-gray-500 font-mono">{i + 1}</td>
+              <tr key={player.id} className="border-b border-border/50 hover:bg-surface-2 transition-colors">
+                <td className="py-3 text-content-subtle font-mono">{i + 1}</td>
                 <td className="py-3">
                   <span className="font-medium">{player.name}</span>
-                  <span className="text-gray-500 text-xs ml-1">({player.team})</span>
+                  <span className="text-content-subtle text-xs ml-1">({player.team})</span>
                 </td>
                 <td className="py-3">
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -55,10 +55,10 @@ const DifferentialsTab: React.FC<DifferentialsTabProps> = ({ differentials, getP
                 </td>
                 <td className="py-3 text-right font-mono text-sm">£{player.price}m</td>
                 <td className="py-3 text-right font-mono text-orange-400">{player.ownership}%</td>
-                <td className="py-3 text-right font-mono text-[#00ff87] font-semibold">
+                <td className="py-3 text-right font-mono text-primary font-semibold">
                   {player.predicted_points?.toFixed(1) ?? '0.0'}
                 </td>
-                <td className="py-3 text-xs text-gray-400 max-w-[150px]">{player.reason}</td>
+                <td className="py-3 text-xs text-content-muted max-w-[150px]">{player.reason}</td>
               </tr>
             ))}
           </tbody>

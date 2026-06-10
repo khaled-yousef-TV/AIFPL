@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from .models import (
     Settings, GameWeekLog, Decision, Prediction,
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
-    TripleCaptainRecommendations, Task, WildcardTrajectory, init_db
+    TripleCaptainRecommendations, Task, WildcardTrajectory, HermesRun,
+    SeasonArchive, HermesLesson, init_db
 )
 # Import FplTeam - must be imported after other models to avoid circular imports
 try:
@@ -946,13 +947,271 @@ class DatabaseManager:
                 trajectory = session.query(WildcardTrajectory).order_by(
                     WildcardTrajectory.created_at.desc()
                 ).first()
-                
+
                 if not trajectory:
                     return None
-                
+
                 return trajectory.trajectory_data
         except Exception as e:
             logger.error(f"Failed to get wildcard trajectory: {e}")
             return None
+
+    # ==================== Hermes Runs ====================
+
+    @staticmethod
+    def _hermes_run_to_dict(run: HermesRun) -> Dict[str, Any]:
+        return {
+            "run_id": run.run_id,
+            "gameweek": run.gameweek,
+            "run_type": run.run_type,
+            "status": run.status,
+            "fpl_team_id": run.fpl_team_id,
+            "signals": run.signals,
+            "adjustments": run.adjustments,
+            "result": run.result,
+            "evaluation": run.evaluation,
+            "narrative": run.narrative,
+            "error": run.error,
+            "model": run.model,
+            "prompt_tokens": run.prompt_tokens,
+            "completion_tokens": run.completion_tokens,
+            "created_at": (run.created_at.isoformat() + "Z") if run.created_at else None,
+            "completed_at": (run.completed_at.isoformat() + "Z") if run.completed_at else None,
+        }
+
+    def save_hermes_run(
+        self,
+        run_id: str,
+        gameweek: int,
+        run_type: str,
+        status: str = "pending",
+        fpl_team_id: Optional[int] = None,
+    ) -> bool:
+        """Create a new Hermes run record."""
+        try:
+            with self.get_session() as session:
+                session.add(HermesRun(
+                    run_id=run_id,
+                    gameweek=gameweek,
+                    run_type=run_type,
+                    status=status,
+                    fpl_team_id=fpl_team_id,
+                ))
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save Hermes run {run_id}: {e}")
+            return False
+
+    def update_hermes_run(self, run_id: str, **fields) -> bool:
+        """
+        Update a Hermes run. Accepted fields: status, signals, adjustments,
+        result, evaluation, narrative, error, model, prompt_tokens,
+        completion_tokens. Sets completed_at on terminal statuses.
+        """
+        allowed = {
+            "status", "signals", "adjustments", "result", "evaluation",
+            "narrative", "error", "model", "prompt_tokens", "completion_tokens",
+        }
+        try:
+            with self.get_session() as session:
+                run = session.query(HermesRun).filter(HermesRun.run_id == run_id).first()
+                if not run:
+                    return False
+                for key, value in fields.items():
+                    if key in allowed:
+                        setattr(run, key, value)
+                if fields.get("status") in ("completed", "degraded", "failed"):
+                    run.completed_at = datetime.utcnow()
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update Hermes run {run_id}: {e}")
+            return False
+
+    def get_hermes_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Get a Hermes run by run_id."""
+        try:
+            with self.get_session() as session:
+                run = session.query(HermesRun).filter(HermesRun.run_id == run_id).first()
+                return self._hermes_run_to_dict(run) if run else None
+        except Exception as e:
+            logger.error(f"Failed to get Hermes run {run_id}: {e}")
+            return None
+
+    def get_latest_hermes_run(
+        self,
+        run_type: Optional[str] = None,
+        gameweek: Optional[int] = None,
+        statuses: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get the most recent Hermes run, optionally filtered."""
+        try:
+            with self.get_session() as session:
+                query = session.query(HermesRun)
+                if run_type:
+                    query = query.filter(HermesRun.run_type == run_type)
+                if gameweek is not None:
+                    query = query.filter(HermesRun.gameweek == gameweek)
+                if statuses:
+                    query = query.filter(HermesRun.status.in_(statuses))
+                run = query.order_by(HermesRun.created_at.desc()).first()
+                return self._hermes_run_to_dict(run) if run else None
+        except Exception as e:
+            logger.error(f"Failed to get latest Hermes run: {e}")
+            return None
+
+    def get_hermes_runs_for_gameweek(self, gameweek: int) -> List[Dict[str, Any]]:
+        """Get all Hermes runs for a gameweek (used by the learning loop)."""
+        try:
+            with self.get_session() as session:
+                runs = session.query(HermesRun).filter(
+                    HermesRun.gameweek == gameweek
+                ).order_by(HermesRun.created_at.desc()).all()
+                return [self._hermes_run_to_dict(r) for r in runs]
+        except Exception as e:
+            logger.error(f"Failed to get Hermes runs for GW{gameweek}: {e}")
+            return []
+
+    def get_evaluated_hermes_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recent runs that have an evaluation (for the calibration profile)."""
+        try:
+            with self.get_session() as session:
+                runs = session.query(HermesRun).filter(
+                    HermesRun.evaluation.isnot(None)
+                ).order_by(HermesRun.created_at.desc()).limit(limit).all()
+                return [self._hermes_run_to_dict(r) for r in runs]
+        except Exception as e:
+            logger.error(f"Failed to get evaluated Hermes runs: {e}")
+            return []
+
+    # ==================== Season Archive ====================
+
+    def save_season_archive_entry(self, season: str, entry: Dict[str, Any]) -> bool:
+        """Upsert one player's archive entry for a season."""
+        try:
+            with self.get_session() as session:
+                existing = session.query(SeasonArchive).filter(
+                    SeasonArchive.season == season,
+                    SeasonArchive.player_id == entry["player_id"],
+                ).first()
+                if existing:
+                    for key, value in entry.items():
+                        if hasattr(existing, key):
+                            setattr(existing, key, value)
+                    existing.archived_at = datetime.utcnow()
+                else:
+                    session.add(SeasonArchive(season=season, **entry))
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save archive entry for player {entry.get('player_id')}: {e}")
+            return False
+
+    def get_season_archive(self, season: str) -> List[Dict[str, Any]]:
+        """Get all archived players for a season."""
+        try:
+            with self.get_session() as session:
+                rows = session.query(SeasonArchive).filter(
+                    SeasonArchive.season == season
+                ).all()
+                return [
+                    {
+                        "season": r.season,
+                        "player_id": r.player_id,
+                        "player_name": r.player_name,
+                        "full_name": r.full_name,
+                        "team_short": r.team_short,
+                        "position_id": r.position_id,
+                        "total_points": r.total_points,
+                        "minutes": r.minutes,
+                        "goals": r.goals,
+                        "assists": r.assists,
+                        "points_per_game": r.points_per_game,
+                        "end_price": r.end_price,
+                        "ownership": r.ownership,
+                        "xGI": r.xGI,
+                        "xGC": r.xGC,
+                        "gw_history": r.gw_history,
+                        "variability": r.variability,
+                        "archived_at": r.archived_at.isoformat() if r.archived_at else None,
+                    }
+                    for r in rows
+                ]
+        except Exception as e:
+            logger.error(f"Failed to get season archive {season}: {e}")
+            return []
+
+    def get_archived_seasons(self) -> List[Dict[str, Any]]:
+        """List archived seasons with player counts."""
+        try:
+            with self.get_session() as session:
+                from sqlalchemy import func
+                rows = session.query(
+                    SeasonArchive.season, func.count(SeasonArchive.id)
+                ).group_by(SeasonArchive.season).all()
+                return [{"season": s, "players": c} for s, c in rows]
+        except Exception as e:
+            logger.error(f"Failed to list archived seasons: {e}")
+            return []
+
+    # ==================== Hermes Lessons ====================
+
+    def save_hermes_lesson(
+        self, gameweek: int, category: str, lesson: str,
+        evidence: Optional[Dict] = None,
+    ) -> bool:
+        """Save a lesson learned from a post-GW evaluation."""
+        try:
+            with self.get_session() as session:
+                session.add(HermesLesson(
+                    gameweek_learned=gameweek,
+                    category=category,
+                    lesson=lesson,
+                    evidence=evidence,
+                ))
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save Hermes lesson: {e}")
+            return False
+
+    def get_active_lessons(self, limit: int = 15) -> List[Dict[str, Any]]:
+        """Get active lessons, newest/heaviest first."""
+        try:
+            with self.get_session() as session:
+                rows = session.query(HermesLesson).filter(
+                    HermesLesson.active.is_(True)
+                ).order_by(
+                    HermesLesson.weight.desc(), HermesLesson.gameweek_learned.desc()
+                ).limit(limit).all()
+                return [
+                    {
+                        "id": r.id,
+                        "gameweek_learned": r.gameweek_learned,
+                        "category": r.category,
+                        "lesson": r.lesson,
+                        "weight": r.weight,
+                    }
+                    for r in rows
+                ]
+        except Exception as e:
+            logger.error(f"Failed to get lessons: {e}")
+            return []
+
+    def decay_lessons(self, factor: float = 0.9, deactivate_below: float = 0.3) -> int:
+        """Decay lesson weights each GW; deactivate stale ones. Returns active count."""
+        try:
+            with self.get_session() as session:
+                rows = session.query(HermesLesson).filter(HermesLesson.active.is_(True)).all()
+                for r in rows:
+                    r.weight = round((r.weight or 1.0) * factor, 3)
+                    if r.weight < deactivate_below:
+                        r.active = False
+                session.commit()
+                return sum(1 for r in rows if r.active)
+        except Exception as e:
+            logger.error(f"Failed to decay lessons: {e}")
+            return 0
 
 

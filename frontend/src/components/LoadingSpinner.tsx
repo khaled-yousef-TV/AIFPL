@@ -8,8 +8,8 @@ interface LoadingSpinnerProps {
 export function LoadingSpinner({ text = 'Loading...', className = '' }: LoadingSpinnerProps) {
   return (
     <div className={`flex items-center justify-center py-4 ${className}`}>
-      <Loader2 className="w-6 h-6 text-[#00ff87] animate-spin" />
-      <span className="ml-2 text-gray-400">{text}</span>
+      <Loader2 className="w-6 h-6 text-primary animate-spin" />
+      <span className="ml-2 text-content-muted">{text}</span>
     </div>
   )
 }

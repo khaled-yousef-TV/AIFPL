@@ -31,21 +31,37 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
+def build_optimal_squad(
+    players: List[Dict],
+    budget: float,
+    locked_ids: Optional[List[int]] = None,
+    excluded_ids: Optional[List[int]] = None,
+) -> List[Dict]:
     """
     Build optimal 15-man squad using Mixed Integer Linear Programming.
-    
+
     Constraints:
     - Exactly 2 GK, 5 DEF, 5 MID, 3 FWD
     - Max 3 players per team
     - Total cost <= budget
-    
+    - locked_ids forced into the squad; excluded_ids kept out (Hermes overrides)
+
     Objective: Maximize total predicted points
     """
+    if excluded_ids:
+        excluded = set(excluded_ids)
+        players = [p for p in players if p["id"] not in excluded]
+
     prob = LpProblem("FPL_Squad", LpMaximize)
 
     # Create binary variable for each player
     player_vars = {p["id"]: LpVariable(f"player_{p['id']}", cat="Binary") for p in players}
+
+    # Force locked players into the squad (ignore locks for unknown ids)
+    if locked_ids:
+        for pid in locked_ids:
+            if pid in player_vars:
+                prob += player_vars[pid] == 1
 
     # Objective: maximize predicted points
     prob += lpSum(player_vars[p["id"]] * p["predicted"] for p in players)
@@ -75,33 +91,46 @@ def build_optimal_squad(players: List[Dict], budget: float) -> List[Dict]:
 
     if LpStatus[prob.status] != "Optimal":
         logger.warning(f"Squad optimization status: {LpStatus[prob.status]}")
-        # Fallback: return top predicted players by position
-        return _greedy_fallback(players, budget)
+        # Fallback: return top predicted players by position (honoring locks)
+        return _greedy_fallback(players, budget, locked_ids)
 
     # Extract selected squad
     squad = [p for p in players if player_vars[p["id"]].varValue == 1]
     return squad
 
 
-def _greedy_fallback(players: List[Dict], budget: float) -> List[Dict]:
-    """Greedy fallback when MILP fails."""
+def _greedy_fallback(
+    players: List[Dict], budget: float, locked_ids: Optional[List[int]] = None
+) -> List[Dict]:
+    """Greedy fallback when MILP fails. Seeds the squad with any locked players."""
     squad = []
     remaining = budget
-    
+
+    # Seed locked players first so Hermes 'lock' overrides survive the fallback
+    locked = set(locked_ids or [])
+    if locked:
+        for p in players:
+            if p["id"] in locked:
+                squad.append(p)
+                remaining -= p["price"]
+
+    def pos_filled(pos_id):
+        return len([s for s in squad if s["position_id"] == pos_id])
+
     for pos_id, count in [(1, 2), (2, 5), (3, 5), (4, 3)]:
         pos_players = sorted(
-            [p for p in players if p["position_id"] == pos_id],
+            [p for p in players if p["position_id"] == pos_id and p["id"] not in locked],
             key=lambda x: x["predicted"],
             reverse=True
         )
         for p in pos_players:
-            if len([s for s in squad if s["position_id"] == pos_id]) < count:
+            if pos_filled(pos_id) < count:
                 if p["price"] <= remaining:
                     team_count = len([s for s in squad if s["team_id"] == p["team_id"]])
                     if team_count < 3:
                         squad.append(p)
                         remaining -= p["price"]
-    
+
     return squad
 
 
@@ -146,31 +175,23 @@ def optimize_lineup(squad: List[Dict]) -> tuple:
     return best_xi, bench, best_formation
 
 
-async def build_squad_with_predictor(
-    predictor,
-    method_name: str,
-    budget: float = 100.0,
-    force_refresh: bool = False
-) -> Dict[str, Any]:
-    """Build squad using a specific predictor method."""
+def compute_player_predictions(predictor, force_refresh: bool = False) -> List[Dict]:
+    """
+    Build the per-player prediction dicts used by the MILP optimizer.
+
+    Synchronous core shared by build_squad_with_predictor and the Hermes
+    orchestrator (which adjusts these before optimizing).
+    """
     deps = get_dependencies()
     fpl_client = deps.fpl_client
     feature_eng = deps.feature_engineer
     betting_odds_client = deps.betting_odds_client
-    
-    # Force refresh FPL data if requested
+
     if force_refresh:
         fpl_client.get_bootstrap(force_refresh=True)
-    
+
     next_gw = fpl_client.get_next_gameweek()
     gw_id = next_gw.id if next_gw else 0
-    cache_key = (method_name, gw_id, round(budget, 1))
-    
-    # Skip cache if forcing refresh
-    if not force_refresh:
-        cached = cache.get("squad", cache_key)
-        if cached is not None:
-            return cached
 
     players = fpl_client.get_players()
     teams = fpl_client.get_teams()
@@ -178,29 +199,51 @@ async def build_squad_with_predictor(
 
     fixtures = fpl_client.get_fixtures(gameweek=gw_id if gw_id else None)
     gw_deadline = next_gw.deadline_time if next_gw else datetime.now()
-    
+
     fixture_info = _build_fixture_info(fixtures, team_names)
     team_trends = _compute_team_trends(fpl_client, teams)
     fixture_odds_cache = _fetch_betting_odds(betting_odds_client, fixtures, team_names)
-    
-    player_predictions = _build_player_predictions(
-        players, fpl_client, feature_eng, predictor, 
-        team_names, fixture_info, gw_deadline, team_trends, 
+
+    return _build_player_predictions(
+        players, fpl_client, feature_eng, predictor,
+        team_names, fixture_info, gw_deadline, team_trends,
         fixture_odds_cache, betting_odds_client
     )
-    
-    squad = build_optimal_squad(player_predictions, budget)
+
+
+def assemble_squad_result(
+    player_predictions: List[Dict],
+    budget: float,
+    method_name: str,
+    gameweek: Optional[int],
+    locked_ids: Optional[List[int]] = None,
+    excluded_ids: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Run the MILP + lineup optimization and assemble the squad response dict."""
+    squad = build_optimal_squad(
+        player_predictions, budget,
+        locked_ids=locked_ids, excluded_ids=excluded_ids,
+    )
     starting_xi, bench, formation = optimize_lineup(squad)
-    
-    captain = max(starting_xi, key=lambda x: x["predicted"])
-    vice_captain = sorted(starting_xi, key=lambda x: x["predicted"], reverse=True)[1]
-    
+
+    if not starting_xi:
+        # Over-constrained inputs (e.g. too many excludes / tiny budget) left
+        # no valid XI — degrade instead of crashing the whole run.
+        raise ValueError(
+            "Could not assemble a valid starting XI from the given constraints "
+            "(check excludes/locks/budget)."
+        )
+
+    ranked = sorted(starting_xi, key=lambda x: x["predicted"], reverse=True)
+    captain = ranked[0]
+    vice_captain = ranked[1] if len(ranked) > 1 else captain
+
     total_cost = sum(p["price"] for p in squad)
     total_predicted = sum(p["predicted"] for p in starting_xi) + captain["predicted"]
-    
-    result = {
+
+    return {
         "method": method_name,
-        "gameweek": next_gw.id if next_gw else None,
+        "gameweek": gameweek,
         "formation": formation,
         "starting_xi": [
             {**p, "is_captain": p["id"] == captain["id"], "is_vice_captain": p["id"] == vice_captain["id"]}
@@ -213,6 +256,36 @@ async def build_squad_with_predictor(
         "remaining_budget": round(budget - total_cost, 1),
         "predicted_points": round(total_predicted, 1),
     }
+
+
+async def build_squad_with_predictor(
+    predictor,
+    method_name: str,
+    budget: float = 100.0,
+    force_refresh: bool = False
+) -> Dict[str, Any]:
+    """Build squad using a specific predictor method."""
+    deps = get_dependencies()
+    fpl_client = deps.fpl_client
+
+    # Force refresh FPL data if requested (before reading the gameweek)
+    if force_refresh:
+        fpl_client.get_bootstrap(force_refresh=True)
+
+    next_gw = fpl_client.get_next_gameweek()
+    gw_id = next_gw.id if next_gw else 0
+    cache_key = (method_name, gw_id, round(budget, 1))
+
+    # Skip cache if forcing refresh
+    if not force_refresh:
+        cached = cache.get("squad", cache_key)
+        if cached is not None:
+            return cached
+
+    player_predictions = compute_player_predictions(predictor)
+    result = assemble_squad_result(
+        player_predictions, budget, method_name, next_gw.id if next_gw else None
+    )
 
     cache.set("squad", cache_key, result)
     return result

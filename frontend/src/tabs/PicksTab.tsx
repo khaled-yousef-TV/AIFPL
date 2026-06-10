@@ -17,17 +17,17 @@ const PicksTab: React.FC<PicksTabProps> = ({ topPicks }) => {
           </div>
           <div className="space-y-2">
             {players.map((player, i) => (
-              <div key={player.id} className="p-3 bg-[#0f0f1a] rounded-lg">
+              <div key={player.id} className="p-3 bg-bg rounded-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="text-gray-500 font-mono w-4">{i + 1}</span>
+                    <span className="text-content-subtle font-mono w-4">{i + 1}</span>
                     <div>
                       <div className="font-medium">{player.name}</div>
-                      <div className="text-sm text-gray-400">{player.team} • £{player.price}m</div>
+                      <div className="text-sm text-content-muted">{player.team} • £{player.price}m</div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[#00ff87] font-mono font-semibold">
+                    <div className="text-primary font-mono font-semibold">
                       {player.predicted_points?.toFixed(1) ?? '0.0'}
                     </div>
                     <span className={`text-xs px-1.5 py-0.5 rounded ${
@@ -39,7 +39,7 @@ const PicksTab: React.FC<PicksTabProps> = ({ topPicks }) => {
                     </span>
                   </div>
                 </div>
-                <div className="text-xs text-gray-500 mt-2 pl-7">{player.reason}</div>
+                <div className="text-xs text-content-subtle mt-2 pl-7">{player.reason}</div>
               </div>
             ))}
           </div>

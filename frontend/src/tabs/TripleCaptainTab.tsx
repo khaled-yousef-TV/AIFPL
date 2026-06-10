@@ -52,11 +52,11 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
 
         {loadingTripleCaptain ? (
           <div className="text-center py-8">
-            <RefreshCw className="w-8 h-8 animate-spin text-[#00ff87] mx-auto mb-4" />
-            <p className="text-gray-400">Loading Triple Captain recommendations...</p>
+            <RefreshCw className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
+            <p className="text-content-muted">Loading Triple Captain recommendations...</p>
           </div>
         ) : sortedGameweeks.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
+          <div className="text-center py-8 text-content-muted">
             <Crown className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p>No recommendations available</p>
             <p className="text-xs mt-2">
@@ -66,7 +66,7 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
         ) : (
           <>
             {/* Gameweek Tabs */}
-            <div className="border-b border-[#2a2a4a] overflow-x-auto scrollbar-hide">
+            <div className="border-b border-border overflow-x-auto scrollbar-hide">
               <div className="flex gap-1 min-w-max">
                 {sortedGameweeks.map((gw) => (
                   <button
@@ -75,12 +75,12 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                     className={`px-4 py-2 border-b-2 transition-colors whitespace-nowrap ${
                       selectedGameweek === gw
                         ? 'border-purple-400 text-white'
-                        : 'border-transparent text-gray-400 hover:text-white'
+                        : 'border-transparent text-content-muted hover:text-white'
                     }`}
                   >
                     <span className="text-sm font-medium">GW{gw}</span>
                     {tripleCaptainRecs[gw]?.calculated_at && (
-                      <span className="text-xs text-gray-500 ml-2">
+                      <span className="text-xs text-content-subtle ml-2">
                         {new Date(tripleCaptainRecs[gw].calculated_at!).toLocaleDateString('en-US', { 
                           month: 'short', 
                           day: 'numeric'
@@ -94,12 +94,12 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
 
             {/* Selected Gameweek Content */}
             {currentRecs && (
-              <div className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4 sm:p-6">
+              <div className="bg-bg rounded-lg border border-border p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6">
                   <div>
                     <h3 className="text-xl font-semibold text-purple-400 mb-1">Gameweek {selectedGameweek}</h3>
                     {currentRecs.calculated_at && (
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-content-muted">
                         Calculated {new Date(currentRecs.calculated_at).toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
@@ -111,13 +111,13 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                   </div>
                   <div className="flex gap-4 mt-2 sm:mt-0">
                     <div className="text-right">
-                      <div className="text-xs text-gray-400">Total Recommendations</div>
+                      <div className="text-xs text-content-muted">Total Recommendations</div>
                       <div className="text-lg font-mono font-semibold text-purple-400">
                         {currentRecs.total_recommendations || currentRecs.recommendations?.length || 0}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-xs text-gray-400">Gameweek Range</div>
+                      <div className="text-xs text-content-muted">Gameweek Range</div>
                       <div className="text-lg font-mono">
                         {currentRecs.gameweek_range || 5} GWs
                       </div>
@@ -128,7 +128,7 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="text-left text-gray-400 text-sm border-b border-[#2a2a4a]">
+                      <tr className="text-left text-content-muted text-sm border-b border-border">
                         <th className="pb-3">#</th>
                         <th className="pb-3">Player</th>
                         <th className="pb-3">Peak GW</th>
@@ -141,12 +141,12 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                     </thead>
                     <tbody>
                       {(currentRecs.recommendations || []).map((rec, i) => (
-                        <tr key={rec.player_id || i} className="border-b border-[#2a2a4a]/50 hover:bg-[#1f1f3a] transition-colors">
-                          <td className="py-3 text-gray-500 font-mono">{i + 1}</td>
+                        <tr key={rec.player_id || i} className="border-b border-border/50 hover:bg-surface-2 transition-colors">
+                          <td className="py-3 text-content-subtle font-mono">{i + 1}</td>
                           <td className="py-3">
                             <div>
                               <div className="font-medium">{rec.player_name}</div>
-                              <div className="text-sm text-gray-400">{rec.team} • {rec.position}</div>
+                              <div className="text-sm text-content-muted">{rec.team} • {rec.position}</div>
                             </div>
                           </td>
                           <td className="py-3">
@@ -158,7 +158,7 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                                 const opponent = rec.peak_opponent || 
                                   rec.all_gameweeks?.find(gw => gw.gameweek === rec.peak_gameweek)?.opponent;
                                 return opponent && (
-                                  <span className="text-xs text-gray-300">
+                                  <span className="text-xs text-content-muted">
                                     vs {opponent}
                                   </span>
                                 );
@@ -171,7 +171,7 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                             </span>
                           </td>
                           <td className="py-3">
-                            <span className="font-mono text-[#00ff87]">
+                            <span className="font-mono text-primary">
                               {rec.peak_expected_points.toFixed(1)}
                             </span>
                           </td>
@@ -181,7 +181,7 @@ const TripleCaptainTab: React.FC<TripleCaptainTabProps> = ({
                                 DGW
                               </span>
                             ) : (
-                              <span className="text-gray-500 text-xs">—</span>
+                              <span className="text-content-subtle text-xs">—</span>
                             )}
                           </td>
                           <td className="py-3">

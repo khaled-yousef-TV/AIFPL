@@ -21,7 +21,24 @@ import type {
 
 // Component imports
 import { FPLLogo } from './components'
-import { HomeTab, DifferentialsTab, PicksTab, TasksTab, TripleCaptainTab, SelectedTeamsTab, TransfersTab, WildcardTab } from './tabs'
+import { HomeTab, DifferentialsTab, PicksTab, TasksTab, TripleCaptainTab, SelectedTeamsTab, TransfersTab, WildcardTab, HermesTab } from './tabs'
+
+// Hooks
+import { useTasks } from './hooks/useTasks'
+import { useFplImport } from './hooks/useFplImport'
+
+// Squad/formation display helpers
+import { getPositionClass, parseFormation } from './utils/squad'
+
+// Pitch render helpers (renderBeforeAfterPitch / renderPitchFormation are pure and used directly;
+// the others are wrapped below to bind App state)
+import {
+  renderPlayerPill as pitchRenderPlayerPill,
+  renderPlayerPillWithTransfer as pitchRenderPlayerPillWithTransfer,
+  renderBeforeAfterPitch,
+  renderPitchFormation,
+  renderTransfersPitch as pitchRenderTransfersPitch,
+} from './components/pitch'
 
 // In production (GitHub Pages) set this to your hosted backend, e.g. https://api.fplai.nl
 // In local dev it defaults to http://localhost:8001
@@ -48,7 +65,7 @@ function App() {
   // Initialize activeTab from URL hash (e.g., #transfers -> 'transfers')
   const [activeTab, setActiveTab] = useState(() => {
     const hash = window.location.hash.slice(1) // Remove the '#'
-    const validTabs = ['home', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
+    const validTabs = ['home', 'hermes', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
     return validTabs.includes(hash) ? hash : 'home'
   })
   const [error, setError] = useState<string | null>(null)
@@ -135,13 +152,24 @@ function App() {
     return { holdSuggestions, sortedGroups }
   }, [transferSuggestions, freeTransfers])
 
-  // FPL team import
-  const [fplTeamId, setFplTeamId] = useState<string>('')
-  const [importingFplTeam, setImportingFplTeam] = useState(false)
-  
-  // Saved FPL team IDs (types imported from ./types)
-  const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
-  const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
+  // FPL team import (state + import logic extracted to hooks/useFplImport)
+  const {
+    fplTeamId, setFplTeamId,
+    importingFplTeam,
+    savedFplTeams,
+    selectedSavedFplTeamId, setSelectedSavedFplTeamId,
+    importFromSavedFplTeam,
+    importFplTeam,
+  } = useFplImport({
+    API_BASE,
+    setMySquad,
+    setBank,
+    setBankInput,
+    setWildcardPlan,
+    setTransferSuggestions,
+    setSquadAnalysis,
+    squadSectionRef,
+  })
 
   // Selected teams (suggested squads for each gameweek) - fetched from API
   const [selectedTeams, setSelectedTeams] = useState<Record<number, SelectedTeam>>({})
@@ -150,379 +178,18 @@ function App() {
   const [snapshotUpdateMessage, setSnapshotUpdateMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [selectedGameweekTab, setSelectedGameweekTab] = useState<number | null>(null)
 
-  // Task management
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [notifications, setNotifications] = useState<Array<{ id: string; type: 'success' | 'error'; title: string; message: string; timestamp: number }>>([])
-  const [taskStartedModal, setTaskStartedModal] = useState<{ taskId: string; title: string } | null>(null)
-  
-  // Ref to track if we need immediate poll (after task creation)
-  const needsImmediatePollRef = useRef(false)
-  
-  // Ref to track previous task states for detecting completion
-  const previousTasksRef = useRef<Task[]>([])
+  // Task management (state, polling and helpers extracted to hooks/useTasks)
+  const {
+    tasks, setTasks,
+    notifications, setNotifications,
+    taskStartedModal, setTaskStartedModal,
+    loadTasksFromStorage,
+    createTask, updateTask, completeTask,
+    addNotification, isTaskRunning,
+  } = useTasks(API_BASE)
 
   const DRAFT_KEY = 'fpl_squad_draft_v1' // Still used for local draft auto-save
-  const TASKS_KEY = 'fpl_tasks_v1' // Key for persisting tasks
   const FPL_TEAMS_KEY = 'fpl_imported_teams_v1' // Store imported FPL team IDs
-
-  // Check if a running task actually completed by checking the backend
-  const checkTaskCompletion = useCallback(async (task: Task): Promise<boolean> => {
-    try {
-      if (task.type === 'daily_snapshot') {
-        // Check if a new snapshot exists after task start
-        const res = await fetch(`${API_BASE}/api/selected-teams`).then(r => r.json())
-        if (res.teams && res.teams.length > 0) {
-          const latestTeam = res.teams[0]
-          const snapshotTime = new Date(latestTeam.saved_at).getTime()
-          return snapshotTime > task.createdAt
-        }
-      } else if (task.type === 'triple_captain') {
-        // Check if recommendations exist
-        const res = await fetch(`${API_BASE}/api/chips/triple-captain`).then(r => r.json())
-        if (res && typeof res === 'object') {
-          const hasRecs = (res.recommendations && Object.keys(res.recommendations).length > 0) || 
-                        (res.gameweeks && Array.isArray(res.gameweeks) && res.gameweeks.length > 0) ||
-                        (res.gameweek && typeof res.gameweek === 'object')
-          return !!hasRecs
-        }
-      }
-    } catch (err) {
-      console.error('Error checking task completion:', err)
-    }
-    return false
-  }, [])
-
-  // Check backend for recent operations and create tasks for them
-  const checkBackendForRecentTasks = async (): Promise<Task[]> => {
-    const recentTasks: Task[] = []
-    const now = Date.now()
-    const fiveMinutesAgo = now - 5 * 60 * 1000
-
-    try {
-      // Check for recent daily snapshot
-      const selectedTeamsRes = await fetch(`${API_BASE}/api/selected-teams`).then(r => r.json()).catch(() => null)
-      if (selectedTeamsRes?.teams && selectedTeamsRes.teams.length > 0) {
-        const latestTeam = selectedTeamsRes.teams[0]
-        const snapshotTime = new Date(latestTeam.saved_at).getTime()
-        if (snapshotTime > fiveMinutesAgo) {
-          recentTasks.push({
-            id: `daily_snapshot_${snapshotTime}`,
-            type: 'daily_snapshot',
-            title: 'Update Free Hit Squad',
-            description: 'Refreshing squad with latest player availability...',
-            status: 'completed',
-            progress: 100,
-            createdAt: snapshotTime - 60000, // Assume it took 1 minute
-            completedAt: snapshotTime
-          })
-        }
-      }
-
-      // Check for recent triple captain calculation
-      const tcRes = await fetch(`${API_BASE}/api/chips/triple-captain`).then(r => r.json()).catch(() => null)
-      if (tcRes && typeof tcRes === 'object') {
-        const hasRecs = (tcRes.recommendations && Object.keys(tcRes.recommendations).length > 0) || 
-                      (tcRes.gameweeks && Array.isArray(tcRes.gameweeks) && tcRes.gameweeks.length > 0) ||
-                      (tcRes.gameweek && typeof tcRes.gameweek === 'object')
-        if (hasRecs) {
-          // We can't know exactly when it was calculated, so we'll show it as recently completed
-          // if recommendations exist (they're only created after calculation completes)
-          const estimatedTime = now - 2 * 60 * 1000 // Assume 2 minutes ago
-          recentTasks.push({
-            id: `triple_captain_${estimatedTime}`,
-            type: 'triple_captain',
-            title: 'Calculate Triple Captain',
-            description: 'Analyzing optimal gameweeks for Triple Captain chip...',
-            status: 'completed',
-            progress: 100,
-            createdAt: estimatedTime - 5 * 60 * 1000, // Assume it took 5 minutes
-            completedAt: estimatedTime
-          })
-        }
-      }
-    } catch (err) {
-      // Silently fail - this is just for showing recent tasks
-      console.debug('Error checking backend for recent tasks:', err)
-    }
-
-    return recentTasks
-  }
-
-  // Load tasks from backend (with localStorage fallback)
-  const loadTasksFromStorage = useCallback(async () => {
-    try {
-      // Try to fetch from backend first
-      let tasksToLoad: Task[] = []
-      try {
-        const res = await fetch(`${API_BASE}/api/tasks?include_old=false`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.tasks && Array.isArray(data.tasks)) {
-            // Convert backend format to frontend format
-            tasksToLoad = data.tasks.map((t: any) => ({
-              id: t.id,
-              type: t.type as TaskType,
-              title: t.title,
-              description: t.description || '',
-              status: t.status as TaskStatus,
-              progress: t.progress || 0,
-              createdAt: t.createdAt || Date.now(),
-              completedAt: t.completedAt,
-              error: t.error
-            }))
-          }
-        }
-      } catch (err) {
-        console.debug('Failed to fetch tasks from backend, falling back to localStorage:', err)
-        // Fall back to localStorage
-        const savedTasks = localStorage.getItem(TASKS_KEY)
-        if (savedTasks) {
-          const parsed = JSON.parse(savedTasks) as Task[]
-          const now = Date.now()
-          
-          // Filter out old completed tasks immediately
-          tasksToLoad = parsed.filter(task => {
-            // Keep pending and running tasks
-            if (task.status === 'pending' || task.status === 'running') {
-              return true
-            }
-            // For completed/failed tasks, keep if less than 5 minutes old
-            if (task.completedAt) {
-              return (now - task.completedAt) < 5 * 60 * 1000
-            }
-            return false
-          })
-        }
-      }
-
-      // If still empty (e.g., incognito mode with no backend), check backend for recent operations
-      if (tasksToLoad.length === 0) {
-        const recentTasks = await checkBackendForRecentTasks()
-        tasksToLoad = recentTasks
-      }
-
-      // Set tasks immediately (non-blocking) - even if empty
-      setTasks(tasksToLoad)
-      
-      // Then verify running tasks in the background (don't block render)
-      if (tasksToLoad.length > 0) {
-        setTimeout(async () => {
-          const now = Date.now()
-          const verifiedTasks = await Promise.all(
-            tasksToLoad.map(async (task) => {
-              if (task.status === 'running') {
-                // Check if task actually completed
-                const completed = await checkTaskCompletion(task)
-                if (completed) {
-                  const updated = {
-                    ...task,
-                    status: 'completed' as TaskStatus,
-                    progress: 100,
-                    completedAt: Date.now()
-                  }
-                  // Update backend
-                  await updateTask(task.id, { status: 'completed', progress: 100 })
-                  return updated
-                }
-                // If task started more than 10 minutes ago, mark as failed
-                if (now - task.createdAt > 10 * 60 * 1000) {
-                  const updated = {
-                    ...task,
-                    status: 'failed' as TaskStatus,
-                    error: 'Task timed out. It may have completed - please check the results or try again.',
-                    completedAt: Date.now()
-                  }
-                  // Update backend
-                  await updateTask(task.id, { 
-                    status: 'failed', 
-                    progress: 100,
-                    error: updated.error 
-                  })
-                  return updated
-                }
-                // Otherwise, keep it as running
-                return task
-              }
-              return task
-            })
-          )
-
-          setTasks(verifiedTasks)
-          
-          // Persist verified tasks to localStorage as backup (if not in incognito mode)
-          try {
-            localStorage.setItem(TASKS_KEY, JSON.stringify(verifiedTasks))
-          } catch (err) {
-            // Silently fail in incognito mode or if storage is disabled
-            console.debug('Could not save tasks to localStorage (may be incognito mode):', err)
-          }
-        }, 100) // Small delay to not block initial render
-      }
-    } catch (err) {
-      console.error('Failed to load tasks:', err)
-      // Ensure tasks state is set even on error
-      setTasks([])
-    }
-  }, [checkTaskCompletion])
-
-  // Load tasks from localStorage on mount (non-blocking)
-  useEffect(() => {
-    loadTasksFromStorage()
-  }, [])
-
-  // Helper to check if tasks are different (for avoiding unnecessary state updates)
-  const tasksAreEqual = (a: Task[], b: Task[]): boolean => {
-    if (a.length !== b.length) return false
-    const aMap = new Map(a.map(t => [t.id, t]))
-    for (const taskB of b) {
-      const taskA = aMap.get(taskB.id)
-      if (!taskA) return false
-      // Compare relevant fields that affect UI
-      if (taskA.status !== taskB.status || 
-          taskA.progress !== taskB.progress ||
-          taskA.completedAt !== taskB.completedAt ||
-          taskA.error !== taskB.error) {
-        return false
-      }
-    }
-    return true
-  }
-
-  // Reusable function to poll and update tasks from backend
-  const pollTasksFromBackend = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/tasks?include_old=false`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.tasks && Array.isArray(data.tasks)) {
-          // Convert backend format to frontend format
-          const backendTasks = data.tasks.map((t: any) => ({
-            id: t.id,
-            type: t.type as TaskType,
-            title: t.title,
-            description: t.description || '',
-            status: t.status as TaskStatus,
-            progress: t.progress || 0,
-            createdAt: t.createdAt || Date.now(),
-            completedAt: t.completedAt,
-            error: t.error
-          }))
-
-          // Update tasks state with latest status from backend (only if changed)
-          setTasks(prevTasks => {
-            // Create a map of backend tasks by id for quick lookup
-            const backendTaskMap = new Map(backendTasks.map(t => [t.id, t]))
-            
-            // Update existing tasks with backend status, or add new tasks
-            const updatedTasks = prevTasks.map(task => {
-              const backendTask = backendTaskMap.get(task.id)
-              if (backendTask) {
-                // Update with backend status
-                return backendTask
-              }
-              // Keep existing task if not in backend (might be local-only)
-              return task
-            })
-
-            // Add any new tasks from backend that we don't have
-            backendTasks.forEach(backendTask => {
-              if (!updatedTasks.find(t => t.id === backendTask.id)) {
-                updatedTasks.push(backendTask)
-              }
-            })
-
-            // Only update state if something actually changed
-            if (tasksAreEqual(prevTasks, updatedTasks)) {
-              return prevTasks // Return same reference to avoid re-render
-            }
-
-            return updatedTasks
-          })
-        }
-      }
-    } catch (err) {
-      // Silently fail - polling errors shouldn't break the UI
-      console.debug('Error polling task status:', err)
-    }
-  }, [])
-
-  // Persist tasks to localStorage (debounced to avoid excessive writes)
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(tasks))
-      } catch (err) {
-        console.error('Failed to save tasks to localStorage:', err)
-      }
-    }, 1000) // Debounce: only write 1 second after last change
-
-    return () => clearTimeout(timeoutId)
-  }, [tasks])
-
-  // Handle immediate poll when task is created
-  useEffect(() => {
-    if (needsImmediatePollRef.current) {
-      needsImmediatePollRef.current = false
-      // Small delay to allow backend to process the new task
-      const timeoutId = setTimeout(() => {
-        pollTasksFromBackend()
-      }, 500)
-      return () => clearTimeout(timeoutId)
-    }
-  }, [tasks.length, pollTasksFromBackend]) // Trigger when task count changes
-
-  // Poll for task status updates - always poll to detect new tasks
-  useEffect(() => {
-    const hasActiveTasks = tasks.some(task => task.status === 'running' || task.status === 'pending')
-    
-    // Use shorter interval (3s) when there are active tasks, longer (10s) when idle
-    // We still poll when idle to detect new tasks that might be created in the backend
-    const pollInterval = hasActiveTasks ? 3000 : 10000
-
-    // Poll immediately, then set up interval
-    pollTasksFromBackend()
-    const pollIntervalId = setInterval(pollTasksFromBackend, pollInterval)
-
-    return () => {
-      clearInterval(pollIntervalId)
-    }
-  }, [tasks, pollTasksFromBackend])
-
-  // Detect task completion and show notifications
-  useEffect(() => {
-    // Request notification permission on first load
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {
-        // Silently fail if permission is denied
-      })
-    }
-
-    // Compare current tasks with previous tasks to detect completion
-    const previousTasks = previousTasksRef.current
-    if (previousTasks.length > 0) {
-      tasks.forEach(currentTask => {
-        const previousTask = previousTasks.find(t => t.id === currentTask.id)
-        
-        // Detect transition from running/pending to completed
-        if (previousTask && 
-            (previousTask.status === 'running' || previousTask.status === 'pending') &&
-            currentTask.status === 'completed') {
-          
-          // Show browser notification
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Task Completed', {
-              body: `${currentTask.title} has finished successfully.`,
-              icon: '/favicon.ico', // Optional: add favicon if available
-              tag: `task-${currentTask.id}`, // Prevent duplicate notifications
-            })
-          }
-        }
-      })
-    }
-
-    // Update previous tasks ref
-    previousTasksRef.current = tasks
-  }, [tasks])
 
   useEffect(() => {
     loadInitial()
@@ -542,7 +209,7 @@ function App() {
   useEffect(() => {
     const handleNavigation = () => {
       const hash = window.location.hash.slice(1)
-      const validTabs = ['home', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
+      const validTabs = ['home', 'hermes', 'picks', 'differentials', 'transfers', 'wildcard', 'triple_captain', 'selected_teams', 'tasks']
       setActiveTab(validTabs.includes(hash) ? hash : 'home')
     }
     window.addEventListener('popstate', handleNavigation)
@@ -588,39 +255,8 @@ function App() {
     return () => clearInterval(interval)
   }, [gameweek?.next?.deadline])
 
-  // Load saved FPL team IDs from database
-  const loadSavedFplTeams = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/fpl-teams`)
-      if (!res.ok) {
-        console.error(`Failed to load saved FPL teams: HTTP ${res.status}`)
-        setSavedFplTeams([])
-        return
-      }
-      const data = await res.json()
-      if (data.teams && Array.isArray(data.teams)) {
-        // Map API response to frontend format
-        const mapped: SavedFplTeam[] = data.teams.map((t: any) => ({
-          teamId: t.teamId,
-          teamName: t.teamName,
-          lastImported: t.lastImported ? new Date(t.lastImported).getTime() : Date.now()
-        }))
-        setSavedFplTeams(mapped)
-        console.log(`Loaded ${mapped.length} saved FPL team(s) from database`)
-      } else {
-        console.warn('Unexpected response format from fpl-teams endpoint:', data)
-        setSavedFplTeams([])
-      }
-    } catch (err) {
-      console.error('Failed to load saved FPL teams:', err)
-      setSavedFplTeams([])
-    }
-  }, [])
-
-  // Load FPL teams and draft on mount
+  // Load draft on mount (saved FPL teams are loaded by useFplImport)
   useEffect(() => {
-    loadSavedFplTeams()
-
     // Load draft squad from localStorage (still local, not synced)
     try {
       const rawDraft = localStorage.getItem(DRAFT_KEY)
@@ -636,7 +272,7 @@ function App() {
         }
       }
     } catch {}
-  }, [loadSavedFplTeams])
+  }, [])
 
   // Load selected teams from API
   const loadSelectedTeams = async () => {
@@ -659,182 +295,6 @@ function App() {
     } finally {
       setLoadingSelectedTeams(false)
     }
-  }
-
-  // Task management helpers
-  const createTask = async (type: TaskType, title: string, description: string, showModal: boolean = true): Promise<string> => {
-    const taskId = `${type}_${Date.now()}`
-    const newTask: Task = {
-      id: taskId,
-      type,
-      title,
-      description,
-      status: 'pending',
-      progress: 0,
-      createdAt: Date.now()
-    }
-    
-    // Save to backend first
-    try {
-      await fetch(`${API_BASE}/api/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task_id: taskId,
-          task_type: type,
-          title,
-          description,
-          status: 'pending',
-          progress: 0
-        })
-      })
-    } catch (err) {
-      console.error('Failed to save task to backend:', err)
-      // Continue anyway - will fall back to localStorage
-    }
-    
-    setTasks(prev => {
-      const updated = [...prev, newTask]
-      return updated
-    })
-    
-    // Mark that we need immediate poll (will be handled by polling effect)
-    needsImmediatePollRef.current = true
-    
-    // Poll immediately and then again after a short delay to catch status updates
-    // (backend might update status from 'pending' to 'running' asynchronously)
-    pollTasksFromBackend() // Immediate poll
-    setTimeout(() => {
-      pollTasksFromBackend() // Poll again after 500ms
-    }, 500)
-    setTimeout(() => {
-      pollTasksFromBackend() // Poll again after 2s to be sure
-    }, 2000)
-    
-    // Show modal if requested
-    if (showModal) {
-      setTaskStartedModal({ taskId, title })
-    }
-    
-    return taskId
-  }
-
-  const updateTask = async (taskId: string, updates: Partial<Task>) => {
-    // Update backend first
-    try {
-      await fetch(`${API_BASE}/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: updates.status,
-          progress: updates.progress,
-          error: updates.error
-        })
-      })
-    } catch (err) {
-      console.error('Failed to update task on backend:', err)
-      // Continue anyway - will fall back to localStorage
-    }
-    
-    setTasks(prev => {
-      const updated = prev.map(task => 
-        task.id === taskId ? { ...task, ...updates } : task
-      )
-      // Also persist to localStorage as backup
-      try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(updated))
-      } catch (err) {
-        console.error('Failed to save tasks to localStorage:', err)
-      }
-      return updated
-    })
-  }
-
-  const completeTask = async (taskId: string, success: boolean, error?: string) => {
-    // Update backend first
-    try {
-      await fetch(`${API_BASE}/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: success ? 'completed' : 'failed',
-          progress: 100,
-          error: error
-        })
-      })
-    } catch (err) {
-      console.error('Failed to update task on backend:', err)
-      // Continue anyway
-    }
-
-    // Get task info before updating (to avoid stale closure)
-    setTasks(prev => {
-      const task = prev.find(t => t.id === taskId)
-      if (!task) return prev
-
-      // Update task status
-      const updatedTasks = prev.map(t => 
-        t.id === taskId 
-          ? { ...t, status: success ? 'completed' : 'failed', progress: 100, completedAt: Date.now(), error }
-          : t
-      )
-
-      // Show notification
-      addNotification(
-        success ? 'success' : 'error',
-        task.title,
-        success 
-          ? task.type === 'daily_snapshot' 
-            ? 'Free hit squad updated successfully!' 
-            : 'Triple Captain calculation completed!'
-          : error || 'Task failed'
-      )
-
-      // Auto-remove completed tasks after 5 minutes
-      setTimeout(async () => {
-        // Delete from backend
-        try {
-          await fetch(`${API_BASE}/api/tasks/${taskId}`, { method: 'DELETE' })
-        } catch (err) {
-          console.debug('Failed to delete task from backend:', err)
-        }
-
-        setTasks(current => {
-          const filtered = current.filter(t => t.id !== taskId)
-          // Also persist to localStorage as backup
-          try {
-            localStorage.setItem(TASKS_KEY, JSON.stringify(filtered))
-          } catch (err) {
-            console.error('Failed to save tasks:', err)
-          }
-          return filtered
-        })
-      }, 5 * 60 * 1000)
-
-      // Persist updated tasks to localStorage as backup
-      try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(updatedTasks))
-      } catch (err) {
-        console.error('Failed to save tasks:', err)
-      }
-
-      return updatedTasks
-    })
-  }
-
-  const addNotification = (type: 'success' | 'error', title: string, message: string) => {
-    const notificationId = `notif_${Date.now()}`
-    setNotifications(prev => [...prev, { id: notificationId, type, title, message, timestamp: Date.now() }])
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== notificationId))
-    }, 5000)
-  }
-
-  // Helper to check if a task type is currently running
-  const isTaskRunning = (taskType: TaskType): boolean => {
-    return tasks.some(task => task.type === taskType && task.status === 'running')
   }
 
   /**
@@ -1068,108 +528,6 @@ function App() {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(payload))
     } catch {}
   }, [mySquad, bank, freeTransfers])
-
-  // Import squad from saved FPL team ID (always fetches latest from FPL)
-  const importFromSavedFplTeam = useCallback(async (teamId: number) => {
-    setImportingFplTeam(true)
-    try {
-      // Always fetch latest team data from FPL API
-      const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
-        throw new Error(error.detail || 'Failed to import FPL team')
-      }
-      
-      const data = await res.json()
-      const squad = data.squad || []
-      const importedBank = data.bank || 0
-      const teamName = data.team_name || `FPL Team ${teamId}`
-      
-      // Backend automatically saves/updates FPL team in database, so reload the list
-      await loadSavedFplTeams()
-      
-      // Load the squad into the UI
-      setMySquad(squad)
-      setBank(importedBank)
-      setBankInput(String(importedBank))
-      
-      // Reset view when importing a new squad
-      setWildcardPlan(null)
-      setTransferSuggestions([])
-      setSquadAnalysis([])
-      
-      // Reset dropdown selection so it can be used again
-      setSelectedSavedFplTeamId('')
-      
-      alert(`Successfully imported ${teamName}!`)
-      
-      // Scroll to squad section after import
-      setTimeout(() => {
-        if (squadSectionRef.current) {
-          squadSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-      }, 100)
-    } catch (err: any) {
-      console.error('Failed to import FPL team:', err)
-      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
-    } finally {
-      setImportingFplTeam(false)
-    }
-  }, [loadSavedFplTeams])
-
-  const importFplTeam = useCallback(async () => {
-    const teamId = parseInt(fplTeamId.trim())
-    if (!teamId || isNaN(teamId) || teamId <= 0) {
-      alert('Please enter a valid FPL Team ID')
-      return
-    }
-    
-    setImportingFplTeam(true)
-    try {
-      // Import team from FPL (backend automatically saves to database)
-      const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Failed to import FPL team' }))
-        throw new Error(error.detail || 'Failed to import FPL team')
-      }
-      
-      const data = await res.json()
-      const squad = data.squad || []
-      const importedBank = data.bank || 0
-      const teamName = data.team_name || `FPL Team ${teamId}`
-      
-      // Backend automatically saves/updates FPL team in database, so reload the list
-      await loadSavedFplTeams()
-      
-      // Load the squad into the UI
-      setMySquad(squad)
-      setBank(importedBank)
-      setBankInput(String(importedBank))
-      
-      // Reset view when importing a new squad
-      setWildcardPlan(null)
-      setTransferSuggestions([])
-      setSquadAnalysis([])
-      
-      // Clear the input
-      setFplTeamId('')
-      setSelectedSavedFplTeamId('')
-      
-      alert(`Successfully imported ${teamName}!`)
-      
-      // Scroll to squad section after import
-      setTimeout(() => {
-        if (squadSectionRef.current) {
-          squadSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-      }, 100)
-    } catch (err: any) {
-      console.error('Failed to import FPL team:', err)
-      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
-    } finally {
-      setImportingFplTeam(false)
-    }
-  }, [fplTeamId, loadSavedFplTeams])
 
   const loadInitial = async () => {
     // Only load lightweight header data on boot (keeps Quick Transfers instant).
@@ -1531,517 +889,19 @@ function App() {
     }
   }
 
-  const getPositionClass = (pos: string) => {
-    const classes: Record<string, string> = {
-      'GK': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-      'DEF': 'bg-green-500/20 text-green-400 border-green-500/30',
-      'MID': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-      'FWD': 'bg-red-500/20 text-red-400 border-red-500/30'
-    }
-    return classes[pos] || 'bg-gray-500/20 text-gray-400'
-  }
-
-  // Parse formation string (e.g., "3-5-2" -> {def: 3, mid: 5, fwd: 2})
-  const parseFormation = (formation: string) => {
-    const parts = formation.split('-').map(Number)
-    return {
-      def: parts[0] || 0,
-      mid: parts[1] || 0,
-      fwd: parts[2] || 0,
-      gk: 1
-    }
-  }
+  // Pitch render helpers moved to ./components/pitch — thin wrappers below keep
+  // the original names/signatures so all existing usage and prop-passing stays identical.
 
   // Render a single player pill (uniform size)
-  const renderPlayerPill = (player: any | null, isEmpty: boolean = false, showRemoveButton: boolean = false) => {
-    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
-    
-    if (isEmpty || !player) {
-      return (
-        <div className={`${pillClasses} bg-[#0b0b14]/50 border-[#2a2a4a]/30 border-dashed opacity-50`}>
-          <div className="text-gray-500 text-[10px] text-center">Empty</div>
-        </div>
-      )
-    }
-
-    return (
-      <div
-        className={`${pillClasses} relative ${
-          player.is_captain 
-            ? 'bg-yellow-500/30 border-yellow-400 shadow-lg shadow-yellow-500/20' 
-            : player.is_vice_captain
-            ? 'bg-purple-500/30 border-purple-400 shadow-lg shadow-purple-500/20'
-            : player.rotation_risk === 'high'
-            ? 'bg-orange-500/20 border-orange-500/50'
-            : 'bg-[#0f0f1a]/80 border-[#2a2a4a] hover:border-[#00ff87]/50'
-        }`}
-      >
-        {/* Remove button - top right */}
-        {showRemoveButton && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              removeFromSquad(player.id)
-            }}
-            className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-500/80 hover:bg-red-500 text-white opacity-80 hover:opacity-100 transition-opacity z-10"
-            title="Remove player"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        )}
-        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
-          {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
-          {player.is_vice_captain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-            {player.position}
-          </span>
-        </div>
-        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
-        <div className="text-[9px] text-gray-400 truncate w-full text-center mt-0.5">{player.team}</div>
-        {player.predicted !== undefined && (
-          <div className="text-[9px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-        )}
-        {player.european_comp && (
-          <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-            'bg-blue-500/20 text-blue-400'
-          }`}>
-            {player.european_comp}
-          </span>
-        )}
-      </div>
-    )
-  }
+  const renderPlayerPill = (p: any, e?: boolean, s?: boolean) => pitchRenderPlayerPill(p, e ?? false, s ?? false, removeFromSquad)
 
   // Render player pill with transfer highlighting (red for out, green for in)
-  const renderPlayerPillWithTransfer = (player: any | null, isEmpty: boolean, isTransferOut: boolean, isTransferIn: boolean) => {
-    const pillClasses = "flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg border-2 w-[90px] sm:w-[110px] h-[100px] sm:h-[120px] transition-all"
-    
-    if (isEmpty || !player) {
-      return (
-        <div className={`${pillClasses} bg-[#0b0b14]/50 border-[#2a2a4a]/30 border-dashed opacity-50`}>
-          <div className="text-gray-500 text-[10px] text-center">Empty</div>
-        </div>
-      )
-    }
-
-    // Determine border color based on transfer status
-    let borderClass = 'border-[#2a2a4a]'
-    let bgClass = 'bg-[#0f0f1a]/80'
-    if (isTransferOut) {
-      borderClass = 'border-red-400'
-      bgClass = 'bg-red-500/20'
-    } else if (isTransferIn) {
-      borderClass = 'border-green-400'
-      bgClass = 'bg-green-500/20'
-    }
-
-    return (
-      <div
-        className={`${pillClasses} ${bgClass} ${borderClass} ${
-          player.is_captain 
-            ? 'shadow-lg shadow-yellow-500/20' 
-            : player.is_vice_captain
-            ? 'shadow-lg shadow-purple-500/20'
-            : ''
-        }`}
-      >
-        <div className="flex items-center gap-1 mb-1 flex-wrap justify-center">
-          {player.is_captain && <span className="text-yellow-400 font-bold text-[10px]">©</span>}
-          {player.is_vice_captain && <span className="text-purple-400 font-bold text-[10px]">V</span>}
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${getPositionClass(player.position)}`}>
-            {player.position}
-          </span>
-        </div>
-        <div className="font-medium text-[11px] sm:text-xs text-center truncate w-full leading-tight">{player.name}</div>
-        <div className="text-[9px] text-gray-400 truncate w-full text-center mt-0.5">{player.team}</div>
-        {player.predicted !== undefined && (
-          <div className="text-[9px] text-[#00ff87] font-mono mt-1">{player.predicted?.toFixed(1) ?? '0.0'}</div>
-        )}
-        {player.european_comp && (
-          <span className={`mt-1 px-1 py-0.5 rounded text-[8px] font-bold ${
-            player.rotation_risk === 'high' ? 'bg-orange-500/30 text-orange-400' :
-            player.rotation_risk === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-            'bg-blue-500/20 text-blue-400'
-          }`}>
-            {player.european_comp}
-          </span>
-        )}
-      </div>
-    )
-  }
-
-  // Render before/after pitch formations side by side (all 15 players on field)
-  const renderBeforeAfterPitch = (
-    beforeSquad: any[], // Full 15-player squad
-    afterSquad: any[], // Full 15-player squad
-    beforeFormation: string,
-    afterFormation: string,
-    transfersOut: any[],
-    transfersIn: any[]
-  ) => {
-    const beforeFormationLayout = parseFormation(beforeFormation)
-    const afterFormationLayout = parseFormation(afterFormation)
-    
-    // Group players by position for before squad (all 15 players)
-    const beforeByPosition = {
-      GK: beforeSquad.filter((p: any) => p.position === 'GK'),
-      DEF: beforeSquad.filter((p: any) => p.position === 'DEF'),
-      MID: beforeSquad.filter((p: any) => p.position === 'MID'),
-      FWD: beforeSquad.filter((p: any) => p.position === 'FWD'),
-    }
-
-    // Group players by position for after squad (all 15 players)
-    const afterByPosition = {
-      GK: afterSquad.filter((p: any) => p.position === 'GK'),
-      DEF: afterSquad.filter((p: any) => p.position === 'DEF'),
-      MID: afterSquad.filter((p: any) => p.position === 'MID'),
-      FWD: afterSquad.filter((p: any) => p.position === 'FWD'),
-    }
-
-    // Create transfer lookup maps
-    const transferOutMap = new Set(transfersOut.map((t: any) => t.id))
-    const transferInMap = new Set(transfersIn.map((t: any) => t.id))
-
-    const renderRow = (players: any[], expectedCount: number, position: string, isBefore: boolean) => {
-      const slots: any[] = []
-      for (let i = 0; i < expectedCount; i++) {
-        if (i < players.length) {
-          const player = players[i]
-          const isTransferOut = isBefore && transferOutMap.has(player.id)
-          const isTransferIn = !isBefore && transferInMap.has(player.id)
-          slots.push({ player, isTransferOut, isTransferIn })
-        } else {
-          slots.push({ player: null, isTransferOut: false, isTransferIn: false })
-        }
-      }
-      return slots
-    }
-
-    const renderPitchSide = (byPosition: any, formationLayout: any, isBefore: boolean, title: string) => {
-      // Show all players on the field - starting XI in formation, bench players below
-      // Starting XI positions
-      const startingXiGK = byPosition.GK.slice(0, 1)
-      const startingXiDEF = byPosition.DEF.slice(0, formationLayout.def)
-      const startingXiMID = byPosition.MID.slice(0, formationLayout.mid)
-      const startingXiFWD = byPosition.FWD.slice(0, formationLayout.fwd)
-      
-      // Bench players (remaining after starting XI)
-      const benchGK = byPosition.GK.slice(1)
-      const benchDEF = byPosition.DEF.slice(formationLayout.def)
-      const benchMID = byPosition.MID.slice(formationLayout.mid)
-      const benchFWD = byPosition.FWD.slice(formationLayout.fwd)
-      
-      // Combine all bench players in order: GK, DEF, MID, FWD
-      const benchPlayers = [...benchGK, ...benchDEF, ...benchMID, ...benchFWD]
-      
-      return (
-        <div className="flex-1">
-          <div className="text-sm font-semibold mb-3 text-center" style={{ color: isBefore ? '#f87171' : '#00ff87' }}>
-            {title}
-          </div>
-          <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
-            <div className="relative min-h-[400px] sm:min-h-[500px] md:min-h-[550px] flex flex-col justify-between">
-              {/* Goalkeeper (TOP) */}
-              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                {renderRow(startingXiGK, 1, 'GK', isBefore).map((slot, idx) => (
-                  <div key={`gk-${idx}`}>
-                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                  </div>
-                ))}
-                {/* Bench GK */}
-                {benchGK.map((player: any) => {
-                  const isTransferOut = isBefore && transferOutMap.has(player.id)
-                  const isTransferIn = !isBefore && transferInMap.has(player.id)
-                  return (
-                    <div key={`bench-gk-${player.id}`}>
-                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Defenders */}
-              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-                {renderRow(startingXiDEF, formationLayout.def, 'DEF', isBefore).map((slot, idx) => (
-                  <div key={`def-${idx}`}>
-                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                  </div>
-                ))}
-                {/* Bench DEF */}
-                {benchDEF.map((player: any) => {
-                  const isTransferOut = isBefore && transferOutMap.has(player.id)
-                  const isTransferIn = !isBefore && transferInMap.has(player.id)
-                  return (
-                    <div key={`bench-def-${player.id}`}>
-                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Midfielders */}
-              <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-                {renderRow(startingXiMID, formationLayout.mid, 'MID', isBefore).map((slot, idx) => (
-                  <div key={`mid-${idx}`}>
-                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                  </div>
-                ))}
-                {/* Bench MID */}
-                {benchMID.map((player: any) => {
-                  const isTransferOut = isBefore && transferOutMap.has(player.id)
-                  const isTransferIn = !isBefore && transferInMap.has(player.id)
-                  return (
-                    <div key={`bench-mid-${player.id}`}>
-                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Forwards (BOTTOM) */}
-              <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-                {renderRow(startingXiFWD, formationLayout.fwd, 'FWD', isBefore).map((slot, idx) => (
-                  <div key={`fwd-${idx}`}>
-                    {renderPlayerPillWithTransfer(slot.player, slot.player === null, slot.isTransferOut, slot.isTransferIn)}
-                  </div>
-                ))}
-                {/* Bench FWD */}
-                {benchFWD.map((player: any) => {
-                  const isTransferOut = isBefore && transferOutMap.has(player.id)
-                  const isTransferIn = !isBefore && transferInMap.has(player.id)
-                  return (
-                    <div key={`bench-fwd-${player.id}`}>
-                      {renderPlayerPillWithTransfer(player, false, isTransferOut, isTransferIn)}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    return (
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {renderPitchSide(beforeByPosition, beforeFormationLayout, true, 'Before')}
-        {renderPitchSide(afterByPosition, afterFormationLayout, false, 'After')}
-      </div>
-    )
-  }
-
-  // Render pitch formation view (GK top, FWD bottom)
-  const renderPitchFormation = (startingXi: any[], formation: string, showEmptySlots: boolean = false) => {
-    const formationLayout = parseFormation(formation)
-    
-    // Group players by position
-    const byPosition = {
-      GK: startingXi.filter((p: any) => p.position === 'GK'),
-      DEF: startingXi.filter((p: any) => p.position === 'DEF'),
-      MID: startingXi.filter((p: any) => p.position === 'MID'),
-      FWD: startingXi.filter((p: any) => p.position === 'FWD'),
-    }
-
-    // Create arrays with empty slots if needed
-    const renderRow = (players: any[], expectedCount: number, position: string) => {
-      const slots: any[] = []
-      for (let i = 0; i < expectedCount; i++) {
-        if (i < players.length) {
-          slots.push(players[i])
-        } else if (showEmptySlots) {
-          slots.push(null) // null indicates empty slot
-        }
-      }
-      return slots
-    }
-
-    return (
-      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
-        {/* Pitch - Rotated: GK top, FWD bottom */}
-        <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
-          {/* Goalkeeper (TOP) */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-            {renderRow(byPosition.GK, 1, 'GK').map((slot, idx) => (
-              <div key={`gk-${idx}`}>
-                {renderPlayerPill(slot, slot === null)}
-              </div>
-            ))}
-          </div>
-
-          {/* Defenders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {renderRow(byPosition.DEF, formationLayout.def, 'DEF').map((slot, idx) => (
-              <div key={`def-${idx}`}>
-                {renderPlayerPill(slot, slot === null)}
-              </div>
-            ))}
-          </div>
-
-          {/* Midfielders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {renderRow(byPosition.MID, formationLayout.mid, 'MID').map((slot, idx) => (
-              <div key={`mid-${idx}`}>
-                {renderPlayerPill(slot, slot === null)}
-              </div>
-            ))}
-          </div>
-
-          {/* Forwards (BOTTOM) */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-            {renderRow(byPosition.FWD, formationLayout.fwd, 'FWD').map((slot, idx) => (
-              <div key={`fwd-${idx}`}>
-                {renderPlayerPill(slot, slot === null)}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const renderPlayerPillWithTransfer = (player: any | null, isEmpty: boolean, isTransferOut: boolean, isTransferIn: boolean) =>
+    pitchRenderPlayerPillWithTransfer(player, isEmpty, isTransferOut, isTransferIn)
 
   // Render transfers pitch with empty slots based on current squad
-  const renderTransfersPitch = () => {
-    // Use standard FPL formation (3-5-2) to show all slots - 2 GKs allowed
-    const formation = { def: 5, mid: 5, fwd: 3, gk: 2 }
-
-    // Group current squad by position and maintain slot positions
-    // Create slot-based structure to preserve positions when removing players
-    const getSlotsForPosition = (position: string, maxSlots: number) => {
-      const players = mySquad.filter(p => p.position === position)
-      const slots: (SquadPlayer | null)[] = new Array(maxSlots).fill(null)
-      const pendingUpdates = new Map<number, { position: string; slotIndex: number }>()
-      
-      // Fill slots based on stored slot positions, preserving positions when players are removed
-      players.forEach((player) => {
-        const slotInfo = playerSlotPositions.get(player.id)
-        if (slotInfo && slotInfo.slotIndex < maxSlots && slots[slotInfo.slotIndex] === null) {
-          // Use stored slot position if available
-          slots[slotInfo.slotIndex] = player
-        } else {
-          // If no stored position or slot is taken, find first available slot
-          for (let i = 0; i < maxSlots; i++) {
-            if (slots[i] === null) {
-              slots[i] = player
-              // Track pending update (will be applied after render)
-              if (!slotInfo || slotInfo.slotIndex !== i) {
-                pendingUpdates.set(player.id, { position, slotIndex: i })
-              }
-              break
-            }
-          }
-        }
-      })
-      
-      // Apply pending updates after render completes
-      if (pendingUpdates.size > 0) {
-        setTimeout(() => {
-          const newMap = new Map(playerSlotPositions)
-          pendingUpdates.forEach((value, key) => {
-            newMap.set(key, value)
-          })
-          setPlayerSlotPositions(newMap)
-        }, 0)
-      }
-      
-      return slots
-    }
-
-    const byPosition = {
-      GK: getSlotsForPosition('GK', formation.gk),
-      DEF: getSlotsForPosition('DEF', formation.def),
-      MID: getSlotsForPosition('MID', formation.mid),
-      FWD: getSlotsForPosition('FWD', formation.fwd),
-    }
-
-    const handleSlotClick = (position: string) => {
-      if (isPositionFull(position)) return
-      // Focus search and filter by position
-      setSearchPosition(position)
-      if (!searchQuery.trim()) {
-        searchPlayers('', position)
-      }
-    }
-
-    return (
-      <div className="bg-gradient-to-b from-green-900/20 via-green-800/10 to-green-900/20 rounded-lg border border-green-500/20 p-3 sm:p-4 md:p-6">
-        <div className="relative min-h-[350px] sm:min-h-[450px] md:min-h-[500px] flex flex-col justify-between">
-          {/* Goalkeeper (TOP) */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-            {byPosition.GK.map((slot, idx) => {
-              const isEmpty = slot === null
-              const isFull = isPositionFull('GK')
-              return (
-                <div 
-                  key={`gk-${idx}`} 
-                  onClick={() => isEmpty && !isFull && handleSlotClick('GK')} 
-                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
-                  title={isEmpty && !isFull ? 'Click to search for GK players' : isEmpty && isFull ? 'GK position full' : ''}
-                >
-                  {renderPlayerPill(slot, isEmpty, true)}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Defenders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {byPosition.DEF.map((slot, idx) => {
-              const isEmpty = slot === null
-              const isFull = isPositionFull('DEF')
-              return (
-                <div 
-                  key={`def-${idx}`} 
-                  onClick={() => isEmpty && !isFull && handleSlotClick('DEF')} 
-                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
-                  title={isEmpty && !isFull ? 'Click to search for DEF players' : isEmpty && isFull ? 'DEF position full' : ''}
-                >
-                  {renderPlayerPill(slot, isEmpty, true)}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Midfielders */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
-            {byPosition.MID.map((slot, idx) => {
-              const isEmpty = slot === null
-              const isFull = isPositionFull('MID')
-              return (
-                <div 
-                  key={`mid-${idx}`} 
-                  onClick={() => isEmpty && !isFull && handleSlotClick('MID')} 
-                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
-                  title={isEmpty && !isFull ? 'Click to search for MID players' : isEmpty && isFull ? 'MID position full' : ''}
-                >
-                  {renderPlayerPill(slot, isEmpty, true)}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Forwards (BOTTOM) */}
-          <div className="flex justify-center items-center gap-2 sm:gap-3 flex-wrap">
-            {byPosition.FWD.map((slot, idx) => {
-              const isEmpty = slot === null
-              const isFull = isPositionFull('FWD')
-              return (
-                <div 
-                  key={`fwd-${idx}`} 
-                  onClick={() => isEmpty && !isFull && handleSlotClick('FWD')} 
-                  className={isEmpty && !isFull ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
-                  title={isEmpty && !isFull ? 'Click to search for FWD players' : isEmpty && isFull ? 'FWD position full' : ''}
-                >
-                  {renderPlayerPill(slot, isEmpty, true)}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const renderTransfersPitch = () =>
+    pitchRenderTransfersPitch(mySquad, playerSlotPositions, setPlayerSlotPositions, isPositionFull, setSearchPosition, searchQuery, searchPlayers, removeFromSquad)
 
   const formatDeadline = (dateStr?: string) => {
     if (!dateStr) return 'Unknown'
@@ -2056,6 +916,7 @@ function App() {
   }
 
   const navigationTabs = [
+    { id: 'hermes', icon: Brain, label: 'Hermes', shortLabel: 'Hermes', color: 'text-purple-400', description: 'AI orchestrator: synthesizes all signals into squad, chip and captaincy advice' },
     { id: 'transfers', icon: ArrowRightLeft, label: 'Transfers', shortLabel: 'Transfers', color: 'text-blue-400', description: 'Get AI-powered transfer suggestions (1-3) or coordinated rebuild (4+)' },
     { id: 'wildcard', icon: Zap, label: 'Wildcard', shortLabel: 'WC', color: 'text-violet-400', description: '8-GW trajectory optimizer using hybrid LSTM-XGBoost model' },
     { id: 'selected_teams', icon: Trophy, label: 'Free Hit of the Week', shortLabel: 'Free Hit', color: 'text-yellow-400', description: 'View your saved free hit team selections' },
@@ -2372,10 +1233,13 @@ function App() {
           />
         )}
 
+        {/* Hermes Tab (self-contained: fetches its own data) */}
+        {activeTab === 'hermes' && <HermesTab />}
+
         {/* Wildcard Tab */}
         {activeTab === 'wildcard' && (
           <WildcardTab
-            gameweek={gameweek?.id ?? null}
+            gameweek={gameweek?.next?.id ?? null}
             trajectory={wildcardTrajectory}
             loading={loadingWildcard}
             onGenerate={handleWildcardGenerate}

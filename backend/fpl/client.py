@@ -213,14 +213,30 @@ class FPLClient:
     def get_player_details(self, player_id: int) -> Dict[str, Any]:
         """
         Get detailed player info including fixture history.
-        
+
         Args:
             player_id: Player ID
-            
+
         Returns:
             Player details with history
         """
         return self._get(f"element-summary/{player_id}/")
+
+    def get_event_live(self, gameweek: int) -> Dict[int, int]:
+        """
+        Get actual points for every player in a (finished or live) gameweek.
+
+        One API call for the whole league — used by the Hermes evaluation
+        loop and the backtester.
+
+        Returns:
+            {player_id: total_points} for the gameweek
+        """
+        data = self._get(f"event/{gameweek}/live/")
+        return {
+            el["id"]: el.get("stats", {}).get("total_points", 0)
+            for el in data.get("elements", [])
+        }
     
     def get_teams(self) -> List[Team]:
         """Get all teams."""

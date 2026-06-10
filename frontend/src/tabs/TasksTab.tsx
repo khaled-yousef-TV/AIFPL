@@ -16,12 +16,12 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
             <span>Background Tasks</span>
           </div>
         </div>
-        <p className="text-gray-400 text-sm mb-4">
+        <p className="text-content-muted text-sm mb-4">
           Track the progress of background tasks like squad updates and Triple Captain calculations.
         </p>
 
         {tasks.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
+          <div className="text-center py-12 text-content-muted">
             <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p>No active tasks</p>
             <p className="text-xs mt-2">Tasks will appear here when you trigger background operations.</p>
@@ -31,7 +31,7 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
             {tasks.map((task) => (
               <div
                 key={task.id}
-                className="bg-[#0f0f1a] rounded-lg border border-[#2a2a4a] p-4"
+                className="bg-bg rounded-lg border border-border p-4"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
@@ -46,18 +46,18 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
                         <AlertCircle className="w-4 h-4 text-red-400" />
                       )}
                       {task.status === 'pending' && (
-                        <Clock className="w-4 h-4 text-gray-400" />
+                        <Clock className="w-4 h-4 text-content-muted" />
                       )}
                       <h3 className="font-medium text-white">{task.title}</h3>
                     </div>
-                    <p className="text-sm text-gray-400">{task.description}</p>
+                    <p className="text-sm text-content-muted">{task.description}</p>
                   </div>
                   <div className="text-right">
                     <div className={`text-xs font-medium px-2 py-1 rounded ${
                       task.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
                       task.status === 'completed' ? 'bg-green-500/20 text-green-400' :
                       task.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                      'bg-gray-500/20 text-gray-400'
+                      'bg-gray-500/20 text-content-muted'
                     }`}>
                       {task.status === 'running' ? 'Running' :
                        task.status === 'completed' ? 'Completed' :
@@ -70,11 +70,11 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
                 {/* Progress Bar */}
                 {(task.status === 'running' || task.status === 'pending') && (
                   <div className="mb-2">
-                    <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+                    <div className="flex items-center justify-between text-xs text-content-muted mb-1">
                       <span>Progress</span>
                       <span>{Math.round(task.progress)}%</span>
                     </div>
-                    <div className="w-full bg-[#1a1a2e] rounded-full h-2 overflow-hidden">
+                    <div className="w-full bg-surface rounded-full h-2 overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-300 ease-out"
                         style={{ width: `${task.progress}%` }}
@@ -84,7 +84,7 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
                 )}
 
                 {task.status === 'completed' && task.completedAt && (
-                  <div className="text-xs text-gray-500 mt-2">
+                  <div className="text-xs text-content-subtle mt-2">
                     Completed {new Date(task.completedAt).toLocaleString('en-US', {
                       month: 'short',
                       day: 'numeric',
@@ -101,7 +101,7 @@ const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => {
                 )}
 
                 {task.status === 'completed' && (
-                  <div className="mt-2 text-xs text-gray-500">
+                  <div className="mt-2 text-xs text-content-subtle">
                     Started {new Date(task.createdAt).toLocaleString('en-US', {
                       month: 'short',
                       day: 'numeric',

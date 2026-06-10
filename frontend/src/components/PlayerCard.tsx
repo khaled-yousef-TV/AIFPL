@@ -25,12 +25,12 @@ export function PlayerCard({
       <div className="flex items-center justify-between py-2">
         <div className="flex items-center gap-2">
           {index !== undefined && (
-            <span className="text-gray-500 font-mono w-4 text-sm">{index + 1}</span>
+            <span className="text-content-subtle font-mono w-4 text-sm">{index + 1}</span>
           )}
           <span className="font-medium">{player.name}</span>
-          <span className="text-gray-500 text-sm">{player.team}</span>
+          <span className="text-content-subtle text-sm">{player.team}</span>
         </div>
-        <span className="text-[#00ff87] font-mono">
+        <span className="text-primary font-mono">
           {(player.predicted_points ?? player.predicted ?? 0).toFixed(1)}
         </span>
       </div>
@@ -38,21 +38,21 @@ export function PlayerCard({
   }
 
   return (
-    <div className="p-3 bg-[#0f0f1a] rounded-lg">
+    <div className="p-3 bg-bg rounded-lg">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {index !== undefined && (
-            <span className="text-gray-500 font-mono w-4">{index + 1}</span>
+            <span className="text-content-subtle font-mono w-4">{index + 1}</span>
           )}
           <div>
             <div className="font-medium">{player.name}</div>
-            <div className="text-sm text-gray-400">
+            <div className="text-sm text-content-muted">
               {player.team} • £{player.price}m
             </div>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[#00ff87] font-mono font-semibold">
+          <div className="text-primary font-mono font-semibold">
             {(player.predicted_points ?? player.predicted ?? 0).toFixed(1)}
           </div>
           {showFixture && player.opponent && (
@@ -63,7 +63,7 @@ export function PlayerCard({
         </div>
       </div>
       {showReason && player.reason && (
-        <div className="text-xs text-gray-500 mt-2 pl-7">{player.reason}</div>
+        <div className="text-xs text-content-subtle mt-2 pl-7">{player.reason}</div>
       )}
     </div>
   )
