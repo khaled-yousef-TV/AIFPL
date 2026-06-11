@@ -729,8 +729,11 @@ class WildcardOptimizer:
             # Get next gameweek
             next_gw = self.fpl_client.get_next_gameweek()
             if not next_gw:
-                logger.error("No next gameweek found")
-                return None
+                raise ValueError(
+                    "No upcoming gameweek — the season has finished. "
+                    "Wildcard trajectories will be available again once the "
+                    "new season's fixtures are released."
+                )
             
             start_gw = next_gw.id
             
@@ -740,8 +743,7 @@ class WildcardOptimizer:
             trajectory_players = self._build_trajectory_players(start_gw, horizon)
             
             if not trajectory_players:
-                logger.error("No eligible players found")
-                return None
+                raise ValueError("No eligible players found for the trajectory window.")
             
             logger.info(f"Built predictions for {len(trajectory_players)} players")
             
@@ -817,10 +819,14 @@ class WildcardOptimizer:
                 rationale=rationale
             )
             
+        except ValueError:
+            # Known terminal conditions (off-season, empty pool) — let the
+            # caller surface the message to the user instead of "try again".
+            raise
         except Exception as e:
             logger.error(f"Error in trajectory optimization: {e}", exc_info=True)
             return None
-    
+
     def trajectory_to_dict(self, trajectory: WildcardTrajectory) -> Dict[str, Any]:
         """Convert WildcardTrajectory to JSON-serializable dict."""
         

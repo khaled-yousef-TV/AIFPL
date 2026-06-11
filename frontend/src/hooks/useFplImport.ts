@@ -30,6 +30,20 @@ export function useFplImport(params: {
   const [fplTeamId, setFplTeamId] = useState<string>('')
   const [importingFplTeam, setImportingFplTeam] = useState(false)
 
+  // Inline import feedback (replaces blocking alert() dialogs)
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  const showImportStatus = useCallback((type: 'success' | 'error', message: string) => {
+    setImportStatus({ type, message })
+    if (type === 'success') {
+      setTimeout(() => {
+        setImportStatus((current) =>
+          current && current.type === 'success' && current.message === message ? null : current
+        )
+      }, 5000)
+    }
+  }, [])
+
   // Saved FPL team IDs (types imported from ../types)
   const [savedFplTeams, setSavedFplTeams] = useState<SavedFplTeam[]>([])
   const [selectedSavedFplTeamId, setSelectedSavedFplTeamId] = useState<number | ''>('')
@@ -71,6 +85,7 @@ export function useFplImport(params: {
   // Import squad from saved FPL team ID (always fetches latest from FPL)
   const importFromSavedFplTeam = useCallback(async (teamId: number) => {
     setImportingFplTeam(true)
+    setImportStatus(null)
     try {
       // Always fetch latest team data from FPL API
       const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
@@ -100,7 +115,7 @@ export function useFplImport(params: {
       // Reset dropdown selection so it can be used again
       setSelectedSavedFplTeamId('')
 
-      alert(`Successfully imported ${teamName}!`)
+      showImportStatus('success', `Successfully imported ${teamName}!`)
 
       // Scroll to squad section after import
       setTimeout(() => {
@@ -110,20 +125,21 @@ export function useFplImport(params: {
       }, 100)
     } catch (err: any) {
       console.error('Failed to import FPL team:', err)
-      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
+      showImportStatus('error', err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
     } finally {
       setImportingFplTeam(false)
     }
-  }, [loadSavedFplTeams])
+  }, [loadSavedFplTeams, showImportStatus])
 
   const importFplTeam = useCallback(async () => {
     const teamId = parseInt(fplTeamId.trim())
     if (!teamId || isNaN(teamId) || teamId <= 0) {
-      alert('Please enter a valid FPL Team ID')
+      showImportStatus('error', 'Please enter a valid FPL Team ID')
       return
     }
 
     setImportingFplTeam(true)
+    setImportStatus(null)
     try {
       // Import team from FPL (backend automatically saves to database)
       const res = await fetch(`${API_BASE}/api/fpl-teams/import/${teamId}`)
@@ -154,7 +170,7 @@ export function useFplImport(params: {
       setFplTeamId('')
       setSelectedSavedFplTeamId('')
 
-      alert(`Successfully imported ${teamName}!`)
+      showImportStatus('success', `Successfully imported ${teamName}!`)
 
       // Scroll to squad section after import
       setTimeout(() => {
@@ -164,13 +180,14 @@ export function useFplImport(params: {
       }, 100)
     } catch (err: any) {
       console.error('Failed to import FPL team:', err)
-      alert(err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
+      showImportStatus('error', err.message || 'Failed to import FPL team. Please check the Team ID and try again.')
     } finally {
       setImportingFplTeam(false)
     }
-  }, [fplTeamId, loadSavedFplTeams])
+  }, [fplTeamId, loadSavedFplTeams, showImportStatus])
 
   return {
+    importStatus,
     fplTeamId,
     setFplTeamId,
     importingFplTeam,

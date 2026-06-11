@@ -98,6 +98,7 @@ interface TransfersTabProps {
   setFplTeamId: (id: string) => void
   importingFplTeam: boolean
   importFplTeam: () => void
+  importStatus: { type: 'success' | 'error'; message: string } | null
   importFromSavedFplTeam: (teamId: number) => void
   
   // Rendering helpers
@@ -162,6 +163,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
   setFplTeamId,
   importingFplTeam,
   importFplTeam,
+  importStatus,
   importFromSavedFplTeam,
   getPositionClass,
   renderTransfersPitch,
@@ -327,6 +329,18 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                 <div className="text-[10px] text-content-subtle mt-1.5">
                   Enter your FPL Team ID to import your squad. Find it in your FPL profile URL (e.g., fantasy.premierleague.com/entry/<strong>123456</strong>/event/1).
                 </div>
+                {importStatus && (
+                  <div
+                    role="status"
+                    className={`text-xs mt-2 px-3 py-2 rounded border ${
+                      importStatus.type === 'success'
+                        ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                        : 'bg-red-500/10 border-red-500/30 text-red-400'
+                    }`}
+                  >
+                    {importStatus.message}
+                  </div>
+                )}
               </div>
             </div>
             <div className="text-[10px] sm:text-[11px] text-content-subtle mt-2">
@@ -534,7 +548,7 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                       )}
                     </button>
                     {mySquad.length > 0 && (
-                      <button 
+                      <button
                         onClick={() => setMySquad([])}
                         className="text-xs text-red-400 hover:text-red-300"
                       >
@@ -543,6 +557,14 @@ const TransfersTab: React.FC<TransfersTabProps> = ({
                     )}
                   </div>
                 </div>
+                {error && (
+                  <div
+                    role="alert"
+                    className="text-xs mb-3 px-3 py-2 rounded border bg-red-500/10 border-red-500/30 text-red-400"
+                  >
+                    {error}
+                  </div>
+                )}
                 
                 <div className="mb-4">
                   <div className="text-xs text-content-subtle mb-2">

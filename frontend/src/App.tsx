@@ -69,6 +69,9 @@ function App() {
     return validTabs.includes(hash) ? hash : 'home'
   })
   const [error, setError] = useState<string | null>(null)
+  // Transfers-tab-scoped errors: the global `error` swaps the whole app for a
+  // full-screen failure page, which is wrong for a failed suggestion request.
+  const [transfersError, setTransfersError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
   // Transfer tab state
@@ -156,6 +159,7 @@ function App() {
   const {
     fplTeamId, setFplTeamId,
     importingFplTeam,
+    importStatus,
     savedFplTeams,
     selectedSavedFplTeamId, setSelectedSavedFplTeamId,
     importFromSavedFplTeam,
@@ -845,10 +849,10 @@ function App() {
 
   const getTransferSuggestions = async () => {
     if (mySquad.length < 11) {
-      alert('Please add at least 11 players to your squad')
+      setTransfersError('Please add at least 11 players to your squad')
       return
     }
-    
+
     setTransferLoading(true)
     
     try {
@@ -866,6 +870,10 @@ function App() {
         }),
       })
       
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ detail: 'Failed to get transfer suggestions' }))
+        throw new Error(typeof errBody.detail === 'string' ? errBody.detail : 'Failed to get transfer suggestions')
+      }
       const data = await res.json()
       setTransferSuggestions(data.suggestions || [])
       setSquadAnalysis(data.squad_analysis || [])
@@ -884,6 +892,7 @@ function App() {
       }, 100)
     } catch (err) {
       console.error('Transfer suggestion error:', err)
+      setTransfersError(err instanceof Error ? err.message : 'Failed to get transfer suggestions')
     } finally {
       setTransferLoading(false)
     }
@@ -951,6 +960,10 @@ function App() {
     )
   }
 
+  // Off-season (gameweek loaded, no next deadline) must not look like loading
+  const offSeason = !!gameweek && !gameweek.next
+  const gwLabel = gameweek ? (gameweek.next?.id ? `GW${gameweek.next.id}` : 'Season finished') : 'Loading...'
+
   return (
     <div className="min-h-screen bg-[#0f0f1a] text-white flex">
       {/* Left Sidebar Navigation - Desktop Only */}
@@ -963,7 +976,7 @@ function App() {
             <div className="flex-1 min-w-0">
               <h1 className="font-bold text-sm leading-tight">FPL Squad Suggester</h1>
               <p className="text-[10px] text-gray-400 leading-tight">
-                {gameweek?.next?.id ? `GW${gameweek.next.id}` : 'Loading...'}
+                {gwLabel}
               </p>
             </div>
           </div>
@@ -1031,8 +1044,8 @@ function App() {
                     <span className="text-[10px] font-bold text-[#00ff87] drop-shadow-[0_0_4px_rgba(0,255,135,0.6)] animate-pulse">{String(countdown.seconds).padStart(2, '0')}</span>
                   </div>
                 ) : (
-                  <p className="text-[10px] text-gray-400 animate-pulse">
-                    {gameweek?.next?.id ? `GW${gameweek.next.id}` : 'Loading...'}
+                  <p className={`text-[10px] text-gray-400 ${gameweek ? '' : 'animate-pulse'}`}>
+                    {gwLabel}
                   </p>
                 )}
               </div>
@@ -1124,7 +1137,11 @@ function App() {
                   {!countdown && <div className="text-gray-400 text-sm animate-pulse flex items-center h-full">Loading...</div>}
                 </>
               )}
-              {!gameweek?.next && <div className="text-gray-400 text-sm animate-pulse flex items-center h-full">Loading...</div>}
+              {!gameweek?.next && (
+                offSeason
+                  ? <div className="text-gray-400 text-sm flex items-center h-full">Season finished — next season's fixtures TBC</div>
+                  : <div className="text-gray-400 text-sm animate-pulse flex items-center h-full">Loading...</div>
+              )}
             </div>
             {activeTab !== 'selected_teams' && activeTab !== 'home' && (
               <button 
@@ -1213,8 +1230,8 @@ function App() {
             expandedGroups={expandedGroups}
             setExpandedGroups={setExpandedGroups}
             squadAnalysis={squadAnalysis}
-            error={error}
-            setError={setError}
+            error={transfersError}
+            setError={setTransfersError}
             savedFplTeams={savedFplTeams}
             selectedSavedFplTeamId={selectedSavedFplTeamId}
             setSelectedSavedFplTeamId={setSelectedSavedFplTeamId}
@@ -1222,6 +1239,7 @@ function App() {
             setFplTeamId={setFplTeamId}
             importingFplTeam={importingFplTeam}
             importFplTeam={importFplTeam}
+            importStatus={importStatus}
             importFromSavedFplTeam={importFromSavedFplTeam}
             getPositionClass={getPositionClass}
             renderTransfersPitch={renderTransfersPitch}

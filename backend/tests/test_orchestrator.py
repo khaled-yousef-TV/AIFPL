@@ -111,9 +111,25 @@ def test_synthesize_raises_after_two_failures():
 def test_fallback_narrative_lists_agent_summaries():
     reports = {"data": report("data", {}), "form": report("form", {})}
     reports["data"].summary = "10 candidates"
-    text = HermesOrchestrator._fallback_narrative(reports)
+    text = HermesOrchestrator._narrative(None, reports)
     assert "LLM unavailable" in text
     assert "10 candidates" in text
+
+
+def test_blank_llm_narrative_falls_back_to_agent_summaries():
+    """Some models return valid adjustments with narrative=''; the user
+    must still see something, but not a misleading 'LLM unavailable'."""
+    from hermes.schemas import HermesAdjustments
+
+    reports = {"data": report("data", {})}
+    reports["data"].summary = "10 candidates"
+    adj = HermesAdjustments(narrative="   ")
+    text = HermesOrchestrator._narrative(adj, reports)
+    assert "10 candidates" in text
+    assert "LLM unavailable" not in text
+
+    adj_with_text = HermesAdjustments(narrative="Captain Salah.")
+    assert HermesOrchestrator._narrative(adj_with_text, reports) == "Captain Salah."
 
 
 def test_no_llm_configured_means_no_client():

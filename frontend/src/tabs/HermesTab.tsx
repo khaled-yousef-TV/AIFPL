@@ -209,8 +209,8 @@ const HermesTab: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Bot className="w-5 h-5 text-accent" />
                 <span>
-                  {RUN_TYPES.find((r) => r.value === run.run_type)?.label || run.run_type} — GW
-                  {run.gameweek}
+                  {RUN_TYPES.find((r) => r.value === run.run_type)?.label || run.run_type} —{' '}
+                  {run.gameweek ? `GW${run.gameweek}` : 'Pre-season'}
                 </span>
               </div>
               <span
@@ -300,11 +300,31 @@ const HermesTab: React.FC = () => {
             </div>
           )}
 
-          {/* Chip advice */}
-          {run.result?.chip_advice && !isRunning && (
+          {/* Chip advice — skip the section entirely when Hermes had nothing to say */}
+          {run.result?.chip_advice && !isRunning &&
+            (run.result.chip_advice.reason?.trim() ||
+              run.result.chip_advice.wildcard_now ||
+              run.result.chip_advice.free_hit_now ||
+              run.result.chip_advice.bench_boost_now) && (
             <div className="mb-4">
               <h4 className="text-sm font-medium text-content-muted mb-2">Chip advice</h4>
-              <p className="text-sm text-content">{run.result.chip_advice.reason}</p>
+              {(run.result.chip_advice.wildcard_now ||
+                run.result.chip_advice.free_hit_now ||
+                run.result.chip_advice.bench_boost_now) && (
+                <p className="text-sm text-magenta font-medium mb-1">
+                  Play now:{' '}
+                  {[
+                    run.result.chip_advice.wildcard_now && 'Wildcard',
+                    run.result.chip_advice.free_hit_now && 'Free Hit',
+                    run.result.chip_advice.bench_boost_now && 'Bench Boost',
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                </p>
+              )}
+              {run.result.chip_advice.reason?.trim() && (
+                <p className="text-sm text-content">{run.result.chip_advice.reason}</p>
+              )}
             </div>
           )}
 

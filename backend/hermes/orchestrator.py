@@ -122,7 +122,7 @@ class HermesOrchestrator:
             "signals": {name: r.model_dump(mode="json") for name, r in reports.items()},
             "adjustments": adjustments.model_dump(mode="json") if adjustments else None,
             "result": result,
-            "narrative": adjustments.narrative if adjustments else self._fallback_narrative(reports),
+            "narrative": self._narrative(adjustments, reports),
             "usage": usage,
             "model": self.config.model,
         }
@@ -268,10 +268,20 @@ class HermesOrchestrator:
 
         return result
 
-    @staticmethod
-    def _fallback_narrative(reports: Dict[str, AgentReport]) -> str:
-        """Deterministic narrative when the LLM is unavailable: agent summaries."""
-        lines = ["**Hermes LLM unavailable — deterministic signals only.**", ""]
+    @classmethod
+    def _narrative(
+        cls, adjustments: Optional[HermesAdjustments], reports: Dict[str, AgentReport]
+    ) -> str:
+        """LLM narrative, falling back to agent summaries when it is missing
+        OR blank — some models return adjustments with an empty narrative."""
+        if adjustments and adjustments.narrative and adjustments.narrative.strip():
+            return adjustments.narrative
+        header = (
+            "**Hermes LLM unavailable — deterministic signals only.**"
+            if adjustments is None
+            else "**Hermes returned no narrative — agent signal summaries:**"
+        )
+        lines = [header, ""]
         for name, r in reports.items():
             lines.append(f"- **{name}**: {r.summary}")
         return "\n".join(lines)
