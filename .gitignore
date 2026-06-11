@@ -48,3 +48,7 @@ logs/
 
 # Claude Code runtime
 .claude/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
