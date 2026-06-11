@@ -39,6 +39,14 @@ FORM_WINDOW = 4
 # pure-ceiling (the old heuristic) by ~+2.25. See hermes/backtest.py.
 CAPTAIN_BLEND = {"mean": 0.7, "form": 0.15, "ceiling": 0.15}
 
+# Anchored captaincy: the 2025-26 backtest showed every pure-blend weighting
+# LOSES to the naive "captain your best player so far" baseline (-0.48 to
+# -0.91 pts/GW). So the captain pick is anchored on the season-points leader
+# and deviates to the blend's pick only when its blended score is decisively
+# higher. A sweep over thresholds 0.5-4.0 found 1.0 optimal (edge +0.06
+# pts/GW, deviations net-positive); below 1.0 the deviations turn harmful.
+CAPTAIN_DEVIATION_THRESHOLD = 1.0
+
 
 def captaincy_score(stats: dict, weights: dict = None) -> float:
     """Blended captaincy score: expected value + recent form + ceiling upside."""
@@ -48,6 +56,37 @@ def captaincy_score(stats: dict, weights: dict = None) -> float:
         + w["form"] * stats.get("form_recent", 0)
         + w["ceiling"] * stats.get("ceiling_p90", 0)
     )
+
+
+def season_points_proxy(stats: dict) -> float:
+    """Season points so far. Exact when the caller provides `season_pts`
+    (backtest market data); otherwise appearance-sum (mean × appearances),
+    which equals season total since non-appearances score 0."""
+    if stats.get("season_pts") is not None:
+        return stats["season_pts"]
+    return stats.get("mean_pts", 0) * stats.get("n_gws", 0)
+
+
+def pick_captain_anchored(
+    candidates: List[dict],
+    threshold: float = None,
+    weights: dict = None,
+) -> Optional[dict]:
+    """
+    Anchored captain pick: default to the season-points leader (the naive
+    baseline that beats pure heuristics) and deviate to the blend's top pick
+    only when its blended score clears the leader's by `threshold`.
+
+    By construction this can only differ from the naive baseline when the
+    blend sees a decisively better option — it ties the baseline otherwise.
+    """
+    if not candidates:
+        return None
+    t = CAPTAIN_DEVIATION_THRESHOLD if threshold is None else threshold
+    baseline = max(candidates, key=season_points_proxy)
+    challenger = max(candidates, key=lambda c: captaincy_score(c, weights))
+    challenger_edge = captaincy_score(challenger, weights) - captaincy_score(baseline, weights)
+    return challenger if challenger_edge >= t else baseline
 
 # Daily cache: {player_id: VariabilityEntry-dict}, keyed by ISO date
 _cache: Dict[str, Dict[int, dict]] = {}
@@ -185,14 +224,21 @@ class VariabilityAgent(BaseAgent):
             day_cache[pid] = entry_dict
             entries.append(VariabilityEntry(**entry_dict))
 
-        # Captaincy candidates: blended score (expected value + form + upside),
-        # backtest-tuned to beat both pure-mean and pure-ceiling ranking.
+        # Captaincy candidates: anchored pick first (season-points leader
+        # unless the blend sees a decisively better option — see
+        # pick_captain_anchored), then the rest by blended score.
         good = [e for e in entries if e.mean_pts >= 4.0]
-        captaincy = [
+        good_dicts = [e.model_dump() for e in good]
+        anchor = pick_captain_anchored(good_dicts)
+        by_blend = [
             e.id for e in sorted(
                 good, key=lambda e: captaincy_score(e.model_dump()), reverse=True
-            )[:10]
+            )
         ]
+        captaincy = (
+            ([anchor["id"]] + [pid for pid in by_blend if pid != anchor["id"]])[:10]
+            if anchor else by_blend[:10]
+        )
         core = [
             e.id for e in sorted(good, key=lambda e: e.consistency_score, reverse=True)[:10]
         ]

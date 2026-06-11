@@ -121,13 +121,23 @@ const HermesInsights: React.FC = () => {
                   {backtest.summary.gameweeks_scored} gameweeks scored
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Stat label="Captain (anchored)" value={backtest.summary.captaincy.by_anchored_avg ?? backtest.summary.captaincy.by_blend_avg} suffix=" pts" />
                   <Stat label="Captain (blend)" value={backtest.summary.captaincy.by_blend_avg} suffix=" pts" />
-                  <Stat label="Captain (mean)" value={backtest.summary.captaincy.by_mean_avg} suffix=" pts" />
                   <Stat label="Best possible" value={backtest.summary.captaincy.best_possible_avg} suffix=" pts" />
                   <Stat label="Hot-form edge" value={backtest.summary.form_signal.edge_vs_league} suffix=" pts/GW" signed />
                   <Stat label="Hot-form avg" value={backtest.summary.form_signal.hot_top10_avg} suffix=" pts" />
                   <Stat label="League avg" value={backtest.summary.form_signal.league_avg} suffix=" pts" />
                 </div>
+                {backtest.summary.verdict?.notes?.length ? (
+                  <ul className="space-y-1 pt-1">
+                    {backtest.summary.verdict.notes.map((note, i) => (
+                      <li key={i} className="text-xs text-content-muted flex gap-2">
+                        <span className="text-magenta">•</span>
+                        <span>{note}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             )}
           </div>

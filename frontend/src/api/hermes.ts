@@ -113,9 +113,20 @@ export interface BacktestSummary {
   season: string
   summary: {
     gameweeks_scored: number
-    captaincy: Record<string, number>
+    // numeric stats plus nested head-to-head objects (anchored_vs_*, blend_vs_*)
+    captaincy: Record<string, any>
     form_signal: Record<string, number>
     consistency_signal: Record<string, number>
+    verdict?: {
+      captaincy_beats_naive: boolean
+      captaincy_matches_naive?: boolean
+      captaincy_beats_template?: boolean
+      form_signal_real: boolean
+      consistency_signal_real: boolean
+      has_measurable_edge: boolean
+      caveat: string
+      notes: string[]
+    }
   }
 }
 

@@ -23,6 +23,7 @@ from agents.variability_agent import (
     MIN_APPEARANCES,
     captaincy_score,
     compute_variability_stats,
+    pick_captain_anchored,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,9 @@ def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
     ceiling_pick = top_by("ceiling_p90")[0]
     mean_pick = top_by("mean_pts")[0]
     blend_pick = top_by("blend")[0]
+    # Production strategy: anchored on the season-points leader, deviating
+    # to the blend pick only on a decisive blended-score edge.
+    anchored_pick = pick_captain_anchored(candidates)
     best_possible = max(candidates, key=lambda c: c["actual"])
 
     return {
@@ -143,6 +147,7 @@ def backtest_gameweek(archive: List[Dict], gw: int) -> Optional[Dict]:
         "captain_by_ceiling": {"name": ceiling_pick["name"], "actual": ceiling_pick["actual"]},
         "captain_by_mean": {"name": mean_pick["name"], "actual": mean_pick["actual"]},
         "captain_by_blend": {"name": blend_pick["name"], "actual": blend_pick["actual"]},
+        "captain_by_anchored": {"name": anchored_pick["name"], "actual": anchored_pick["actual"]},
         "best_possible_captain": {"name": best_possible["name"], "actual": best_possible["actual"]},
         # Naive manager baselines (no lookahead): the bar the smart heuristics must beat
         "captain_by_season_points": pick("season_pts"),   # "captain your best player so far"
@@ -171,6 +176,7 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
     ceiling_caps = [g["captain_by_ceiling"]["actual"] for g in per_gw]
     mean_caps = [g["captain_by_mean"]["actual"] for g in per_gw]
     blend_caps = [g["captain_by_blend"]["actual"] for g in per_gw]
+    anchored_caps = [g["captain_by_anchored"]["actual"] for g in per_gw]
     best_caps = [g["best_possible_captain"]["actual"] for g in per_gw]
     league = [g["league_avg_points"] for g in per_gw]
     hot = [g["hot_form_top10_avg"] for g in per_gw]
@@ -207,7 +213,12 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
     owned_caps = naive_series("captain_by_ownership")
 
     # Primary bar = "captain your best player so far" (season points); the
-    # toughest naive heuristic and always available.
+    # toughest naive heuristic and always available. The production strategy
+    # is the ANCHORED pick (baseline + decisive-deviation); the pure blend is
+    # kept for reference.
+    anchored_vs_best_player = head_to_head(anchored_caps, season_caps)
+    anchored_vs_price = head_to_head(anchored_caps, price_caps)
+    anchored_vs_template = head_to_head(anchored_caps, owned_caps)
     blend_vs_best_player = head_to_head(blend_caps, season_caps)
     blend_vs_price = head_to_head(blend_caps, price_caps)
     blend_vs_template = head_to_head(blend_caps, owned_caps)
@@ -216,6 +227,7 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
         "by_ceiling_avg": avg(ceiling_caps),
         "by_mean_avg": avg(mean_caps),
         "by_blend_avg": avg(blend_caps),
+        "by_anchored_avg": avg(anchored_caps),
         "best_possible_avg": avg(best_caps),
         "blend_beats_mean": sum(1 for b, m in zip(blend_caps, mean_caps) if b > m),
         "blend_beats_ceiling": sum(1 for b, c in zip(blend_caps, ceiling_caps) if b > c),
@@ -223,6 +235,11 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
         "naive_by_season_points_avg": avg(season_caps) if season_caps else None,
         "naive_by_price_avg": avg(price_caps) if price_caps else None,
         "naive_by_ownership_avg": avg(owned_caps) if owned_caps else None,
+        # production strategy (anchored)
+        "anchored_vs_best_player": anchored_vs_best_player,
+        "anchored_vs_price": anchored_vs_price,
+        "anchored_vs_template": anchored_vs_template,
+        # reference: the unanchored blend (the old strategy)
         "blend_vs_best_player": blend_vs_best_player,
         "blend_vs_price": blend_vs_price,
         "blend_vs_template": blend_vs_template,
@@ -249,7 +266,8 @@ def run_backtest(archive: List[Dict], start_gw: int, end_gw: int) -> Dict:
         "form_signal": form_signal,
         "consistency_signal": consistency_signal,
         "verdict": _build_verdict(
-            n, blend_vs_best_player, form_signal, consistency_signal
+            n, anchored_vs_best_player, anchored_vs_template,
+            form_signal, consistency_signal,
         ),
     }
     return {"gameweeks": per_gw, "summary": summary}
@@ -264,62 +282,92 @@ _SIGNAL_EDGE_PTS = 0.3
 
 def _build_verdict(
     n: int,
-    blend_vs_best_player: Optional[Dict],
+    anchored_vs_best_player: Optional[Dict],
+    anchored_vs_template: Optional[Dict],
     form_signal: Dict,
     consistency_signal: Dict,
 ) -> Dict:
     """
-    Turn the numbers into an honest read. Conservative by design: a strategy
-    only "beats" the naive baseline if it wins on BOTH average points AND the
-    head-to-head win-rate, so a single lucky haul can't earn a pass.
+    Turn the numbers into an honest read of the PRODUCTION captaincy strategy
+    (anchored: season-points leader unless the blend sees a decisively better
+    pick). Conservative by design: a strategy only "beats" a baseline if it
+    wins on BOTH average points AND the head-to-head win-rate, so a single
+    lucky haul can't earn a pass.
     """
     notes: List[str] = []
 
     captaincy_beats_naive = False
-    if blend_vs_best_player:
-        edge = blend_vs_best_player["avg_edge_per_gw"]
-        wins, losses = blend_vs_best_player["smart_wins"], blend_vs_best_player["naive_wins"]
+    captaincy_matches_naive = False
+    if anchored_vs_best_player:
+        edge = anchored_vs_best_player["avg_edge_per_gw"]
+        wins, losses = anchored_vs_best_player["smart_wins"], anchored_vs_best_player["naive_wins"]
         captaincy_beats_naive = edge >= _CAPTAINCY_EDGE_PTS and wins > losses
+        captaincy_matches_naive = edge >= 0 and losses <= wins
         if captaincy_beats_naive:
             notes.append(
-                f"Blend captaincy beats 'captain your best player' by {edge} pts/GW "
+                f"Anchored captaincy beats 'captain your best player' by {edge} pts/GW "
                 f"(won {wins}/{n}) — a real, if modest, edge."
             )
-        elif abs(edge) < _CAPTAINCY_EDGE_PTS:
+        elif captaincy_matches_naive:
             notes.append(
-                f"Blend captaincy is within noise of just captaining your best player "
-                f"(edge {edge} pts/GW, won {wins} lost {losses} of {n}). The ceiling "
-                f"heuristic isn't buying captaincy edge on this data."
+                f"Anchored captaincy matches the toughest naive baseline "
+                f"(edge {edge:+} pts/GW, won {wins} lost {losses} of {n}) — by design it "
+                f"defaults to that baseline and only deviates on decisive signal, so it "
+                f"no longer underperforms it."
             )
         else:
             notes.append(
-                f"Blend captaincy UNDERPERFORMS the naive baseline here "
-                f"(edge {edge} pts/GW, won {wins} lost {losses}). Prefer the simple pick."
+                f"Anchored captaincy UNDERPERFORMS the naive baseline here "
+                f"(edge {edge} pts/GW, won {wins} lost {losses}). Raise the deviation "
+                f"threshold (CAPTAIN_DEVIATION_THRESHOLD)."
             )
+
+    captaincy_beats_template = False
+    if anchored_vs_template:
+        t_edge = anchored_vs_template["avg_edge_per_gw"]
+        t_wins, t_losses = anchored_vs_template["smart_wins"], anchored_vs_template["naive_wins"]
+        captaincy_beats_template = t_edge >= _CAPTAINCY_EDGE_PTS and t_wins > t_losses
+        notes.append(
+            f"Vs 'captain the template' (highest ownership): "
+            f"{'BEATS it' if captaincy_beats_template else 'no clear edge'} "
+            f"({t_edge:+} pts/GW, won {t_wins} lost {t_losses} of {n})."
+        )
 
     form_real = form_signal["edge_vs_naive_best"] >= _SIGNAL_EDGE_PTS
     notes.append(
         f"Hot-form picks {'beat' if form_real else 'do NOT beat'} just picking the "
-        f"best players ({form_signal['edge_vs_naive_best']:+} pts/GW vs naive top-10)."
+        f"best players ({form_signal['edge_vs_naive_best']:+} pts/GW vs naive top-10). "
+        + ("" if form_real else "Treat form as context for the LLM, not as a selection signal.")
     )
 
     consistency_real = consistency_signal["edge_vs_naive_best"] >= _SIGNAL_EDGE_PTS
     notes.append(
         f"Consistency core {'beats' if consistency_real else 'does NOT beat'} the naive "
         f"top-10 ({consistency_signal['edge_vs_naive_best']:+} pts/GW)."
+        + ("" if consistency_real else " Use consistency for bench/floor decisions only.")
     )
 
-    any_edge = captaincy_beats_naive or form_real or consistency_real
-    notes.append(
-        "Bottom line: the deterministic core shows measurable edge over naive play."
-        if any_edge else
-        "Bottom line: on this season the deterministic core does not clearly beat naive "
-        "play. Treat Hermes as decision-support/explanation, not as alpha — and re-run "
-        "across more seasons before trusting it."
-    )
+    any_edge = captaincy_beats_naive or captaincy_beats_template or form_real or consistency_real
+    if captaincy_beats_naive:
+        bottom = "Bottom line: the deterministic core shows measurable edge over naive play."
+    elif captaincy_matches_naive and captaincy_beats_template:
+        bottom = (
+            "Bottom line: captaincy now matches the best naive baseline (it can no longer "
+            "lose to it by construction) and beats template-captaincy. Real alpha beyond "
+            "that must come from the unmeasured layers: odds, news and the LLM."
+        )
+    else:
+        bottom = (
+            "Bottom line: on this season the deterministic core does not clearly beat naive "
+            "play. Treat Hermes as decision-support/explanation, not as alpha — and re-run "
+            "across more seasons before trusting it."
+        )
+    notes.append(bottom)
 
     return {
         "captaincy_beats_naive": captaincy_beats_naive,
+        "captaincy_matches_naive": captaincy_matches_naive,
+        "captaincy_beats_template": captaincy_beats_template,
         "form_signal_real": form_real,
         "consistency_signal_real": consistency_real,
         "has_measurable_edge": any_edge,

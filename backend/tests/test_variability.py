@@ -5,10 +5,13 @@ import pytest
 from agents.variability_agent import (
     BLANK_POINTS,
     CAPTAIN_BLEND,
+    CAPTAIN_DEVIATION_THRESHOLD,
     HAUL_POINTS,
     MIN_APPEARANCES,
     captaincy_score,
     compute_variability_stats,
+    pick_captain_anchored,
+    season_points_proxy,
 )
 
 
@@ -79,3 +82,50 @@ def test_consistency_ordering():
     spiky = compute_variability_stats([1, 12, 0, 14, 2, 4])
     assert steady["consistency_score"] > spiky["consistency_score"]
     assert spiky["ceiling_p90"] > steady["ceiling_p90"]
+
+
+# ---- anchored captaincy (baseline + decisive-deviation) ----
+
+def _cand(name, season_pts, mean, form, ceiling):
+    return {
+        "name": name, "season_pts": season_pts,
+        "mean_pts": mean, "form_recent": form, "ceiling_p90": ceiling,
+    }
+
+
+def test_anchored_defaults_to_season_points_leader():
+    # Challenger's blend edge is positive but NOT decisive -> stay with baseline
+    baseline = _cand("Leader", season_pts=200, mean=6.0, form=6.0, ceiling=12.0)
+    rival = _cand("Rival", season_pts=150, mean=6.5, form=7.0, ceiling=13.0)
+    pick = pick_captain_anchored([baseline, rival])
+    assert pick["name"] == "Leader"
+
+
+def test_anchored_deviates_on_decisive_blend_edge():
+    baseline = _cand("Leader", season_pts=200, mean=5.0, form=4.0, ceiling=10.0)
+    rival = _cand("Rival", season_pts=150, mean=8.0, form=9.0, ceiling=16.0)
+    edge = captaincy_score(rival) - captaincy_score(baseline)
+    assert edge >= CAPTAIN_DEVIATION_THRESHOLD  # sanity: this case IS decisive
+    pick = pick_captain_anchored([baseline, rival])
+    assert pick["name"] == "Rival"
+
+
+def test_anchored_can_never_pick_worse_than_baseline_without_decisive_edge():
+    # threshold=inf must reproduce the naive baseline exactly
+    cands = [
+        _cand("A", 180, 7.0, 8.0, 14.0),
+        _cand("B", 220, 6.0, 5.0, 11.0),
+        _cand("C", 90, 9.0, 9.5, 18.0),
+    ]
+    pick = pick_captain_anchored(cands, threshold=float("inf"))
+    assert pick["name"] == "B"
+
+
+def test_anchored_empty_candidates():
+    assert pick_captain_anchored([]) is None
+
+
+def test_season_points_proxy_uses_exact_when_present():
+    assert season_points_proxy({"season_pts": 123, "mean_pts": 5, "n_gws": 10}) == 123
+    # Falls back to appearance-sum (mean x appearances) otherwise
+    assert season_points_proxy({"mean_pts": 5.0, "n_gws": 10}) == 50.0
