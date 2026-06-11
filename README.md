@@ -1,6 +1,6 @@
 # 🤖 FPL AI Squad Suggester
 
-An AI-powered Fantasy Premier League **squad + transfers suggester** with a fast dashboard UI.
+An AI-powered Fantasy Premier League **squad + transfers suggester** with a fast dashboard UI..
 
 Built for **manual decision support** (no login required): it uses public FPL data and explains its picks.
 
