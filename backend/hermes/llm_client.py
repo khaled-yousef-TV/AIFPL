@@ -27,7 +27,15 @@ class LLMClient:
         # by endpoint (clients are per-run, so a wrong guess self-corrects via
         # the adaptive retry but would otherwise repeat every run).
         self._uses_max_completion_tokens = "api.openai.com" in (config.base_url or "")
-        self._supports_temperature = True  # feature-detected on first failure
+        # OpenAI's reasoning-series models (gpt-5.*, o1-*, o3-*, o4-*) only
+        # accept the default temperature. Seed so we don't burn a 400 per run
+        # rediscovering it; adaptive retry still self-corrects for anything
+        # the pattern misses.
+        model = (config.model or "").lower()
+        is_openai = "api.openai.com" in (config.base_url or "")
+        self._supports_temperature = not (
+            is_openai and (model.startswith(("gpt-5", "o1", "o3", "o4-mini", "o4")))
+        )
         self._reasoning_budget_floor = 0  # raised on first reasoning-starve event
 
     # Reasoning models spend most of the budget on invisible reasoning
