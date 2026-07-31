@@ -1,16 +1,15 @@
 import { test, expect, Page } from '@playwright/test'
 
-// The shell has one destination: "This Week" (the Hermes report, with a
-// run-type view switcher inside it). Sidebar (desktop) uses full labels,
-// the mobile tab bar short ones; both are always in the DOM, so click
-// whichever variant is actually visible.
+// The shell is a masthead + a poster hero + one numbered run-type nav.
+// The old sidebar and the mobile tab bar are gone: run types are the only
+// navigation, and they carry full labels at every breakpoint (the leading
+// "01"–"07" numerals are aria-hidden, so accessible names stay clean).
 
-// The old run-type tabs are now pill views inside This Week.
 const RUN_VIEW_LABELS = ['Weekly Briefing', 'Best Squad', 'Wildcard', 'Free Hit', 'Triple Captain', 'Differentials']
 
 async function gotoApp(page: Page) {
   await page.goto('/')
-  // The briefing view is the default; its pill is always present.
+  // The briefing view is the default; its nav item is always present.
   await expect(page.locator('main').getByText('Weekly Briefing').first()).toBeVisible()
 }
 
@@ -28,25 +27,25 @@ async function clickVisible(page: Page, fullLabel: string, short?: string) {
 
 
 test.describe('App shell', () => {
-  test('sidebar collapses to a single This Week entry', async ({ page }) => {
+  test('navigation is the run-type nav only — no sidebar', async ({ page }) => {
     await gotoApp(page)
-    await expect(
-      page.getByRole('button', { name: /This Week|Week/ }).first(),
-    ).toBeAttached()
-    // Old standalone tabs are gone from the nav (run types live as view
-    // pills inside main, Tasks became a header indicator, Track Record
-    // has been removed).
-    const aside = page.locator('aside')
-    for (const gone of ['Tasks', 'Transfers', 'Top Picks', 'Wildcard', 'Track Record']) {
-      await expect(aside.getByRole('button', { name: gone, exact: true })).toHaveCount(0)
+    // The sidebar is gone entirely.
+    await expect(page.locator('aside')).toHaveCount(0)
+    // Every run type is reachable from the one nav.
+    for (const label of RUN_VIEW_LABELS) {
+      await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible()
+    }
+    // Old standalone destinations stay gone.
+    for (const gone of ['Tasks', 'Transfers', 'Top Picks', 'Track Record']) {
+      await expect(page.getByRole('button', { name: gone, exact: true })).toHaveCount(0)
     }
   })
 
-  test('header resolves to a gameweek label, never stuck on Loading', async ({ page }) => {
+  test('masthead resolves to a gameweek label, never stuck on Loading', async ({ page }) => {
     await gotoApp(page)
-    const label = page.locator('aside p').first()
-    // In-season: "GW<n>". Off-season: "Season finished". Never an eternal "Loading...".
-    await expect(label).toHaveText(/GW\d+|Season finished/, { timeout: 15_000 })
+    const clock = page.locator('.masthead-clock')
+    // In-season: "GW<n> · T−…". Off-season: "Season finished". Never an eternal "Loading…".
+    await expect(clock).toHaveText(/GW\d+|Season finished/, { timeout: 15_000 })
   })
 
   test('no console errors on initial load', async ({ page }) => {
@@ -61,12 +60,27 @@ test.describe('App shell', () => {
     expect(real).toEqual([])
   })
 
+  test('fonts are self-hosted — nothing fetched from a font CDN', async ({ page }) => {
+    const cdn: string[] = []
+    page.on('request', (r) => {
+      if (/fonts\.(googleapis|gstatic)\.com/.test(r.url())) cdn.push(r.url())
+    })
+    await gotoApp(page)
+    await page.waitForTimeout(1_000)
+    expect(cdn).toEqual([])
+  })
+
   test('hash routing deep-links into run views', async ({ page }) => {
     await page.goto('/#differentials')
-    // The differentials pill must be the selected view.
-    await expect(page.locator('main').getByText('Differentials').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Differentials', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
     await page.goto('/#wildcard')
-    await expect(page.locator('main').getByText('Wildcard').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Wildcard', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
   })
 })
 
@@ -75,26 +89,31 @@ test.describe('This Week report', () => {
     await gotoApp(page)
     for (const label of RUN_VIEW_LABELS) {
       await clickVisible(page, label)
-      // Either a verdict header + evidence, a running card, or the empty state.
+      // Either a report plate, a running state, or the empty state.
       const outcome = page
         .locator('main')
-        .getByText(/Evidence — agent signals|No .* run yet|Hermes is thinking|Running/i)
+        .getByText(/Agent signals|About this run|Hermes is thinking|Running/i)
       await expect(outcome.first()).toBeVisible({ timeout: 15_000 })
     }
   })
 
-  test('completed run shows verdict header and collapsible full report', async ({ page }) => {
+  test('completed run shows the poster verdict and a collapsible full report', async ({ page }) => {
     await gotoApp(page)
-    const evidence = page.getByText('Evidence — agent signals')
+    // Runs arrive asynchronously — wait for the page to settle into either the
+    // report plate or the empty state before deciding whether to skip.
+    const evidence = page.locator('main').getByRole('heading', { name: /Agent signals/ })
+    const empty = page.locator('main').getByRole('heading', { name: /About this run/ })
+    await expect(evidence.or(empty).first()).toBeVisible({ timeout: 15_000 })
     // Only present when a run exists; skip otherwise (fresh database).
     if ((await evidence.count()) === 0) test.skip(true, 'no Hermes run stored yet')
-    // Verdict headline is an h2 in the verdict card.
-    await expect(page.locator('main h2').first()).toBeVisible()
+    // The verdict is the poster headline — the page's only h1.
+    await expect(page.locator('main h1')).toHaveCount(1)
+    await expect(page.locator('main h1')).toBeVisible()
     // Narrative starts collapsed and expands.
-    const fullReport = page.getByRole('button', { name: /Full report/ })
+    const fullReport = page.getByRole('button', { name: /full report/i })
     if ((await fullReport.count()) > 0) {
       await fullReport.first().click()
-      await expect(page.locator('main').getByText(/./).first()).toBeVisible()
+      await expect(page.getByRole('button', { name: /hide full report/i })).toBeVisible()
     }
   })
 
@@ -106,7 +125,7 @@ test.describe('This Week report', () => {
     const label = await askButton.innerText()
     if (/thinking/i.test(label)) {
       await expect(askButton).toBeDisabled()
-      // Switching views via pills must NOT re-enable it.
+      // Switching views must NOT re-enable it.
       await clickVisible(page, 'Wildcard')
       await clickVisible(page, 'Weekly Briefing')
       await expect(page.getByRole('button', { name: /Hermes is thinking/ }).first()).toBeDisabled()
@@ -131,5 +150,13 @@ test.describe('This Week report', () => {
       expect(text.length).toBeGreaterThan(0)
     }
   })
-})
 
+  test('the pitch survives: eleven numbered shirts, captain armband', async ({ page }) => {
+    await gotoApp(page)
+    const pitch = page.locator('.pitch')
+    if ((await pitch.count()) === 0) test.skip(true, 'no squad in the stored run')
+    await expect(pitch.locator('.dot')).toHaveCount(11)
+    await expect(pitch.locator('.dot-no').first()).toHaveText('1')
+    await expect(pitch.locator('.arm', { hasText: 'C' }).first()).toBeVisible()
+  })
+})

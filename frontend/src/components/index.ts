@@ -1,1 +1,0 @@
-export { FPLLogo } from './FPLLogo'

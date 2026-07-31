@@ -1,59 +1,97 @@
-# FPL AI — Design System
+# Hermes FPL — Design System
 
-Generated with the `ui-ux-pro-max` skill (Data-Dense Dashboard + dark Financial
-Dashboard palette) and adapted to the official FPL brand colors.
+**"The Matchday Programme."** Ink on paper, FPL purple as flood colour, one
+orange signal accent. The product's output is a *written verdict* backed by
+seven agents, so the page is laid out like printed sports journalism: a
+masthead, a poster hero carrying the verdict, and a two-column plate below it.
+
+Replaced the previous dark/neon "Data-Dense Dashboard" system in full.
 
 ## Identity
-- **Style:** Data-Dense Dashboard — KPI cards, tables, grid layout, space-efficient,
-  maximum data visibility. Dark mode (primary).
-- **Brand:** Fantasy Premier League — electric green `#00ff87`, deep purple `#37003c`,
-  cyan `#04f5ff`, magenta `#e90052`.
-- **Hermes accent:** purple→magenta gradient, to mark the AI "brain" surfaces.
 
-## Color tokens (CSS variables, dark theme)
+- **Style:** printed matchday programme — poster typography, flat colour
+  blocks, hairline rules. No gradients, no glow, no shadows, no blur.
+- **Brand:** Fantasy Premier League purple `#37003c`, used as a flood colour
+  (masthead, pitch, primary button) rather than as an outline.
+- **Accent:** a single orange `#d9480f` for the captain, the active nav item,
+  the Hermes action, and focus rings. If something is orange, it is *the*
+  thing to look at.
+
+## Colour tokens
+
 | Role | Token | Hex |
 |------|-------|-----|
-| Base background | `--bg` | `#0a0a12` |
-| Surface (cards) | `--surface` | `#14141f` |
-| Surface raised (inputs/hover) | `--surface-2` | `#1c1c2e` |
-| Surface hover | `--surface-3` | `#26263f` |
-| Border | `--border` | `#2a2a40` |
-| Border strong | `--border-strong` | `#3a3a55` |
-| Text primary | `--text` | `#f4f4f8` |
-| Text muted | `--text-muted` | `#9a9ab5` |
-| Text subtle | `--text-subtle` | `#6b6b85` |
-| Primary (FPL green) | `--primary` | `#00ff87` |
-| On primary | `--on-primary` | `#06121e` |
-| Brand (FPL purple) | `--brand` | `#37003c` |
-| Accent (cyan) | `--accent` | `#04f5ff` |
-| Magenta (Hermes) | `--magenta` | `#e90052` |
-| Success | `--success` | `#00d97e` |
-| Danger | `--danger` | `#ff4d6d` |
-| Warning | `--warning` | `#f5a623` |
-| Info | `--info` | `#36a3ff` |
+| Paper (page) | `--paper` | `#ede7da` |
+| Paper inset (fields, callouts) | `--paper-2` | `#f4f0e7` |
+| Paper pressed / hover | `--paper-3` | `#e3dccd` |
+| Rule | `--rule` | `#cdc5b4` |
+| Rule soft (bar tracks) | `--rule-soft` | `#ded7c7` |
+| Rule strong (section rules, borders) | `--rule-strong` | `#131313` |
+| Ink | `--ink` | `#131313` |
+| Ink muted | `--ink-muted` | `#6a6353` |
+| Ink subtle | `--ink-subtle` | `#8a8474` |
+| Brand (FPL purple) | `--purple` | `#37003c` |
+| Brand hover | `--purple-2` | `#4b0a52` |
+| Accent | `--orange` | `#d9480f` |
+| Cream (on purple) | `--cream` | `#ede7da` |
+| Boosted | `--up` | `#1f7a3f` |
+| Faded | `--down` | `#b3271e` |
+| Warning | `--warn` | `#a35a06` |
 
-All contrast pairs verified ≥4.5:1 for text, ≥3:1 for large/UI glyphs (WCAG AA).
+Tailwind semantic names (`bg`, `surface`, `border`, `content`, `primary`,
+`accent`, `success`, `danger`, …) map onto these variables in
+`tailwind.config.js`. Components use the semantic names, never raw hex.
 
-## Typography (skill recommendation)
-- **Body/UI:** Fira Sans (300–700)
-- **Data/mono:** Fira Code (tabular figures for prices, points, percentages)
-- **Type scale:** 12 / 14 / 16 / 18 / 24 / 32 (base 16, line-height 1.5–1.6)
-- Use `.tabular` (font-variant-numeric: tabular-nums) on all numeric columns to
-  prevent layout shift.
+## Typography
 
-## Spacing & layout
-- 4/8px spacing rhythm. Section spacing tiers: 16 / 24 / 32 / 48.
-- Container max-width: `max-w-7xl`. Breakpoints: 375 / 768 / 1024 / 1440.
-- Elevation scale: `--shadow-sm/md/lg` (consistent, no random shadows).
+- **Everything:** Archivo Variable (weights 100–900, **width axis 62–125%**).
+  The width axis is the point — the poster headline is `font-stretch: 70%`
+  at weight 900, which no static font could do without a second family.
+- **Numbers:** JetBrains Mono 400/700, `font-variant-numeric: tabular-nums`
+  on every figure (prices, points, percentages, the countdown).
+- Both are **self-hosted via `@fontsource`** and imported from `src/index.css`.
+  There is no font CDN request — an e2e test enforces this.
+- Headline sizes step down with verdict length (`.sz-lg` / `.sz-md` / `.sz-sm`,
+  all `clamp()`-based) so a long verdict never blows out the hero.
 
-## Interaction
-- Transitions 150–300ms; `cursor-pointer` on all clickables.
-- Visible focus rings (`--primary`, 2px) on all interactive elements.
-- `prefers-reduced-motion` respected (animations disabled).
-- Hover states change color/elevation, never layout bounds.
+## Layout
 
-## Anti-patterns to avoid (flagged by the skill)
-- Raw hex in components (use semantic tokens / Tailwind semantic colors).
-- Emoji as structural icons (use lucide-react).
-- Gray-on-gray low contrast; color as the only signal (pair with icon/text).
-- Ornate decoration on a data product; missing filtering.
+- **Masthead** (purple band) → **hero** (verdict + projected points) →
+  **numbered run-type nav** (`01`–`07`) → **run controls** → **plate**.
+- The plate is `1.55fr / 1fr` on `lg`, single column below, split by a rule
+  rather than by cards.
+- Section headings are `.sec-h`: 0.65rem caps, `0.2em` tracking, 2px ink rule
+  underneath. They replace card headers — the programme has sections, not cards.
+- Page padding `1rem` / `1.625rem` at `sm`. Breakpoints 375 / 640 / 900 / 1024.
+
+## The pitch
+
+The squad stays on a field, drawn in the programme's language: purple flood,
+cream touchlines / centre circle / penalty area, 2px ink frame.
+
+- Shirt numbers (`1`–`11`, top-right of each dot) preserve the teamsheet reading.
+- Captain and vice are **armbands** (`C` / `V`, top-left) — not name suffixes,
+  which truncated inside the dot column at mobile widths.
+- `▲` / `▼` under a player marks a Hermes adjustment; the legend sits under
+  the bench row.
+
+## Interaction & performance
+
+The old system's cost centres are deliberately gone:
+
+- No `@import` of a font CDN (was render-blocking in CSS).
+- No `body::before` full-viewport radial gradients.
+- No `drop-shadow` glow on the countdown, and no `animate-pulse` ticking once
+  a second. The countdown is **one mono string** in the masthead.
+- No `box-shadow` anywhere — `boxShadow.elev-*` are mapped to `none`.
+- Transitions are 120ms (`--t`) and only on colour, border, opacity, transform.
+- Spinners remain only where something is genuinely in flight.
+- `prefers-reduced-motion` disables animation and transitions.
+
+## Anti-patterns
+
+- Raw hex in components — use the semantic tokens.
+- Emoji as structural icons — use `lucide-react`.
+- Colour as the only signal — pair with a glyph or text (`▲`, `OK`, `DEGR`).
+- Adding elevation, gradients or rounded "card" chrome. This system is printed:
+  things are separated by rules and flat fills, not by floating above the page.
