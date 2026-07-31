@@ -8,7 +8,23 @@ caller never hard-fails on LLM flakiness.
 """
 
 import logging
+import re
 from typing import Dict, List, Optional
+
+
+# Defensive net around the prompt asking the LLM to use names in prose.
+# Match any digit block on a word boundary; the substitution only fires
+# when the number is actually a known player id, so decimals ("15.5"),
+# percentages ("15.9%"), and standalone integers ("4 goals") stay intact
+# because those numbers aren't in the names dict.
+_ID_TOKEN = re.compile(r"\b(\d+)\b")
+
+
+def _replace_ids_with_names(text: str, names: Dict[int, str]) -> str:
+    def sub(m):
+        pid = int(m.group(1))
+        return names.get(pid, m.group(0))
+    return _ID_TOKEN.sub(sub, text)
 
 from agents.base import AgentContext
 from agents.registry import run_agents
@@ -122,7 +138,7 @@ class HermesOrchestrator:
             "signals": {name: r.model_dump(mode="json") for name, r in reports.items()},
             "adjustments": adjustments.model_dump(mode="json") if adjustments else None,
             "result": result,
-            "narrative": self._narrative(adjustments, reports),
+            "narrative": self._narrative(adjustments, reports, names),
             "usage": usage,
             "model": self.config.model,
         }
@@ -270,12 +286,16 @@ class HermesOrchestrator:
 
     @classmethod
     def _narrative(
-        cls, adjustments: Optional[HermesAdjustments], reports: Dict[str, AgentReport]
+        cls,
+        adjustments: Optional[HermesAdjustments],
+        reports: Dict[str, AgentReport],
+        names: Dict[int, str],
     ) -> str:
         """LLM narrative, falling back to agent summaries when it is missing
-        OR blank — some models return adjustments with an empty narrative."""
+        OR blank — some models return adjustments with an empty narrative.
+        Replaces any bare player-ids that leaked through with names."""
         if adjustments and adjustments.narrative and adjustments.narrative.strip():
-            return adjustments.narrative
+            return _replace_ids_with_names(adjustments.narrative, names)
         header = (
             "**Hermes LLM unavailable — deterministic signals only.**"
             if adjustments is None

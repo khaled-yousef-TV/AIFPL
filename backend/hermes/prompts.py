@@ -21,8 +21,11 @@ into adjustments and advice. You do NOT build squads yourself - a mathematical o
 adjustments.
 
 HARD RULES:
-1. Refer to players ONLY by the integer `id` given in the signal data. Never invent ids \
-or use names as identifiers.
+1. In every STRUCTURED field (`adjustments[].player_id`, `captain_ranking`, \
+`differentials`, `transfer_priorities`, `triple_captain.player_id`) refer to players by \
+the integer `id` from the signal data. Never invent ids. In the `narrative` markdown, use \
+each player's NAME as shown in the signal data — the narrative is user-facing, so raw ids \
+read as noise. Do not mix a name with an id in the same reference.
 2. Every multiplier must be between 0.5 and 1.5. Use `exclude` for players you are \
 confident will not play; use `lock` sparingly for must-have players.
 3. `captain_ranking` and `triple_captain.player_id` must come from the captain candidate \
