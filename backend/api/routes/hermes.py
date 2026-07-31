@@ -40,7 +40,18 @@ async def _resolve_user_player_ids(fpl_team_id: Optional[int]) -> list:
         imported = await import_fpl_team(fpl_team_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return [p["id"] for p in imported.get("squad", []) if p.get("id")]
+    ids = [p["id"] for p in imported.get("squad", []) if p.get("id")]
+    if not ids:
+        # Entry exists but FPL hasn't published its picks yet (preseason /
+        # before the first deadline) — a my_team run would be meaningless
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "FPL doesn't publish your picks until the first deadline passes — "
+                "My Team analysis unlocks after the GW1 deadline."
+            ),
+        )
+    return ids
 
 
 def build_agent_context(top_n: int = 40, user_player_ids=None) -> AgentContext:
@@ -160,6 +171,32 @@ async def get_latest_run(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/latest-all")
+async def get_latest_runs_all():
+    """Latest completed/degraded run for every nightly run type (tab overview)."""
+    try:
+        from services.hermes_service import NIGHTLY_RUN_TYPES
+        deps = get_dependencies()
+        runs = deps.db_manager.get_latest_hermes_runs_by_type(
+            NIGHTLY_RUN_TYPES, statuses=["completed", "degraded"],
+        )
+        return {"runs": runs}
+    except Exception as e:
+        logger.error(f"Error fetching latest Hermes runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/active")
+async def get_active_runs():
+    """Currently pending/running Hermes runs with task progress (for polling)."""
+    try:
+        deps = get_dependencies()
+        return {"active": deps.db_manager.get_active_hermes_runs()}
+    except Exception as e:
+        logger.error(f"Error fetching active Hermes runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str):
     """Get a Hermes run by id."""
@@ -185,6 +222,41 @@ async def get_status():
     except Exception as e:
         logger.error(f"Error fetching Hermes status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class ProviderRequest(BaseModel):
+    provider: str
+
+
+@router.get("/providers")
+async def get_providers():
+    """Named LLM providers and which one is active (live-toggleable)."""
+    from hermes.config import get_active_provider, list_llm_providers, load_hermes_config
+    return {
+        "active": get_active_provider(),  # None = legacy LLM_* vars
+        "active_model": load_hermes_config().model,
+        "providers": list_llm_providers(),
+    }
+
+
+@router.post("/provider")
+async def set_provider(request: ProviderRequest):
+    """Switch the active LLM provider. Takes effect on the next run — no restart."""
+    from hermes.config import LLM_PROVIDERS, list_llm_providers, load_hermes_config
+
+    provider = request.provider.lower()
+    if provider not in LLM_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'")
+    configured = {p["id"] for p in list_llm_providers() if p["configured"]}
+    if provider not in configured:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider}' is not configured — set "
+                   f"{provider.upper()}_BASE_URL/_MODEL/_API_KEY in backend/.env",
+        )
+    deps = get_dependencies()
+    deps.db_manager.set_setting("llm_provider", provider)
+    return {"active": provider, "active_model": load_hermes_config().model}
 
 
 @router.post("/archive-season")

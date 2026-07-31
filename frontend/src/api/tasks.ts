@@ -1,74 +1,32 @@
 /**
  * Background Tasks API
+ *
+ * Tasks are created and updated by the backend only (Hermes runs, nightly
+ * jobs); the frontend is a read-only viewer.
  */
 
-import { apiRequest, apiFetch } from './client'
+import { apiFetch } from './client'
 import type { Task } from '../types'
+
+export interface TaskDurationStats {
+  [taskType: string]: { avg_duration_ms: number; samples: number }
+}
 
 export interface TasksResponse {
   tasks: Task[]
-}
-
-export interface TaskResponse {
-  task: Task
+  duration_stats: TaskDurationStats
 }
 
 /**
- * Fetch all tasks
+ * Fetch tasks plus per-type average durations.
+ * include_old=true returns recent history (newest first, capped by limit),
+ * not just the last 5 minutes.
  */
-export async function fetchTasks(includeOld: boolean = false): Promise<TasksResponse> {
-  const res = await apiFetch(`/api/tasks?include_old=${includeOld}`)
+export async function fetchTasks(includeOld = true, limit = 30): Promise<TasksResponse> {
+  const res = await apiFetch(`/api/tasks?include_old=${includeOld}&limit=${limit}`)
   if (!res.ok) {
-    return { tasks: [] }
+    return { tasks: [], duration_stats: {} }
   }
-  return res.json()
+  const data = await res.json()
+  return { tasks: data.tasks || [], duration_stats: data.duration_stats || {} }
 }
-
-/**
- * Fetch a single task by ID
- */
-export async function fetchTask(taskId: string): Promise<Task> {
-  return apiRequest<Task>(`/api/tasks/${taskId}`)
-}
-
-/**
- * Create a new task
- */
-export async function createTask(task: Omit<Task, 'completedAt' | 'error'>): Promise<void> {
-  await apiFetch('/api/tasks', {
-    method: 'POST',
-    body: JSON.stringify(task),
-  })
-}
-
-/**
- * Update an existing task
- */
-export async function updateTask(
-  taskId: string, 
-  updates: Partial<Task>
-): Promise<void> {
-  await apiFetch(`/api/tasks/${taskId}`, {
-    method: 'PUT',
-    body: JSON.stringify(updates),
-  })
-}
-
-/**
- * Delete a task
- */
-export async function deleteTask(taskId: string): Promise<void> {
-  await apiFetch(`/api/tasks/${taskId}`, {
-    method: 'DELETE',
-  })
-}
-
-/**
- * Trigger daily snapshot update
- */
-export async function triggerDailySnapshot(): Promise<{ message: string }> {
-  return apiRequest<{ message: string }>('/api/daily-snapshot/update', {
-    method: 'POST',
-  })
-}
-

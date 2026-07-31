@@ -44,6 +44,22 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
     picks_data, used_gameweek = _fetch_team_picks(fpl_client, team_id, gameweek)
     
     if not picks_data or not picks_data.get("picks"):
+        # FPL only publishes picks after a GW deadline passes. If the entry
+        # itself exists (preseason / brand-new team), connect it anyway with
+        # an empty squad instead of failing — the UI explains the rest.
+        bank, team_name = _fetch_entry_data(fpl_client, team_id)
+        if team_name and not team_name.startswith("FPL Team "):
+            try:
+                db_manager.save_fpl_team(team_id, team_name)
+            except Exception as e:
+                logger.warning(f"Failed to save FPL team to database: {e}")
+            return {
+                "squad": [],
+                "bank": bank,
+                "team_name": team_name,
+                "gameweek": None,
+                "picks_available": False,
+            }
         raise ValueError(f"No team data found for team {team_id}")
     
     picks = picks_data["picks"]
@@ -99,6 +115,7 @@ async def import_fpl_team(team_id: int, gameweek: Optional[int] = None) -> Dict[
         "bank": bank,
         "team_name": team_name,
         "gameweek": used_gameweek,
+        "picks_available": True,
     }
 
 

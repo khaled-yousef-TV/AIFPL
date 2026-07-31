@@ -77,7 +77,11 @@ def compute_team_trends(
         if f.team_a in by_team_id:
             by_team_id[f.team_a]["points"].append((f.kickoff_time, a_pts))
 
-    # Strength normalization (simple min/max to keep it stable)
+    # Strength normalization (simple min/max to keep it stable).
+    # Preseason bootstrap data has strength=None; treat those as mid-tier (3 on FPL's 1-5 scale).
+    def team_strength(t) -> int:
+        return t.strength if isinstance(t.strength, int) else 3
+
     strengths = [t.strength for t in teams if isinstance(t.strength, int)]
     s_min = min(strengths) if strengths else 1
     s_max = max(strengths) if strengths else 5
@@ -115,14 +119,14 @@ def compute_team_trends(
         # - higher strength increases score
         # - underperforming recently (season_ppm - recent_ppm) increases score
         # - small momentum boosts (if turning upward)
-        str_n = norm_strength(t.strength)
+        str_n = norm_strength(team_strength(t))
         underperf = season_ppm - recent_ppm  # positive => underperforming recently
         reversal_score = (str_n * 1.2) + (underperf * 0.9) + (max(0.0, momentum) * 0.4)
 
         trends[team_id] = TeamTrend(
             team_id=team_id,
             short_name=t.short_name,
-            strength=t.strength,
+            strength=team_strength(t),
             played=played,
             season_ppm=round(season_ppm, 3),
             recent_ppm=round(recent_ppm, 3),

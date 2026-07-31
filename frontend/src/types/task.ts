@@ -1,42 +1,20 @@
 /**
- * Task-related type definitions for background jobs
+ * Task-related type definitions for background jobs.
+ *
+ * Tasks are created and updated by the backend only; the shape mirrors the
+ * serialization in backend/database/crud.py (_task_to_dict).
  */
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
 
-export type TaskType =
-  | 'daily_snapshot'
-  | 'triple_captain'
-  | 'refresh_picks'
-  | 'refresh_differentials'
-  | 'refresh_transfers'
-  | 'refresh_wildcard'
-  | 'wildcard'
-  | 'hermes_run'
-  | 'season_archive'
-
 export interface Task {
   id: string
-  type: TaskType
+  type: string // e.g. 'hermes_run', 'season_archive', 'daily_snapshot'
   title: string
-  description: string
+  description: string | null
   status: TaskStatus
   progress: number // 0-100
-  createdAt: number
-  completedAt?: number
-  error?: string
+  createdAt: number // epoch ms (UTC)
+  completedAt?: number | null
+  error?: string | null
 }
-
-export interface Notification {
-  id: string
-  type: 'success' | 'error'
-  title: string
-  message: string
-  timestamp: number
-}
-
-export interface TaskStartedModal {
-  taskId: string
-  title: string
-}
-

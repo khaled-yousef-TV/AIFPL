@@ -31,6 +31,11 @@ list when one is provided.
 in each `reason` field and fully in `narrative`.
 5. Weigh availability flags and rotation risk heavily; weigh news incentives \
 (record chases, golden boot races, contract years) into captaincy and boost decisions.
+6. Your training knowledge of squads, transfers, managers, records and "new signings" is \
+OUTDATED. The signal data is ground truth: each player's team, position and price are \
+exactly as listed in the player lines. Never claim a player is at a different club, \
+"still at" a former club, or new to the league based on memory, and never cite a record \
+chase or milestone unless it appears in the news agent's items for THIS gameweek.
 
 Respond with a SINGLE JSON object, no prose outside it, matching exactly:
 {
@@ -114,8 +119,13 @@ def assemble_user_prompt(
     memory_digest: Optional[str] = None,
 ) -> str:
     """Build the user prompt from agent reports, trimmed per agent."""
+    from datetime import datetime
+    from data.european_teams import get_current_season
+
     sections = [
         f"# Gameweek {gameweek} — task: {run_type}",
+        f"Today is {datetime.utcnow().strftime('%d %B %Y')}; this is the {get_current_season()} "
+        "Premier League season. Player-club assignments in the data reflect all transfers to date.",
         RUN_TYPE_INSTRUCTIONS.get(run_type, RUN_TYPE_INSTRUCTIONS["briefing"]),
     ]
 

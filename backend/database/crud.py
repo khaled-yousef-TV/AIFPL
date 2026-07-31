@@ -6,7 +6,7 @@ Create, Read, Update, Delete operations for the FPL Agent database.
 
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -669,6 +669,27 @@ class DatabaseManager:
 
     # ==================== Tasks ====================
     
+    @staticmethod
+    def _utc_ms(dt: Optional[datetime]) -> Optional[int]:
+        """Naive DB datetimes are UTC — .timestamp() would read them as local time."""
+        if dt is None:
+            return None
+        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    @staticmethod
+    def _task_to_dict(task: Task) -> Dict[str, Any]:
+        return {
+            "id": task.task_id,
+            "type": task.task_type,
+            "title": task.title,
+            "description": task.description,
+            "status": task.status,
+            "progress": task.progress,
+            "createdAt": DatabaseManager._utc_ms(task.created_at),
+            "completedAt": DatabaseManager._utc_ms(task.completed_at),
+            "error": task.error
+        }
+
     def create_task(
         self,
         task_id: str,
@@ -705,18 +726,8 @@ class DatabaseManager:
                 session.add(task)
                 session.commit()
                 session.refresh(task)
-                
-                return {
-                    "id": task.task_id,
-                    "type": task.task_type,
-                    "title": task.title,
-                    "description": task.description,
-                    "status": task.status,
-                    "progress": task.progress,
-                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
-                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
-                    "error": task.error
-                }
+
+                return self._task_to_dict(task)
         except Exception as e:
             logger.error(f"Failed to create task {task_id}: {e}")
             raise
@@ -757,18 +768,8 @@ class DatabaseManager:
                 
                 session.commit()
                 session.refresh(task)
-                
-                return {
-                    "id": task.task_id,
-                    "type": task.task_type,
-                    "title": task.title,
-                    "description": task.description,
-                    "status": task.status,
-                    "progress": task.progress,
-                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
-                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
-                    "error": task.error
-                }
+
+                return self._task_to_dict(task)
         except Exception as e:
             logger.error(f"Failed to update task {task_id}: {e}")
             raise
@@ -788,36 +789,27 @@ class DatabaseManager:
                 task = session.query(Task).filter(Task.task_id == task_id).first()
                 if not task:
                     return None
-                
-                return {
-                    "id": task.task_id,
-                    "type": task.task_type,
-                    "title": task.title,
-                    "description": task.description,
-                    "status": task.status,
-                    "progress": task.progress,
-                    "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
-                    "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
-                    "error": task.error
-                }
+
+                return self._task_to_dict(task)
         except Exception as e:
             logger.error(f"Failed to get task {task_id}: {e}")
             return None
     
-    def get_all_tasks(self, include_old: bool = False) -> List[Dict[str, Any]]:
+    def get_all_tasks(self, include_old: bool = False, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get all tasks, optionally filtering out old completed tasks.
-        
+
         Args:
             include_old: If False, only return tasks from last 5 minutes or running/pending tasks
-            
+            limit: Maximum number of tasks to return (newest first)
+
         Returns:
             List of task dictionaries
         """
         try:
             with self.get_session() as session:
                 query = session.query(Task)
-                
+
                 if not include_old:
                     # Only get recent tasks (last 5 minutes) or running/pending tasks
                     from datetime import timedelta
@@ -826,26 +818,80 @@ class DatabaseManager:
                         (Task.status.in_(["pending", "running"])) |
                         ((Task.status.in_(["completed", "failed"])) & (Task.completed_at >= cutoff))
                     )
-                
-                tasks = query.order_by(Task.created_at.desc()).all()
-                
-                return [
-                    {
-                        "id": task.task_id,
-                        "type": task.task_type,
-                        "title": task.title,
-                        "description": task.description,
-                        "status": task.status,
-                        "progress": task.progress,
-                        "createdAt": int(task.created_at.timestamp() * 1000) if task.created_at else None,
-                        "completedAt": int(task.completed_at.timestamp() * 1000) if task.completed_at else None,
-                        "error": task.error
-                    }
-                    for task in tasks
-                ]
+
+                tasks = query.order_by(Task.created_at.desc()).limit(limit).all()
+
+                return [self._task_to_dict(task) for task in tasks]
         except Exception as e:
             logger.error(f"Failed to get tasks: {e}")
             return []
+
+    def get_task_duration_stats(self, per_type_limit: int = 10) -> Dict[str, Dict[str, Any]]:
+        """
+        Average duration of recently completed tasks, per task_type.
+
+        Used by the frontend to show "typically takes ~X" estimates and ETAs.
+        Only the most recent `per_type_limit` completions per type count, so
+        the estimate tracks current run times rather than all-time history.
+        """
+        try:
+            with self.get_session() as session:
+                tasks = session.query(Task).filter(
+                    Task.status == "completed",
+                    Task.completed_at.isnot(None),
+                    Task.created_at.isnot(None),
+                ).order_by(Task.completed_at.desc()).limit(300).all()
+
+                by_type: Dict[str, List[float]] = {}
+                for t in tasks:
+                    durations = by_type.setdefault(t.task_type, [])
+                    if len(durations) < per_type_limit:
+                        durations.append((t.completed_at - t.created_at).total_seconds() * 1000)
+
+                return {
+                    task_type: {
+                        "avg_duration_ms": int(sum(d) / len(d)),
+                        "samples": len(d),
+                    }
+                    for task_type, d in by_type.items() if d
+                }
+        except Exception as e:
+            logger.error(f"Failed to get task duration stats: {e}")
+            return {}
+
+    def fail_interrupted_tasks(self) -> int:
+        """
+        Mark all pending/running tasks — and their Hermes runs — as failed.
+
+        Background threads don't survive a server restart, so anything still
+        'running' at startup is an orphan that would otherwise show as
+        in-progress forever (and block new Hermes runs in the UI).
+        """
+        try:
+            now = datetime.utcnow()
+            count = 0
+            with self.get_session() as session:
+                tasks = session.query(Task).filter(
+                    Task.status.in_(["pending", "running"])
+                ).all()
+                for task in tasks:
+                    task.status = "failed"
+                    task.error = "Interrupted by server restart"
+                    task.completed_at = now
+                    count += 1
+                runs = session.query(HermesRun).filter(
+                    HermesRun.status.in_(["pending", "running"])
+                ).all()
+                for run in runs:
+                    run.status = "failed"
+                    run.error = "Interrupted by server restart"
+                    run.completed_at = now
+                    count += 1
+                session.commit()
+            return count
+        except Exception as e:
+            logger.error(f"Failed to clean up interrupted tasks: {e}")
+            return 0
     
     def delete_task(self, task_id: str) -> bool:
         """
@@ -1060,6 +1106,45 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get latest Hermes run: {e}")
             return None
+
+    def get_active_hermes_runs(self) -> List[Dict[str, Any]]:
+        """
+        Currently pending/running Hermes runs, light payload with the task's
+        progress joined in (task_id is always "task_" + run_id).
+        """
+        try:
+            with self.get_session() as session:
+                runs = session.query(HermesRun).filter(
+                    HermesRun.status.in_(["pending", "running"])
+                ).order_by(HermesRun.created_at.desc()).all()
+                out = []
+                for run in runs:
+                    task = session.query(Task).filter(
+                        Task.task_id == f"task_{run.run_id}"
+                    ).first()
+                    out.append({
+                        "run_id": run.run_id,
+                        "run_type": run.run_type,
+                        "gameweek": run.gameweek,
+                        "status": run.status,
+                        "progress": task.progress if task else 0,
+                        "created_at": (run.created_at.isoformat() + "Z") if run.created_at else None,
+                    })
+                return out
+        except Exception as e:
+            logger.error(f"Failed to get active Hermes runs: {e}")
+            return []
+
+    def get_latest_hermes_runs_by_type(
+        self,
+        run_types: List[str],
+        statuses: Optional[List[str]] = None,
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        """Latest run per run_type in one call (for the tab overview)."""
+        return {
+            run_type: self.get_latest_hermes_run(run_type=run_type, statuses=statuses)
+            for run_type in run_types
+        }
 
     def get_hermes_runs_for_gameweek(self, gameweek: int) -> List[Dict[str, Any]]:
         """Get all Hermes runs for a gameweek (used by the learning loop)."""

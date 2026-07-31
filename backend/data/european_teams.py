@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # SEASON CONFIGURATION - UPDATE THIS EACH SEASON
 # ============================================================
-CURRENT_SEASON = "2025-26"
+CURRENT_SEASON = "2026-27"
 
 # Teams in European competitions
 # Update this at the start of each season based on:
@@ -39,11 +39,17 @@ EUROPEAN_TEAMS_BY_SEASON = {
         # Crystal Palace (FA Cup winners - demoted from UEL due to multi-club ownership)
         "UECL": ["CRY"],
     },
-    # Add future seasons here as they become known
     "2026-27": {
-        "UCL": [],  # To be determined
-        "UEL": [],
-        "UECL": [],
+        # Champions League
+        # Arsenal (1st), Man City (2nd), Man United (3rd), Aston Villa (4th)
+        # Liverpool (5th - European Performance Spot)
+        "UCL": ["ARS", "MCI", "MUN", "AVL", "LIV"],
+
+        # Europa League: Bournemouth (6th), Sunderland (7th)
+        "UEL": ["BOU", "SUN"],
+
+        # Conference League: Brighton (8th)
+        "UECL": ["BHA"],
     },
 }
 
@@ -134,6 +140,61 @@ EUROPEAN_MATCHWEEKS_BY_SEASON = {
         "2026-04-09": ["UEL", "UECL"],  # Quarter-finals
         "2026-04-10": ["UEL", "UECL"],
     },
+    "2026-27": {
+        # UCL league phase (8 matchdays, Sep 2026 - Jan 2027)
+        "2026-09-08": ["UCL"],  # Matchday 1
+        "2026-09-09": ["UCL"],
+        "2026-09-10": ["UCL"],
+        "2026-10-13": ["UCL"],  # Matchday 2
+        "2026-10-14": ["UCL"],
+        "2026-10-20": ["UCL"],  # Matchday 3
+        "2026-10-21": ["UCL"],
+        "2026-11-03": ["UCL"],  # Matchday 4
+        "2026-11-04": ["UCL"],
+        "2026-11-24": ["UCL"],  # Matchday 5
+        "2026-11-25": ["UCL"],
+        "2026-12-08": ["UCL"],  # Matchday 6
+        "2026-12-09": ["UCL"],
+        "2027-01-19": ["UCL"],  # Matchday 7
+        "2027-01-20": ["UCL"],
+        "2027-01-27": ["UCL"],  # Matchday 8
+
+        # UCL knockouts
+        "2027-02-16": ["UCL"],  # Play-offs Leg 1
+        "2027-02-17": ["UCL"],
+        "2027-02-23": ["UCL"],  # Play-offs Leg 2
+        "2027-02-24": ["UCL"],
+        "2027-03-09": ["UCL"],  # Round of 16 Leg 1
+        "2027-03-10": ["UCL"],
+        "2027-03-16": ["UCL"],  # Round of 16 Leg 2
+        "2027-03-17": ["UCL"],
+        "2027-04-06": ["UCL"],  # Quarter-finals Leg 1
+        "2027-04-07": ["UCL"],
+        "2027-04-13": ["UCL"],  # Quarter-finals Leg 2
+        "2027-04-14": ["UCL"],
+        "2027-04-27": ["UCL"],  # Semi-finals Leg 1
+        "2027-04-28": ["UCL"],
+        "2027-05-04": ["UCL"],  # Semi-finals Leg 2
+        "2027-05-05": ["UCL"],
+
+        # UEL/UECL (Thursdays; UECL league phase is 6 matchdays)
+        "2026-09-17": ["UEL", "UECL"],  # Matchday 1
+        "2026-10-15": ["UEL", "UECL"],  # Matchday 2
+        "2026-10-22": ["UEL", "UECL"],  # Matchday 3
+        "2026-11-05": ["UEL", "UECL"],  # Matchday 4
+        "2026-11-26": ["UEL", "UECL"],  # Matchday 5
+        "2026-12-10": ["UEL", "UECL"],  # Matchday 6
+        "2027-01-21": ["UEL"],  # UEL Matchday 7
+        "2027-01-28": ["UEL"],  # UEL Matchday 8
+        "2027-02-18": ["UEL", "UECL"],  # Knockout play-offs
+        "2027-02-25": ["UEL", "UECL"],
+        "2027-03-11": ["UEL", "UECL"],  # Round of 16
+        "2027-03-18": ["UEL", "UECL"],
+        "2027-04-08": ["UEL", "UECL"],  # Quarter-finals
+        "2027-04-15": ["UEL", "UECL"],
+        "2027-04-29": ["UEL", "UECL"],  # Semi-finals
+        "2027-05-06": ["UEL", "UECL"],
+    },
 }
 
 # Competition importance (affects rotation likelihood)
@@ -150,16 +211,17 @@ COMPETITION_IMPORTANCE = {
 def get_current_season() -> str:
     """
     Determine current season based on date.
-    Season runs Aug-May, so:
-    - Aug 2025 - May 2026 = "2025-26"
+    Play runs Aug-May, but the FPL API resets to the new season in early
+    July, so July belongs to the NEW season:
+    - Jul 2025 - May 2026 = "2025-26"
     """
     now = datetime.now()
     year = now.year
     month = now.month
-    
-    if month >= 8:  # Aug-Dec = first half of season
+
+    if month >= 7:  # Jul-Dec = start/first half of season
         return f"{year}-{str(year + 1)[2:]}"
-    else:  # Jan-Jul = second half of season
+    else:  # Jan-Jun = second half + post-season
         return f"{year - 1}-{str(year)[2:]}"
 
 

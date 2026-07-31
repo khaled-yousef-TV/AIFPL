@@ -14,7 +14,8 @@ deterministic conversion of FPL news fields only.
 
 import json
 import logging
-from typing import List, Tuple
+import re
+from typing import Dict, List, Tuple
 
 from pydantic import BaseModel
 
@@ -43,18 +44,48 @@ Respond with ONLY a JSON object:
 "sentiment": float (-1..1), "impact": "out|doubt|boost|neutral|incentive",
 "incentive_type": "record_chase|golden_boot|milestone|contract|call_up|revenge|other"|null,
 "behavioral_implication": str|null, "source_url": str|null}]}
-Only include items genuinely useful for FPL decisions. Max 15 items."""
+Only include items genuinely useful for FPL decisions. Max 15 items.
+Discard stale results: ignore any search result about a previous season, a completed \
+record chase, or a player's former club — search engines sometimes return old articles \
+(check each result's URL and text against the stated upcoming gameweek and season). \
+Per-season counters reset every season: early in a season (GW1-5), discard any claim that \
+a player is "X away from" a season record — that arithmetic belonged to last season. \
+When a result conflicts with the official FPL data you are given, trust the FPL data."""
+
+
+_GW_PATTERN = re.compile(r"game\s*week[\s-]*(\d{1,2})|gw[\s-]?(\d{1,2})\b", re.IGNORECASE)
+
+
+def _is_stale_result(result: Dict, upcoming_gw: int) -> bool:
+    """
+    Drop search results that clearly reference a distant gameweek — search
+    recency filters miss recrawled last-season articles (e.g. a "records you
+    might see in gameweek 37" piece surfacing before GW1).
+    """
+    text = f"{result.get('url', '')} {result.get('title', '')}"
+    for m in _GW_PATTERN.finditer(text):
+        gw = int(m.group(1) or m.group(2))
+        if 1 <= gw <= 38 and abs(gw - upcoming_gw) > 3:
+            return True
+    return False
 
 
 def build_search_queries(top_player_names: List[str], flagged_names: List[str]) -> List[str]:
     """Bounded query set: hard news + incentive-oriented searches."""
+    from datetime import datetime
+    from data.european_teams import get_current_season
+
+    # Date/season anchors keep the keyless fallback provider (no recency
+    # parameter) from surfacing last season's articles as fresh news
+    month = datetime.utcnow().strftime("%B %Y")
+    season = get_current_season()
     queries = [
-        "Premier League injury news team news this week",
-        "Premier League press conference team news",
+        f"Premier League injury news team news {month}",
+        f"Premier League press conference team news {month}",
         # Incentive hunting (user requirement: "mental goals")
-        "Premier League Golden Boot race",
-        "Premier League assist record chase",
-        "Premier League player chasing record milestone",
+        f"Premier League Golden Boot race {season}",
+        f"Premier League assist record chase {season}",
+        f"Premier League player chasing record milestone {season}",
     ]
     # Targeted searches for the most relevant individuals
     for name in flagged_names[:2]:
@@ -118,6 +149,7 @@ class NewsAgent(BaseAgent):
         if search is not None and getattr(search, "available", False):
             for query in build_search_queries(top_names, flagged_names):
                 results = search.search(query, max_results=4)
+                results = [r for r in results if not _is_stale_result(r, ctx.gameweek)]
                 if results:
                     search_used = True
                     lines = [f"### {query}"]
@@ -129,8 +161,12 @@ class NewsAgent(BaseAgent):
             for p in players if p.news and (p.minutes > 0 or float(p.selected_by_percent) >= 1.0)
         ][:25]
 
+        from datetime import datetime
+        from data.european_teams import get_current_season
+
         user_prompt = (
-            f"# Upcoming gameweek: GW{ctx.gameweek}\n\n"
+            f"# Today: {datetime.utcnow().strftime('%d %B %Y')} — {get_current_season()} season, "
+            f"upcoming gameweek: GW{ctx.gameweek}\n\n"
             "## Official FPL injury/news notes\n" + ("\n".join(fpl_notes) or "none")
             + "\n\n## Web search results\n"
             + ("\n\n".join(search_blocks) or "No search results available.")

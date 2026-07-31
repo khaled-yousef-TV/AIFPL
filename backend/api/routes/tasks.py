@@ -13,18 +13,20 @@ router = APIRouter()
 
 
 @router.get("")
-async def get_tasks(include_old: bool = False):
+async def get_tasks(include_old: bool = False, limit: int = 100):
     """
-    Get all tasks.
-    
+    Get all tasks plus per-type average durations.
+
     Args:
-        include_old: If True, include old completed tasks.
+        include_old: If True, include old completed tasks (newest first, capped at limit).
                      If False, only return tasks from last 5 minutes or running/pending tasks.
+        limit: Maximum number of tasks to return.
     """
     try:
         deps = get_dependencies()
-        tasks = deps.db_manager.get_all_tasks(include_old=include_old)
-        return {"tasks": tasks}
+        tasks = deps.db_manager.get_all_tasks(include_old=include_old, limit=limit)
+        stats = deps.db_manager.get_task_duration_stats()
+        return {"tasks": tasks, "duration_stats": stats}
     except Exception as e:
         logger.error(f"Error fetching tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))

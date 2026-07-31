@@ -7,9 +7,4 @@ export interface GameWeekInfo {
   next?: { id: number; name: string; deadline: string }
 }
 
-export interface SavedFplTeam {
-  teamId: number
-  teamName: string
-  lastImported: number // timestamp
-}
 

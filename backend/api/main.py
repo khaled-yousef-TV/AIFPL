@@ -584,6 +584,79 @@ def schedule_next_telegram_notification():
         logger.error(f"Error scheduling Telegram notification: {e}")
 
 
+def run_hermes_predeadline_job():
+    """
+    Force a fresh Hermes briefing shortly before the deadline, so the final
+    advice includes late press conferences and sharpened odds. The nightly
+    03:30 sweep is stale by Friday-afternoon pressers; this closes that gap.
+    """
+    try:
+        from hermes.config import load_hermes_config
+        config = load_hermes_config()
+        if not (config.daily_briefing and config.llm_configured):
+            return
+
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw:
+            return
+
+        # Run-once guard per gameweek (force=True bypasses the daily cache,
+        # so without this a restart inside the window would pay for a rerun)
+        ran_key = f"hermes_predeadline_ran_gw_{next_gw.id}"
+        if db_manager.get_setting(ran_key):
+            logger.info(f"Pre-deadline Hermes briefing for GW{next_gw.id} already ran, skipping")
+            return
+
+        from services.hermes_service import start_hermes_run
+        outcome = start_hermes_run("briefing", force=True)
+        db_manager.set_setting(ran_key, datetime.utcnow().isoformat())
+        logger.info(f"Pre-deadline Hermes briefing started for GW{next_gw.id}: {outcome.get('run_id')}")
+    except RuntimeError as e:
+        # A briefing is already in flight (UI button) — that run is fresh enough
+        logger.info(f"Pre-deadline Hermes briefing already in progress: {e}")
+    except Exception as e:
+        logger.error(f"Error in run_hermes_predeadline_job: {e}", exc_info=True)
+
+
+def schedule_next_hermes_predeadline():
+    """Schedule a forced Hermes briefing 3 hours before the next deadline."""
+    try:
+        from hermes.config import load_hermes_config
+        config = load_hermes_config()
+        if not (config.daily_briefing and config.llm_configured):
+            return
+
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw or not next_gw.deadline_time:
+            return
+
+        deadline = next_gw.deadline_time
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+
+        run_time = deadline - timedelta(hours=3)
+        now = datetime.now(deadline.tzinfo) if getattr(deadline, 'tzinfo', None) else datetime.now()
+
+        if run_time <= now < deadline:
+            # Inside the window (e.g. server just woke up): run immediately
+            logger.info(f"Within 3-hour window for GW{next_gw.id} — running pre-deadline Hermes briefing now")
+            run_hermes_predeadline_job()
+            return
+        if now >= deadline:
+            return
+
+        scheduler.add_job(
+            run_hermes_predeadline_job,
+            DateTrigger(run_date=run_time),
+            id="hermes_predeadline_briefing",
+            name="Hermes Briefing 3h Before Deadline",
+            replace_existing=True,
+        )
+        logger.info(f"Scheduled pre-deadline Hermes briefing for GW{next_gw.id} at {run_time}")
+    except Exception as e:
+        logger.error(f"Error scheduling pre-deadline Hermes briefing: {e}")
+
+
 def run_hermes_learning_job():
     """Daily Hermes learning cycle: evaluate finished-GW runs, update lessons."""
     try:
@@ -597,25 +670,29 @@ def run_hermes_learning_job():
         logger.error(f"Error in run_hermes_learning_job: {e}", exc_info=True)
 
 
-def run_hermes_briefing_job():
-    """Daily Hermes briefing (03:30 UTC, after the midnight snapshot + chip calcs)."""
+def run_hermes_nightly_job():
+    """
+    Nightly Hermes sweep (03:30 UTC, after the midnight snapshot): one run per
+    run type — briefing, squad, wildcard, free hit, triple captain,
+    differentials — so every UI tab has a fresh result each morning.
+
+    The sweep runs in its own thread (sequential inside, ~5-20 min total with
+    the LLM) so neither the cron worker nor startup blocks on it. Types that
+    already ran today are served from cache, making re-entry cheap.
+    """
     try:
         from hermes.config import load_hermes_config
         config = load_hermes_config()
         if not (config.daily_briefing and config.llm_configured):
-            logger.debug("Hermes daily briefing disabled or LLM unconfigured — skipping")
+            logger.info("Hermes nightly sweep disabled (HERMES_DAILY_BRIEFING) or LLM unconfigured — skipping")
             return
 
-        from services.hermes_service import start_hermes_run
-        outcome = start_hermes_run("briefing")  # serves today's cached run if it exists
-        if outcome.get("cached"):
-            logger.info("Hermes daily briefing already exists for today")
-        else:
-            logger.info(f"Hermes daily briefing started: {outcome['run_id']}")
-    except RuntimeError as e:
-        logger.info(f"Hermes briefing already in progress: {e}")
+        from threading import Thread
+        from services.hermes_service import run_nightly_hermes
+        Thread(target=run_nightly_hermes, daemon=True, name="HermesNightly").start()
+        logger.info("Hermes nightly sweep started")
     except Exception as e:
-        logger.error(f"Error in run_hermes_briefing_job: {e}", exc_info=True)
+        logger.error(f"Error in run_hermes_nightly_job: {e}", exc_info=True)
 
 
 async def check_and_run_missed_saves():
@@ -690,6 +767,16 @@ async def startup_event():
         else:
             logger.warning("Scheduler was already running!")
         
+        # Background threads never survive a restart: mark orphaned
+        # running/pending tasks and Hermes runs as failed so the UI doesn't
+        # show them as in-progress forever.
+        try:
+            cleared = db_manager.fail_interrupted_tasks()
+            if cleared:
+                logger.info(f"Marked {cleared} interrupted task(s)/run(s) as failed")
+        except Exception as e:
+            logger.error(f"Failed to clean up interrupted tasks: {e}")
+
         # Check for missed saves when server wakes up (for Render free tier spin-down scenario)
         await check_and_run_missed_saves()
         
@@ -699,8 +786,11 @@ async def startup_event():
         # Schedule the Telegram squad message (60 min before deadline)
         schedule_next_telegram_notification()
 
-        # Backfill today's Hermes briefing if enabled and missed (Render spin-down)
-        run_hermes_briefing_job()
+        # Schedule the fresh pre-deadline Hermes briefing (3h before deadline)
+        schedule_next_hermes_predeadline()
+
+        # Backfill today's Hermes nightly sweep if enabled and missed (Render spin-down)
+        run_hermes_nightly_job()
         
         # Also schedule a check every 6 hours to reschedule if needed
         from apscheduler.triggers.cron import CronTrigger
@@ -723,6 +813,13 @@ async def startup_event():
                 name="Check and Schedule Telegram Squad Message",
                 replace_existing=True
             )
+            scheduler.add_job(
+                schedule_next_hermes_predeadline,
+                CronTrigger(**trigger_kwargs),  # Every 6 hours
+                id="check_and_schedule_hermes_predeadline",
+                name="Check and Schedule Pre-Deadline Hermes Briefing",
+                replace_existing=True
+            )
             logger.info("Added check_and_schedule_selected_team job")
         except Exception as e:
             logger.error(f"Failed to add check_and_schedule_selected_team job: {e}", exc_info=True)
@@ -743,22 +840,22 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Failed to add save_daily_snapshot job: {e}", exc_info=True)
 
-        # Schedule daily Hermes briefing at 03:30 UTC (after snapshot + chip calcs).
-        # The job itself is gated on HERMES_DAILY_BRIEFING + LLM config.
+        # Schedule the nightly Hermes sweep at 03:30 UTC (after snapshot + chip
+        # calcs). The job itself is gated on HERMES_DAILY_BRIEFING + LLM config.
         try:
             trigger_kwargs = {"hour": 3, "minute": 30}
             if UTC:
                 trigger_kwargs["timezone"] = UTC
             scheduler.add_job(
-                run_hermes_briefing_job,
+                run_hermes_nightly_job,
                 CronTrigger(**trigger_kwargs),
-                id="hermes_daily_briefing",
-                name="Hermes Daily Briefing",
+                id="hermes_nightly",
+                name="Hermes Nightly Sweep (all run types)",
                 replace_existing=True
             )
-            logger.info("Added hermes_daily_briefing job")
+            logger.info("Added hermes_nightly job")
         except Exception as e:
-            logger.error(f"Failed to add hermes_daily_briefing job: {e}", exc_info=True)
+            logger.error(f"Failed to add hermes_nightly job: {e}", exc_info=True)
 
         # Daily Hermes learning cycle at 06:00 UTC (after final bonus/data checks).
         # Idempotent: skips GWs whose runs are already evaluated.

@@ -43,6 +43,10 @@ class TavilyProvider:
                     "max_results": max_results,
                     "search_depth": "basic",
                     "include_answer": False,
+                    # Recency guard: timeless queries ("assist record chase")
+                    # otherwise surface last season's articles as fresh news
+                    "topic": "news",
+                    "days": 7,
                 },
                 timeout=15,
             )

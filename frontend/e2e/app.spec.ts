@@ -1,43 +1,57 @@
 import { test, expect, Page } from '@playwright/test'
 
-// The known FPL team id used across the repo's check_* scripts.
-const TEST_TEAM_ID = '4843814'
+// The shell has two destinations: "This Week" (the Hermes report, with a
+// run-type view switcher inside it) and "Track Record". Sidebar (desktop)
+// uses full labels, the mobile tab bar short ones; both are always in the
+// DOM, so click whichever variant is actually visible.
+const NAV_SHORT_LABELS: Record<string, string> = {
+  'This Week': 'Week',
+  'Track Record': 'Record',
+}
 
-async function gotoHome(page: Page) {
+// The old run-type tabs are now pill views inside This Week.
+const RUN_VIEW_LABELS = ['Weekly Briefing', 'Best Squad', 'Wildcard', 'Free Hit', 'Triple Captain', 'Differentials']
+
+async function gotoApp(page: Page) {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Welcome to FPL Squad Suggester' })).toBeVisible()
+  // The briefing view is the default; its pill is always present.
+  await expect(page.locator('main').getByText('Weekly Briefing').first()).toBeVisible()
 }
 
-// Mobile tab bar uses short labels, the desktop sidebar uses full ones; both
-// are always in the DOM, so click whichever variant is actually visible.
-const TAB_FULL_LABELS: Record<string, string> = {
-  WC: 'Wildcard',
-  TC: 'Triple Captain',
-  Picks: 'Top Picks',
-  Diffs: 'Differentials',
-  'Free Hit': 'Free Hit of the Week',
-}
-
-async function openTab(page: Page, shortLabel: string) {
-  const full = TAB_FULL_LABELS[shortLabel] ?? shortLabel
+async function clickVisible(page: Page, fullLabel: string, short?: string) {
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = short
+    ? new RegExp(`^(${escape(fullLabel)}|${escape(short)})$`)
+    : new RegExp(`^${escape(fullLabel)}$`)
   await page
-    .getByRole('button', { name: new RegExp(`^(${escape(shortLabel)}|${escape(full)})$`) })
+    .getByRole('button', { name: pattern })
     .filter({ visible: true })
     .first()
     .click()
 }
 
+async function openNav(page: Page, fullLabel: string) {
+  await clickVisible(page, fullLabel, NAV_SHORT_LABELS[fullLabel])
+}
+
 test.describe('App shell', () => {
-  test('home page renders the navigation cards', async ({ page }) => {
-    await gotoHome(page)
-    for (const card of ['Hermes', 'Transfers', 'Wildcard', 'Free Hit of the Week', 'Triple Captain', 'Top Picks', 'Differentials', 'Tasks']) {
-      await expect(page.getByRole('button', { name: new RegExp(card) }).first()).toBeVisible()
+  test('sidebar collapses to This Week and Track Record', async ({ page }) => {
+    await gotoApp(page)
+    for (const label of Object.keys(NAV_SHORT_LABELS)) {
+      await expect(
+        page.getByRole('button', { name: new RegExp(label) }).first(),
+      ).toBeAttached()
+    }
+    // Old standalone tabs are gone from the nav (run types live as view
+    // pills inside main, Tasks became a header indicator).
+    const aside = page.locator('aside')
+    for (const gone of ['Tasks', 'Transfers', 'Top Picks', 'Wildcard']) {
+      await expect(aside.getByRole('button', { name: gone, exact: true })).toHaveCount(0)
     }
   })
 
   test('header resolves to a gameweek label, never stuck on Loading', async ({ page }) => {
-    await gotoHome(page)
+    await gotoApp(page)
     const label = page.locator('aside p').first()
     // In-season: "GW<n>". Off-season: "Season finished". Never an eternal "Loading...".
     await expect(label).toHaveText(/GW\d+|Season finished/, { timeout: 15_000 })
@@ -48,28 +62,69 @@ test.describe('App shell', () => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text())
     })
-    await gotoHome(page)
+    await gotoApp(page)
     await page.waitForTimeout(2_000)
-    // Expected-empty-state fetches (e.g. TC recs before the midnight job) 404 by design.
+    // Expected-empty-state fetches (fresh database) 404 by design.
     const real = errors.filter((e) => !/404|Failed to load resource/.test(e))
     expect(real).toEqual([])
   })
+
+  test('hash routing deep-links into run views and Track Record', async ({ page }) => {
+    await page.goto('/#differentials')
+    // The differentials pill must be the selected view.
+    await expect(page.locator('main').getByText('Differentials').first()).toBeVisible()
+    await page.goto('/#insights')
+    await expect(
+      page.locator('main').getByText(/Track record|calibration|No scored runs|Backtest/i).first(),
+    ).toBeVisible({ timeout: 15_000 })
+  })
 })
 
-test.describe('Hermes', () => {
-  test('hermes tab shows run types and agent signals for the latest run', async ({ page }) => {
-    await gotoHome(page)
-    await openTab(page, 'Hermes')
-    await expect(page.getByText('Ask Hermes').first()).toBeVisible()
-    for (const runType of ['Weekly Briefing', 'Best Squad', 'Wildcard', 'Free Hit', 'Triple Captain', 'Differentials']) {
-      // Scope to main — nav bars contain hidden spans with the same labels.
-      await expect(page.locator('main').getByText(runType, { exact: true }).first()).toBeVisible()
+test.describe('This Week report', () => {
+  test('every run view renders a report or an honest empty state', async ({ page }) => {
+    await gotoApp(page)
+    for (const label of RUN_VIEW_LABELS) {
+      await clickVisible(page, label)
+      // Either a verdict header + evidence, a running card, or the empty state.
+      const outcome = page
+        .locator('main')
+        .getByText(/Evidence — agent signals|No .* run yet|Hermes is thinking|Running/i)
+      await expect(outcome.first()).toBeVisible({ timeout: 15_000 })
+    }
+  })
+
+  test('completed run shows verdict header and collapsible full report', async ({ page }) => {
+    await gotoApp(page)
+    const evidence = page.getByText('Evidence — agent signals')
+    // Only present when a run exists; skip otherwise (fresh database).
+    if ((await evidence.count()) === 0) test.skip(true, 'no Hermes run stored yet')
+    // Verdict headline is an h2 in the verdict card.
+    await expect(page.locator('main h2').first()).toBeVisible()
+    // Narrative starts collapsed and expands.
+    const fullReport = page.getByRole('button', { name: /Full report/ })
+    if ((await fullReport.count()) > 0) {
+      await fullReport.first().click()
+      await expect(page.locator('main').getByText(/./).first()).toBeVisible()
+    }
+  })
+
+  test('run button reflects in-flight state instead of allowing duplicates', async ({ page }) => {
+    await gotoApp(page)
+    const askButton = page.getByRole('button', { name: /Ask Hermes|Hermes is thinking/ }).first()
+    await expect(askButton).toBeVisible()
+    // If a run is already active (e.g. nightly sweep), the button must be disabled.
+    const label = await askButton.innerText()
+    if (/thinking/i.test(label)) {
+      await expect(askButton).toBeDisabled()
+      // Navigating away and back must NOT re-enable it.
+      await openNav(page, 'Track Record')
+      await openNav(page, 'This Week')
+      await expect(page.getByRole('button', { name: /Hermes is thinking/ }).first()).toBeDisabled()
     }
   })
 
   test('latest run renders agent signal rows that expand', async ({ page }) => {
-    await gotoHome(page)
-    await openTab(page, 'Hermes')
+    await gotoApp(page)
     const agentRow = page.getByRole('button', { name: /Game Mechanics/ })
     // Only present when a run exists; skip otherwise (fresh database).
     if ((await agentRow.count()) === 0) test.skip(true, 'no Hermes run stored yet')
@@ -77,104 +132,23 @@ test.describe('Hermes', () => {
     await expect(page.getByText(/Season phase|deadline/i).first()).toBeVisible()
   })
 
-  test('never renders an empty Chip advice section', async ({ page }) => {
-    await gotoHome(page)
-    await openTab(page, 'Hermes')
-    const heading = page.getByRole('heading', { name: 'Chip advice' })
+  test('chips panel never renders empty', async ({ page }) => {
+    await gotoApp(page)
+    const heading = page.getByRole('heading', { name: 'Chips' })
     if ((await heading.count()) > 0) {
-      // If the section exists it must have visible content under it.
       const section = heading.first().locator('..')
-      const text = (await section.innerText()).replace('Chip advice', '').trim()
+      const text = (await section.innerText()).replace('Chips', '').trim()
       expect(text.length).toBeGreaterThan(0)
     }
   })
 })
 
-test.describe('Transfers', () => {
-  test('player search finds and adds a player to the squad', async ({ page }) => {
-    await gotoHome(page)
-    await openTab(page, 'Transfers')
-    await page.evaluate(() => localStorage.clear())
-    await page.reload()
-    await openTab(page, 'Transfers')
-
-    await page.getByPlaceholder(/Search player name or team/).fill('Haaland')
-    const result = page.getByRole('button', { name: /Haaland/ }).first()
-    await expect(result).toBeVisible()
-    await result.click()
-    await expect(page.getByText('Your Squad (1/15)')).toBeVisible()
-  })
-
-  test('invalid FPL team import shows an inline error, not a blocking dialog or crash', async ({ page }) => {
-    await gotoHome(page)
-    await openTab(page, 'Transfers')
-
-    // A native alert() would hang the test; fail loudly instead.
-    page.on('dialog', async (dialog) => {
-      await dialog.dismiss()
-      throw new Error(`Unexpected native dialog: ${dialog.message()}`)
-    })
-
-    await page.getByPlaceholder('Enter FPL Team ID').fill('999999999')
-    await page.getByRole('button', { name: 'Import', exact: true }).click()
-
-    await expect(page.getByRole('status')).toContainText(/No team data found|Failed to import/, { timeout: 20_000 })
-    // The app shell must survive (no full-screen error page).
-    await expect(page.locator('aside')).toBeVisible()
-  })
-
-  test('imports a real FPL team and gets transfer suggestions', async ({ page }) => {
-    test.setTimeout(240_000) // suggestion generation runs the predictor (~2 min cold)
-    await gotoHome(page)
-    await openTab(page, 'Transfers')
-
-    await page.getByPlaceholder('Enter FPL Team ID').fill(TEST_TEAM_ID)
-    await page.getByRole('button', { name: 'Import', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText('Successfully imported', { timeout: 30_000 })
-    await expect(page.getByText('Your Squad (15/15)')).toBeVisible()
-
-    await page.getByRole('button', { name: 'Get Suggestions' }).click()
+test.describe('Track record', () => {
+  test('insights tab renders calibration or an honest empty state', async ({ page }) => {
+    await gotoApp(page)
+    await openNav(page, 'Track Record')
     await expect(
-      page.getByText('Transfer Suggestions').first().or(page.getByRole('alert').first())
-    ).toBeVisible({ timeout: 220_000 })
-  })
-})
-
-test.describe('Wildcard trajectory', () => {
-  test('generate either succeeds or explains why, never a bare try-again', async ({ page }) => {
-    test.setTimeout(180_000)
-    await gotoHome(page)
-    await openTab(page, 'WC')
-    await expect(page.getByText('Wildcard Trajectory Optimizer')).toBeVisible()
-
-    await page.getByRole('button', { name: 'Generate Trajectory' }).click()
-    const outcome = page
-      .getByText(/No upcoming gameweek|already in progress/)
-      .or(page.getByText(/Total Predicted|Optimal Squad|Starting XI/).first())
-    await expect(outcome.first()).toBeVisible({ timeout: 150_000 })
-    await expect(page.getByText('Failed to generate wildcard trajectory. Please try again.')).toHaveCount(0)
-  })
-})
-
-test.describe('Read-only tabs', () => {
-  test('Picks, Diffs, Free Hit, TC and Tasks all render content or an honest empty state', async ({ page }) => {
-    await gotoHome(page)
-
-    await openTab(page, 'Picks')
-    await expect(page.getByText('Top Goalkeepers')).toBeVisible({ timeout: 30_000 })
-
-    await openTab(page, 'Diffs')
-    await expect(page.getByText(/Differentials \(Under/)).toBeVisible({ timeout: 30_000 })
-
-    await openTab(page, 'Free Hit')
-    await expect(page.getByText(/Free Hit of the Week/).first()).toBeVisible()
-
-    await openTab(page, 'TC')
-    await expect(
-      page.getByText('Triple Captain Recommendations').or(page.getByText(/No recommendations available/)).first()
-    ).toBeVisible()
-
-    await openTab(page, 'Tasks')
-    await expect(page.getByText('Background Tasks').first()).toBeVisible()
+      page.locator('main').getByText(/Track record|calibration|No scored runs|Backtest/i).first(),
+    ).toBeVisible({ timeout: 15_000 })
   })
 })

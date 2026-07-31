@@ -80,7 +80,8 @@ class Team(BaseModel):
     name: str
     short_name: str
     code: int
-    strength: int
+    # Null in the preseason window before FPL seeds strengths for the new season
+    strength: Optional[int] = None
     strength_overall_home: int
     strength_overall_away: int
     strength_attack_home: int

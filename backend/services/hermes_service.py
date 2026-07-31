@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 _running_lock = threading.Lock()
 _running_types = set()
 
+# Run types produced by the nightly sweep — one per UI tab.
+NIGHTLY_RUN_TYPES = [
+    "briefing", "squad", "wildcard", "free_hit", "triple_captain", "differentials",
+]
+
 
 def get_hermes_status() -> Dict:
     """Status for frontend gating."""
@@ -45,6 +50,7 @@ def start_hermes_run(
     user_player_ids: Optional[List[int]] = None,
     budget: float = 100.0,
     force: bool = False,
+    wait: bool = False,
 ) -> Dict:
     """
     Start a Hermes run in a background thread.
@@ -52,6 +58,9 @@ def start_hermes_run(
     Returns {task_id, run_id, cached} — when a completed run for the same
     (run_type, gameweek, day) exists and force is False, returns it
     without spawning a new run.
+
+    wait=True blocks until the run finishes (for the nightly sweep, which
+    must run the types sequentially — never from a request handler).
     """
     deps = get_dependencies()
     db = deps.db_manager
@@ -103,7 +112,34 @@ def start_hermes_run(
             _running_types.discard(run_type)
         raise
 
+    if wait:
+        thread.join()
+
     return {"task_id": task_id, "run_id": run_id, "cached": False}
+
+
+def run_nightly_hermes(force: bool = False) -> Dict[str, str]:
+    """
+    Run every nightly run type sequentially (one LLM run at a time).
+
+    Called by the 03:30 UTC cron and the startup backfill. Runs already
+    produced today are served from cache, so re-entry is cheap — a restart
+    mid-sweep only redoes the types that didn't finish.
+    """
+    results: Dict[str, str] = {}
+    for run_type in NIGHTLY_RUN_TYPES:
+        try:
+            outcome = start_hermes_run(run_type, force=force, wait=True)
+            results[run_type] = "cached" if outcome.get("cached") else "ran"
+        except RuntimeError as e:
+            # Someone (UI button) is already running this type — that run
+            # becomes today's cached result, nothing to redo.
+            results[run_type] = f"already in progress: {e}"
+        except Exception as e:
+            logger.error(f"Nightly Hermes '{run_type}' failed: {e}", exc_info=True)
+            results[run_type] = f"error: {e}"
+    logger.info(f"Nightly Hermes sweep finished: {results}")
+    return results
 
 
 def _execute_run(

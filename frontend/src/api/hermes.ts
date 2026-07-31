@@ -67,6 +67,24 @@ export async function fetchHermesStatus(): Promise<HermesStatus> {
   return apiRequest<HermesStatus>('/api/hermes/status')
 }
 
+export interface LlmProvidersResponse {
+  /** null = legacy single-provider LLM_* config */
+  active: string | null
+  active_model: string | null
+  providers: Array<{ id: string; model: string | null; configured: boolean }>
+}
+
+export async function fetchLlmProviders(): Promise<LlmProvidersResponse> {
+  return apiRequest<LlmProvidersResponse>('/api/hermes/providers')
+}
+
+export async function setLlmProvider(provider: string): Promise<{ active: string; active_model: string | null }> {
+  return apiRequest('/api/hermes/provider', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  })
+}
+
 export async function fetchSignals(topN: number = 40, agents?: string[]): Promise<SignalsResponse> {
   const params = new URLSearchParams({ top_n: String(topN) })
   if (agents?.length) params.set('agents', agents.join(','))
@@ -94,6 +112,26 @@ export async function fetchHermesRun(runId: string): Promise<HermesRun> {
 export async function fetchLatestHermesRun(runType?: HermesRunType): Promise<HermesRun> {
   const params = runType ? `?run_type=${runType}` : ''
   return apiRequest<HermesRun>(`/api/hermes/latest${params}`)
+}
+
+/** Light payload for a pending/running run, with the task's progress joined in. */
+export interface ActiveHermesRun {
+  run_id: string
+  run_type: HermesRunType
+  gameweek: number
+  status: 'pending' | 'running'
+  progress: number
+  created_at: string | null
+}
+
+export async function fetchLatestAllHermesRuns(): Promise<Record<string, HermesRun | null>> {
+  const res = await apiRequest<{ runs: Record<string, HermesRun | null> }>('/api/hermes/latest-all')
+  return res.runs
+}
+
+export async function fetchActiveHermesRuns(): Promise<ActiveHermesRun[]> {
+  const res = await apiRequest<{ active: ActiveHermesRun[] }>('/api/hermes/active')
+  return res.active
 }
 
 export interface CalibrationProfile {
