@@ -379,33 +379,46 @@ const PitchView: React.FC<{ squad: any; adjustments: Adjustment[] }> = ({ squad,
 
 // ==================== Right column panels ====================
 
-const CaptaincyPanel: React.FC<{ ranking: any[]; playerIndex: Map<number, any> }> = ({ ranking, playerIndex }) => {
-  const rows = ranking.slice(0, 5).map((c: any, i: number) => {
+const CaptaincyPanel: React.FC<{
+  ranking: any[]
+  playerIndex: Map<number, any>
+  squad: any
+}> = ({ ranking, playerIndex, squad }) => {
+  const xiIds = new Set<number>((squad?.starting_xi || []).map((p: any) => p.id))
+  const actualCaptainId: number | undefined = squad?.captain?.id
+  // The LLM's ranking often includes players outside the optimizer's £100m
+  // squad — mark the actual squad captain, and flag out-of-squad picks as
+  // "advisory" so the (C) badge always matches the pitch.
+  const rows = ranking.slice(0, 5).map((c: any) => {
     const detail = playerIndex.get(c.id)
     const predicted = detail?.predicted != null ? Number(detail.predicted) : null
-    return { ...c, predicted, rank: i }
+    return { ...c, predicted, inSquad: xiIds.has(c.id), isActualCaptain: c.id === actualCaptainId }
   })
   const max = Math.max(...rows.map((r) => r.predicted ?? 0), 0)
+  const captainOutsideSquad = actualCaptainId != null && ranking.length > 0 && ranking[0].id !== actualCaptainId
 
   return (
     <div className="card">
       <h4 className="text-sm font-medium text-content-muted mb-3">Captaincy</h4>
       <div className="space-y-2.5">
-        {rows.map((r) => {
-          // Fall back to rank-based widths when predictions aren't attached
-          const width = r.predicted != null && max > 0 ? (r.predicted / max) * 100 : 100 - r.rank * 15
+        {rows.map((r, i) => {
+          const width = r.predicted != null && max > 0 ? (r.predicted / max) * 100 : 100 - i * 15
+          const highlight = r.isActualCaptain
           return (
-            <div key={r.id}>
+            <div key={r.id} className={r.inSquad ? '' : 'opacity-60'}>
               <div className="flex justify-between text-xs mb-1">
-                <span className={r.rank === 0 ? 'text-magenta font-semibold' : 'text-content'}>
-                  {r.rank === 0 && '(C) '}
+                <span className={highlight ? 'text-magenta font-semibold' : 'text-content'}>
+                  {highlight && '(C) '}
                   {r.name}
+                  {!r.inSquad && (
+                    <span className="text-content-subtle ml-1.5">· not in squad</span>
+                  )}
                 </span>
                 {r.predicted != null && <span className="text-content-subtle">{r.predicted.toFixed(1)}</span>}
               </div>
               <div className="h-1.5 rounded-full bg-[#1a1a2e] overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${r.rank === 0 ? 'bg-magenta' : 'bg-[#4a4a6e]'}`}
+                  className={`h-full rounded-full ${highlight ? 'bg-magenta' : 'bg-[#4a4a6e]'}`}
                   style={{ width: `${Math.max(6, width)}%` }}
                 />
               </div>
@@ -413,6 +426,11 @@ const CaptaincyPanel: React.FC<{ ranking: any[]; playerIndex: Map<number, any> }
           )
         })}
       </div>
+      {captainOutsideSquad && (
+        <p className="text-xs text-content-subtle mt-3 leading-relaxed">
+          Hermes' top pick isn't in the £100m squad — {squad?.captain?.name} captains from the XI.
+        </p>
+      )}
     </div>
   )
 }
@@ -751,7 +769,11 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
             )}
             <div className={`space-y-4 ${run.result?.squad ? 'lg:col-span-2' : 'lg:col-span-5'}`}>
               {run.result?.captain_ranking?.length > 0 && (
-                <CaptaincyPanel ranking={run.result.captain_ranking} playerIndex={playerIndex} />
+                <CaptaincyPanel
+                  ranking={run.result.captain_ranking}
+                  playerIndex={playerIndex}
+                  squad={run.result.squad}
+                />
               )}
               {(run.result?.chip_advice || run.result?.triple_captain) && (
                 <ChipsPanel chipAdvice={run.result.chip_advice} tripleCaptain={run.result.triple_captain} />
