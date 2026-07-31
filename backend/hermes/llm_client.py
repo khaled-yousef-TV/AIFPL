@@ -33,15 +33,18 @@ class LLMClient:
         # the pattern misses.
         model = (config.model or "").lower()
         is_openai = "api.openai.com" in (config.base_url or "")
-        self._supports_temperature = not (
-            is_openai and (model.startswith(("gpt-5", "o1", "o3", "o4-mini", "o4")))
-        )
-        self._reasoning_budget_floor = 0  # raised on first reasoning-starve event
+        is_reasoning = is_openai and model.startswith(("gpt-5", "o1", "o3", "o4-mini", "o4"))
+        self._supports_temperature = not is_reasoning
+        # Reasoning models burn most tokens on invisible reasoning. Seed a
+        # sensible floor so the first call has room for actual output —
+        # otherwise every run wastes 30-90s on a small-budget retry.
+        self._reasoning_budget_floor = self._REASONING_BUDGET_FLOOR if is_reasoning else 0
 
     # Reasoning models spend most of the budget on invisible reasoning
     # tokens before emitting any visible content. Give them enough headroom
     # that a briefing (target ~2000 output tokens) has room after reasoning.
     _REASONING_BUDGET_FLOOR = 12000
+    _REASONING_BUDGET_CEILING = 32000
 
     def _create(self, client, **kwargs):
         """
@@ -74,7 +77,19 @@ class LLMClient:
             # larger budget so the visible answer actually fits.
             if not self._is_reasoning_starved(response):
                 return response
-            new_budget = max(self._REASONING_BUDGET_FLOOR, self._current_budget(kwargs) * 3)
+            current = self._current_budget(kwargs)
+            new_budget = min(
+                self._REASONING_BUDGET_CEILING,
+                max(self._REASONING_BUDGET_FLOOR, current * 3),
+            )
+            if new_budget <= current:
+                # Already at the ceiling — one final attempt with the same
+                # budget would just repeat the same failure; give up
+                logger.warning(
+                    f"Reasoning model stayed starved at {current}-token ceiling; "
+                    "giving up so the run can degrade cleanly."
+                )
+                return response
             self._reasoning_budget_floor = new_budget  # remember for later calls
             token_key = "max_completion_tokens" if "max_completion_tokens" in kwargs else "max_tokens"
             logger.warning(
