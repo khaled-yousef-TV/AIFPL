@@ -125,9 +125,10 @@ class HermesOrchestrator:
 
         # 3. Apply adjustments through the existing optimizers
         progress(75, "Optimizing with adjusted predictions")
+        names = {p.id: p.web_name for p in deps.fpl_client.get_players()}
         result = self._apply(
             run_type, adjustments, deps, budget, gameweek, reports,
-            trust_weights=trust_weights,
+            names=names, trust_weights=trust_weights,
         )
 
         progress(95, "Finalizing")
@@ -207,6 +208,7 @@ class HermesOrchestrator:
         budget: float,
         gameweek: int,
         reports: Dict[str, AgentReport],
+        names: Dict[int, str],
         trust_weights: Optional[Dict[str, float]] = None,
     ) -> Dict:
         """
@@ -220,7 +222,6 @@ class HermesOrchestrator:
         from services.squad_service import assemble_squad_result, compute_player_predictions
 
         result: Dict = {}
-        names = {p.id: p.web_name for p in deps.fpl_client.get_players()}
         trust = trust_weights or {}
 
         if run_type in SQUAD_RUN_TYPES:
