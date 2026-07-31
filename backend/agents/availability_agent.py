@@ -48,6 +48,36 @@ class AvailabilityAgent(BaseAgent):
         short_names = {t.id: t.short_name for t in teams}
         user_ids = set(ctx.user_player_ids)
 
+        # Bench-keeper detection: FPL doesn't mark backups, they look
+        # identical to starters (status=a, no news). Cheap optimizers then
+        # pick £4.5m Benitez over £5.0m Henderson. Ownership + prior-season
+        # minutes are the community's consensus on who actually starts.
+        auto_excluded_ids = set()
+        gks_by_team = {}
+        for p in players:
+            if p.element_type == 1:  # goalkeeper
+                gks_by_team.setdefault(p.team, []).append(p)
+        for team_gks in gks_by_team.values():
+            if len(team_gks) <= 1:
+                continue
+            # Rank starter candidates by (minutes, ownership) — starter
+            # gets the tie. During preseason FPL still shows last season's
+            # cumulative minutes, which is exactly the signal we want.
+            top = max(
+                team_gks,
+                key=lambda x: (x.minutes, float(x.selected_by_percent)),
+            )
+            for gk in team_gks:
+                if gk.id == top.id or gk.id in user_ids:
+                    continue
+                # A backup keeper has near-zero ownership AND far fewer
+                # minutes than the presumed starter
+                if (
+                    float(gk.selected_by_percent) < 1.0
+                    and gk.minutes < max(900, top.minutes // 3)
+                ):
+                    auto_excluded_ids.add(gk.id)
+
         next_gw = client.get_next_gameweek()
         deadline = next_gw.deadline_time if next_gw else None
 
@@ -120,9 +150,24 @@ class AvailabilityAgent(BaseAgent):
             t for t, r in rotation_cache.items() if r.risk_level == "high"
         )
 
+        auto_excluded = [
+            AvailabilityFlag(
+                id=p.id,
+                name=p.web_name,
+                team=short_names.get(p.team, "???"),
+                status=p.status,
+                chance_of_playing=p.chance_of_playing_next_round,
+                news=(p.news or "")[:120],
+                flag_reason=f"Bench keeper (own={p.selected_by_percent}%, {p.minutes} mins)",
+            )
+            for p in players
+            if p.id in auto_excluded_ids
+        ]
+
         payload = AvailabilitySignals(
             flagged=flagged,
             high_rotation_risk_teams=high_rotation,
+            auto_excluded=auto_excluded,
         )
 
         outs = sum(1 for f in flagged if status_order.get(f.status, 2) == 0)

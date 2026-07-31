@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Brain, Loader2, RefreshCw, TrendingUp } from 'lucide-react'
+import { Brain, Loader2, RefreshCw } from 'lucide-react'
 
 import type { GameWeekInfo } from './types'
 import { FPLLogo } from './components'
-import { HermesInsights, ThisWeekTab } from './tabs'
+import { ThisWeekTab } from './tabs'
 import { HERMES_RUN_TYPES, useHermes } from './hooks/useHermes'
 import { useTasks } from './hooks/useTasks'
 import type { HermesRunType } from './api/hermes'
@@ -12,11 +12,10 @@ import type { HermesRunType } from './api/hermes'
 // In local dev it defaults to http://localhost:8001
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
-// Two destinations: this week's Hermes report, and how it has performed.
-// Everything else (run types, tasks) lives inside those.
+// Single destination now: This Week's Hermes report. Run-type views live
+// inside it as pills; Tasks is the header "working…" indicator.
 const NAV_TABS = [
   { id: 'thisweek', icon: Brain, label: 'This Week', shortLabel: 'Week', color: 'text-purple-400' },
-  { id: 'insights', icon: TrendingUp, label: 'Track Record', shortLabel: 'Record', color: 'text-green-400' },
 ]
 
 const RUN_TYPE_IDS = HERMES_RUN_TYPES.map((rt) => rt.value as string)
@@ -24,7 +23,6 @@ const DEFAULT_VIEW: HermesRunType = 'briefing'
 
 /** Map a URL hash to {tab, view}: run-type hashes deep-link into This Week. */
 function parseHash(hash: string): { tab: string; view: HermesRunType } {
-  if (hash === 'insights') return { tab: 'insights', view: DEFAULT_VIEW }
   if (RUN_TYPE_IDS.includes(hash)) return { tab: 'thisweek', view: hash as HermesRunType }
   return { tab: 'thisweek', view: DEFAULT_VIEW }
 }
@@ -57,8 +55,7 @@ function App() {
 
   // Sync URL hash when the location changes
   useEffect(() => {
-    const expectedHash =
-      activeTab === 'insights' ? 'insights' : view === DEFAULT_VIEW ? '' : view
+    const expectedHash = view === DEFAULT_VIEW ? '' : view
     const currentHash = window.location.hash.slice(1)
     if (currentHash !== expectedHash) {
       const newUrl = expectedHash === '' ? window.location.pathname : `#${expectedHash}`
@@ -310,7 +307,6 @@ function App() {
             />
           )}
 
-          {activeTab === 'insights' && <HermesInsights />}
         </main>
 
         {/* Footer */}

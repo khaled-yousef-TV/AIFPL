@@ -164,6 +164,10 @@ class AvailabilityFlag(BaseModel):
 class AvailabilitySignals(BaseModel):
     flagged: List[AvailabilityFlag] = Field(default_factory=list)
     high_rotation_risk_teams: List[str] = Field(default_factory=list)
+    # Deterministic hard-excludes fed straight into the optimizer, on top of
+    # anything the LLM chooses to exclude. Preseason bench keepers are the
+    # main case — same "status=a, no news" as starters, but 0.1% ownership.
+    auto_excluded: List[AvailabilityFlag] = Field(default_factory=list)
 
 
 # ==================== Form agent ====================

@@ -1,13 +1,9 @@
 import { test, expect, Page } from '@playwright/test'
 
-// The shell has two destinations: "This Week" (the Hermes report, with a
-// run-type view switcher inside it) and "Track Record". Sidebar (desktop)
-// uses full labels, the mobile tab bar short ones; both are always in the
-// DOM, so click whichever variant is actually visible.
-const NAV_SHORT_LABELS: Record<string, string> = {
-  'This Week': 'Week',
-  'Track Record': 'Record',
-}
+// The shell has one destination: "This Week" (the Hermes report, with a
+// run-type view switcher inside it). Sidebar (desktop) uses full labels,
+// the mobile tab bar short ones; both are always in the DOM, so click
+// whichever variant is actually visible.
 
 // The old run-type tabs are now pill views inside This Week.
 const RUN_VIEW_LABELS = ['Weekly Briefing', 'Best Squad', 'Wildcard', 'Free Hit', 'Triple Captain', 'Differentials']
@@ -30,22 +26,18 @@ async function clickVisible(page: Page, fullLabel: string, short?: string) {
     .click()
 }
 
-async function openNav(page: Page, fullLabel: string) {
-  await clickVisible(page, fullLabel, NAV_SHORT_LABELS[fullLabel])
-}
 
 test.describe('App shell', () => {
-  test('sidebar collapses to This Week and Track Record', async ({ page }) => {
+  test('sidebar collapses to a single This Week entry', async ({ page }) => {
     await gotoApp(page)
-    for (const label of Object.keys(NAV_SHORT_LABELS)) {
-      await expect(
-        page.getByRole('button', { name: new RegExp(label) }).first(),
-      ).toBeAttached()
-    }
+    await expect(
+      page.getByRole('button', { name: /This Week|Week/ }).first(),
+    ).toBeAttached()
     // Old standalone tabs are gone from the nav (run types live as view
-    // pills inside main, Tasks became a header indicator).
+    // pills inside main, Tasks became a header indicator, Track Record
+    // has been removed).
     const aside = page.locator('aside')
-    for (const gone of ['Tasks', 'Transfers', 'Top Picks', 'Wildcard']) {
+    for (const gone of ['Tasks', 'Transfers', 'Top Picks', 'Wildcard', 'Track Record']) {
       await expect(aside.getByRole('button', { name: gone, exact: true })).toHaveCount(0)
     }
   })
@@ -69,14 +61,12 @@ test.describe('App shell', () => {
     expect(real).toEqual([])
   })
 
-  test('hash routing deep-links into run views and Track Record', async ({ page }) => {
+  test('hash routing deep-links into run views', async ({ page }) => {
     await page.goto('/#differentials')
     // The differentials pill must be the selected view.
     await expect(page.locator('main').getByText('Differentials').first()).toBeVisible()
-    await page.goto('/#insights')
-    await expect(
-      page.locator('main').getByText(/Track record|calibration|No scored runs|Backtest/i).first(),
-    ).toBeVisible({ timeout: 15_000 })
+    await page.goto('/#wildcard')
+    await expect(page.locator('main').getByText('Wildcard').first()).toBeVisible()
   })
 })
 
@@ -116,9 +106,9 @@ test.describe('This Week report', () => {
     const label = await askButton.innerText()
     if (/thinking/i.test(label)) {
       await expect(askButton).toBeDisabled()
-      // Navigating away and back must NOT re-enable it.
-      await openNav(page, 'Track Record')
-      await openNav(page, 'This Week')
+      // Switching views via pills must NOT re-enable it.
+      await clickVisible(page, 'Wildcard')
+      await clickVisible(page, 'Weekly Briefing')
       await expect(page.getByRole('button', { name: /Hermes is thinking/ }).first()).toBeDisabled()
     }
   })
@@ -143,12 +133,3 @@ test.describe('This Week report', () => {
   })
 })
 
-test.describe('Track record', () => {
-  test('insights tab renders calibration or an honest empty state', async ({ page }) => {
-    await gotoApp(page)
-    await openNav(page, 'Track Record')
-    await expect(
-      page.locator('main').getByText(/Track record|calibration|No scored runs|Backtest/i).first(),
-    ).toBeVisible({ timeout: 15_000 })
-  })
-})

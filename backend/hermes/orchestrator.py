@@ -228,6 +228,12 @@ class HermesOrchestrator:
             predictions = compute_player_predictions(deps.predictor_heuristic)
 
             locked, excluded = [], []
+            # Deterministic auto-excludes from availability (preseason bench
+            # keepers etc.) — applied even when the LLM missed or degraded.
+            avail = reports.get("availability")
+            if avail:
+                for f in avail.payload.get("auto_excluded", []) or []:
+                    excluded.append(f["id"] if isinstance(f, dict) else f.id)
             if adjustments:
                 multipliers = {}
                 for adj in adjustments.adjustments:
