@@ -1,25 +1,117 @@
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
 
 import type { GameWeekInfo } from './types'
 import { ThisWeekTab } from './tabs'
-import { HERMES_RUN_TYPES, useHermes } from './hooks/useHermes'
+import SeasonView from './tabs/SeasonView'
+import HermesAccountability from './tabs/HermesAccountability'
+import { useHermes } from './hooks/useHermes'
 import { useTasks } from './hooks/useTasks'
 import type { HermesRunType } from './api/hermes'
+import {
+  DEFAULT_ROUTE,
+  PRIMARY_TABS,
+  SCENARIO_ITEMS,
+  hashToRoute,
+  routeToHash,
+  type Route,
+} from './nav'
 
 // In production set this to your hosted backend, e.g. https://api.fplai.nl
 // In local dev it defaults to http://localhost:8001
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8001'
 
-const RUN_TYPE_IDS = HERMES_RUN_TYPES.map((rt) => rt.value as string)
-const DEFAULT_VIEW: HermesRunType = 'briefing'
-
-/** Map a URL hash to a run-type view. */
-function parseHash(hash: string): HermesRunType {
-  return RUN_TYPE_IDS.includes(hash) ? (hash as HermesRunType) : DEFAULT_VIEW
-}
-
 const pad = (n: number) => String(n).padStart(2, '0')
+
+
+/**
+ * Four primary tabs + a Scenarios overflow menu. Replaces the old flat
+ * 8-item run-type nav — those run types now live under Scenarios except
+ * for `tracked` (the Squad tab) and `briefing` (the This Week tab).
+ */
+const TopNav: React.FC<{
+  route: Route
+  onRoute: (r: Route) => void
+  activeByType: Record<string, unknown>
+}> = ({ route, onRoute, activeByType }) => {
+  const [openMenu, setOpenMenu] = useState(false)
+  const scenarioActive =
+    route.top === 'scenario' &&
+    SCENARIO_ITEMS.find((s) => s.runType === route.runType)?.label
+  const anyScenarioRunning = SCENARIO_ITEMS.some((s) => activeByType[s.runType])
+
+  // Close on outside-click / Escape. The onMouseLeave approach fired before
+  // onClick could register on the menu items — clicks got lost.
+  useEffect(() => {
+    if (!openMenu) return
+    const onDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && !el.closest('[data-scenarios-menu]')) setOpenMenu(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [openMenu])
+
+  return (
+    <nav className="run-nav scrollbar-hide" aria-label="Primary">
+      {PRIMARY_TABS.map((tab, i) => (
+        <button
+          key={tab.id}
+          onClick={() => onRoute({ top: tab.id })}
+          className="run-nav-item"
+          aria-current={route.top === tab.id ? 'page' : undefined}
+          title={tab.description}
+        >
+          <i aria-hidden="true">{String(i + 1).padStart(2, '0')}</i>
+          {tab.label}
+        </button>
+      ))}
+      <div className="relative" data-scenarios-menu>
+        <button
+          onClick={() => setOpenMenu((s) => !s)}
+          className="run-nav-item"
+          aria-current={route.top === 'scenario' ? 'page' : undefined}
+          aria-expanded={openMenu}
+          aria-haspopup="menu"
+        >
+          <i aria-hidden="true">{pad(PRIMARY_TABS.length + 1)}</i>
+          {scenarioActive || 'Scenarios'}
+          {anyScenarioRunning && <Loader2 className="w-3 h-3 animate-spin" aria-hidden />}
+          <ChevronDown className="w-3 h-3" aria-hidden />
+        </button>
+        {openMenu && (
+          <div
+            role="menu"
+            className="absolute z-20 mt-1 right-0 min-w-[240px] rounded border border-border bg-bg shadow-lg py-1"
+          >
+            {SCENARIO_ITEMS.map((s) => (
+              <button
+                key={s.runType}
+                role="menuitem"
+                onClick={() => {
+                  onRoute({ top: 'scenario', runType: s.runType })
+                  setOpenMenu(false)
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-surface-1 flex items-center justify-between gap-3"
+              >
+                <span>
+                  <span className="block">{s.label}</span>
+                  <span className="block text-content-subtle text-xs">{s.description}</span>
+                </span>
+                {activeByType[s.runType] && <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </nav>
+  )
+}
 
 function App() {
   const [gameweek, setGameweek] = useState<GameWeekInfo | null>(null)
@@ -27,7 +119,7 @@ function App() {
   // One string, updated once a second — the old header rendered eight glowing
   // gradient tiles and repainted all of them on every tick.
   const [countdown, setCountdown] = useState<string | null>(null)
-  const [view, setView] = useState<HermesRunType>(() => parseHash(window.location.hash.slice(1)))
+  const [route, setRoute] = useState<Route>(() => hashToRoute(window.location.hash))
 
   const hermes = useHermes()
   const { durationStats, anyActive: anyTaskActive } = useTasks()
@@ -46,19 +138,19 @@ function App() {
     loadGameweek()
   }, [])
 
-  // Sync URL hash when the view changes
+  // Sync URL hash when the route changes
   useEffect(() => {
-    const expectedHash = view === DEFAULT_VIEW ? '' : view
+    const expectedHash = routeToHash(route)
     const currentHash = window.location.hash.slice(1)
     if (currentHash !== expectedHash) {
       const newUrl = expectedHash === '' ? window.location.pathname : `#${expectedHash}`
       window.history.pushState(null, '', newUrl)
     }
-  }, [view])
+  }, [route])
 
   // Listen for browser back/forward navigation
   useEffect(() => {
-    const handleNavigation = () => setView(parseHash(window.location.hash.slice(1)))
+    const handleNavigation = () => setRoute(hashToRoute(window.location.hash))
     window.addEventListener('popstate', handleNavigation)
     window.addEventListener('hashchange', handleNavigation)
     return () => {
@@ -66,6 +158,8 @@ function App() {
       window.removeEventListener('hashchange', handleNavigation)
     }
   }, [])
+
+  const openScenario = (runType: HermesRunType) => setRoute({ top: 'scenario', runType })
 
   // Countdown to the gameweek deadline
   useEffect(() => {
@@ -128,17 +222,48 @@ function App() {
         </button>
       </header>
 
+      {/* ---------- primary nav: four top-level views + Scenarios ---------- */}
+      <TopNav route={route} onRoute={setRoute} activeByType={hermes.activeByType} />
+
       <main className="flex-1">
-        <ThisWeekTab
-          view={view}
-          onViewChange={setView}
-          runs={hermes.runs}
-          activeByType={hermes.activeByType}
-          errors={hermes.errors}
-          status={hermes.status}
-          avgDurationMs={durationStats['hermes_run']?.avg_duration_ms ?? null}
-          onStart={(rt, force, fplTeamId) => hermes.startRun(rt, force, fplTeamId)}
-        />
+        {route.top === 'squad' && (
+          <ThisWeekTab
+            view="tracked"
+            onViewChange={(rt) => setRoute({ top: 'scenario', runType: rt })}
+            runs={hermes.runs}
+            activeByType={hermes.activeByType}
+            errors={hermes.errors}
+            status={hermes.status}
+            avgDurationMs={durationStats['hermes_run']?.avg_duration_ms ?? null}
+            onStart={(rt, force, fplTeamId) => hermes.startRun(rt, force, fplTeamId)}
+          />
+        )}
+        {route.top === 'this_week' && (
+          <ThisWeekTab
+            view="briefing"
+            onViewChange={(rt) => setRoute({ top: 'scenario', runType: rt })}
+            runs={hermes.runs}
+            activeByType={hermes.activeByType}
+            errors={hermes.errors}
+            status={hermes.status}
+            avgDurationMs={durationStats['hermes_run']?.avg_duration_ms ?? null}
+            onStart={(rt, force, fplTeamId) => hermes.startRun(rt, force, fplTeamId)}
+          />
+        )}
+        {route.top === 'season' && <SeasonView onOpenScenario={openScenario} />}
+        {route.top === 'hermes' && <HermesAccountability />}
+        {route.top === 'scenario' && route.runType && (
+          <ThisWeekTab
+            view={route.runType}
+            onViewChange={(rt) => setRoute({ top: 'scenario', runType: rt })}
+            runs={hermes.runs}
+            activeByType={hermes.activeByType}
+            errors={hermes.errors}
+            status={hermes.status}
+            avgDurationMs={durationStats['hermes_run']?.avg_duration_ms ?? null}
+            onStart={(rt, force, fplTeamId) => hermes.startRun(rt, force, fplTeamId)}
+          />
+        )}
       </main>
 
       <footer className="border-t border-border mt-10 py-5 px-4 sm:px-6">

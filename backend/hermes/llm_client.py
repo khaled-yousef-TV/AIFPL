@@ -27,18 +27,22 @@ class LLMClient:
         # by endpoint (clients are per-run, so a wrong guess self-corrects via
         # the adaptive retry but would otherwise repeat every run).
         self._uses_max_completion_tokens = "api.openai.com" in (config.base_url or "")
-        # OpenAI's reasoning-series models (gpt-5.*, o1-*, o3-*, o4-*) only
-        # accept the default temperature. Seed so we don't burn a 400 per run
-        # rediscovering it; adaptive retry still self-corrects for anything
-        # the pattern misses.
+        # Reasoning-family detection. Two independent facts:
+        #  (a) OpenAI reasoning models (gpt-5.*, o1/o3/o4-*) reject non-default
+        #      temperature — must NOT send it.
+        #  (b) Any thinking-mode model — OpenAI reasoning, DeepSeek's V4
+        #      thinking-on default, `deepseek-reasoner` — burns most tokens on
+        #      invisible reasoning; without a budget floor the visible answer
+        #      is empty and every run wastes 30-90s on the adaptive-retry ladder.
+        # These sets overlap but aren't identical, so track them separately.
         model = (config.model or "").lower()
         is_openai = "api.openai.com" in (config.base_url or "")
-        is_reasoning = is_openai and model.startswith(("gpt-5", "o1", "o3", "o4-mini", "o4"))
-        self._supports_temperature = not is_reasoning
-        # Reasoning models burn most tokens on invisible reasoning. Seed a
-        # sensible floor so the first call has room for actual output —
-        # otherwise every run wastes 30-90s on a small-budget retry.
-        self._reasoning_budget_floor = self._REASONING_BUDGET_FLOOR if is_reasoning else 0
+        openai_reasoning = is_openai and model.startswith(("gpt-5", "o1", "o3", "o4-mini", "o4"))
+        # DeepSeek: V4 defaults thinking-on, `deepseek-reasoner` is R1-style
+        deepseek_thinking = model.startswith("deepseek-v4") or model == "deepseek-reasoner"
+        needs_budget_floor = openai_reasoning or deepseek_thinking
+        self._supports_temperature = not openai_reasoning
+        self._reasoning_budget_floor = self._REASONING_BUDGET_FLOOR if needs_budget_floor else 0
 
     # Reasoning models spend most of the budget on invisible reasoning
     # tokens before emitting any visible content. Give them enough headroom

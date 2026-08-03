@@ -17,6 +17,7 @@ from .schemas import (
     GameweekFixtureLoad,
     MechanicsSignals,
     PriceChangeCandidate,
+    SquadFixtureImpact,
     SquadRules,
 )
 
@@ -170,6 +171,34 @@ class MechanicsAgent(BaseAgent):
             if tid in short_names and fdrs:
                 team_next6_fdr[short_names[tid]] = round(sum(fdrs) / len(fdrs), 2)
 
+        # Per-squad fixture impact: count of owned players affected by each
+        # double/blank GW in the horizon, and their names. This is the concrete
+        # signal chip projections lean on ("4 of your players double in GW7"
+        # is what makes a Bench Boost date meaningful).
+        squad_fixture_impact: list = []
+        if ctx.user_player_ids:
+            owned = set(ctx.user_player_ids)
+            player_lookup = {p.id: p for p in players if p.id in owned}
+            for fl in fixture_load:
+                dbl_teams = set(fl.double_teams)
+                blk_teams = set(fl.blank_teams)
+                doubling = [
+                    p.web_name for p in player_lookup.values()
+                    if short_names.get(p.team) in dbl_teams
+                ]
+                blanking = [
+                    p.web_name for p in player_lookup.values()
+                    if short_names.get(p.team) in blk_teams
+                ]
+                if doubling or blanking:
+                    squad_fixture_impact.append(SquadFixtureImpact(
+                        gameweek=fl.gameweek,
+                        owned_players_doubling=len(doubling),
+                        owned_players_blanking=len(blanking),
+                        doubling_names=doubling,
+                        blanking_names=blanking,
+                    ))
+
         payload = MechanicsSignals(
             current_gameweek=current_gw.id if current_gw else 0,
             next_gameweek=next_gw_id,
@@ -183,6 +212,7 @@ class MechanicsAgent(BaseAgent):
             price_fall_candidates=falls,
             squad_rules=SquadRules(),
             chip_guidance=guidance,
+            squad_fixture_impact=squad_fixture_impact,
         )
 
         dgws = [fl.gameweek for fl in fixture_load if fl.double_teams]

@@ -107,3 +107,42 @@ def test_lessons_save_fetch_and_decay(db):
         db.decay_lessons(factor=0.9, deactivate_below=0.3)
     remaining = db.get_active_lessons()
     assert len(remaining) == 0   # 0.9^12 ~= 0.28 < 0.3 -> deactivated
+
+
+def test_evaluated_runs_filter_by_model(db):
+    """Trust weights are per-model — switching provider must not inherit the
+    outgoing model's calibration."""
+    db.save_hermes_run("r1", 20, "briefing", status="completed")
+    db.update_hermes_run("r1", status="completed", model="deepseek-chat",
+                        evaluation={"captaincy": {"regret": 3}})
+    db.save_hermes_run("r2", 21, "briefing", status="completed")
+    db.update_hermes_run("r2", status="completed", model="gpt-5.6-luna",
+                        evaluation={"captaincy": {"regret": 1}})
+
+    assert len(db.get_evaluated_hermes_runs()) == 2
+    ds = db.get_evaluated_hermes_runs(model="deepseek-chat")
+    assert [r["run_id"] for r in ds] == ["r1"]
+    gpt = db.get_evaluated_hermes_runs(model="gpt-5.6-luna")
+    assert [r["run_id"] for r in gpt] == ["r2"]
+
+
+def test_lessons_scope_filter_by_model(db):
+    """game-scope lessons survive a model switch; model-scope lessons don't."""
+    db.save_hermes_lesson(20, "news", "Promoted teams leak in GW1-2.", scope="game")
+    db.save_hermes_lesson(20, "adjustments", "Your boosts are overconfident.",
+                        model="deepseek-chat", scope="model")
+    db.save_hermes_lesson(21, "captaincy", "You over-captain premiums.",
+                        model="gpt-5.6-luna", scope="model")
+
+    # Unfiltered still returns all three
+    assert len(db.get_active_lessons()) == 3
+
+    # deepseek sees: game lesson + its own self-calibration (2)
+    ds = db.get_active_lessons(model="deepseek-chat")
+    lessons = {(l["scope"], l["category"]) for l in ds}
+    assert lessons == {("game", "news"), ("model", "adjustments")}
+
+    # gpt sees: game lesson + its own self-calibration (2) — NOT deepseek's
+    gpt = db.get_active_lessons(model="gpt-5.6-luna")
+    lessons = {(l["scope"], l["category"]) for l in gpt}
+    assert lessons == {("game", "news"), ("model", "captaincy")}

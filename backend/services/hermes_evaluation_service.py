@@ -35,9 +35,26 @@ against what actually happened. Given the scored outcomes, write AT MOST 3 short
 lessons (1-2 sentences each) that would have improved the recommendations. Focus on patterns, \
 not one-off variance (a single blank is luck; a repeated miss is a lesson).
 
+Tag each lesson's `scope`:
+- "game" — a football/FPL fact true regardless of who is picking (e.g. "promoted teams' \
+defences leak in GW1-2", "away London derbies see more red cards"). Survives a model switch.
+- "model" — a self-calibration observation about YOUR OWN recommending behavior (e.g. \
+"your boost multipliers are consistently too high on premium midfielders", "your fade calls \
+on 5%-owned strikers miss more often than they hit"). Resets on model switch.
+
 Respond with ONLY a JSON object:
-{"lessons": [{"category": "captaincy|adjustments|transfers|news|chips", "lesson": str}]}
+{"lessons": [{"category": "captaincy|adjustments|transfers|news|chips", \
+"scope": "game|model", "lesson": str}]}
 If outcomes look like normal variance with no pattern, return {"lessons": []}."""
+
+
+def _active_model_name() -> Optional[str]:
+    """The model string HermesRun rows are tagged with — same source as
+    the orchestrator uses. None if no LLM is configured, in which case the
+    calibration is unscoped anyway (no evaluated runs will exist)."""
+    from hermes.config import load_hermes_config
+    config = load_hermes_config()
+    return config.model if config.llm_configured else None
 
 
 def find_newly_finished_gameweek() -> Optional[int]:
@@ -91,9 +108,18 @@ def evaluate_gameweek(gameweek: int) -> Dict:
 
 
 def get_calibration_profile() -> Dict:
-    """Build the calibration profile from the trailing window of scored runs."""
+    """
+    Build the calibration profile from the trailing window of scored runs
+    made with the CURRENTLY ACTIVE model. Hit-rates and trust weights are
+    behavioral facts about one LLM; a fresh model starts with an empty
+    profile (trust defaults to 1.0) rather than inheriting the outgoing
+    model's mistakes.
+    """
     deps = get_dependencies()
-    runs = deps.db_manager.get_evaluated_hermes_runs(limit=CALIBRATION_WINDOW)
+    model = _active_model_name()
+    runs = deps.db_manager.get_evaluated_hermes_runs(
+        limit=CALIBRATION_WINDOW, model=model,
+    )
     return build_calibration_profile([r["evaluation"] for r in runs if r.get("evaluation")])
 
 
@@ -107,7 +133,7 @@ def get_memory_digest(profile: Optional[Dict] = None) -> str:
     deps = get_dependencies()
     if profile is None:
         profile = get_calibration_profile()
-    lessons = deps.db_manager.get_active_lessons()
+    lessons = deps.db_manager.get_active_lessons(model=_active_model_name())
     return calibration_digest(profile, lessons)
 
 
@@ -149,12 +175,21 @@ def generate_lessons(gameweek: int) -> int:
         return 0
 
     valid_categories = {"captaincy", "adjustments", "transfers", "news", "chips"}
+    active_model = _active_model_name()
     saved = 0
     for entry in (data.get("lessons") or [])[:MAX_NEW_LESSONS]:
         if not isinstance(entry, dict) or not entry.get("lesson"):
             continue
         category = entry.get("category") if entry.get("category") in valid_categories else "adjustments"
-        if db.save_hermes_lesson(gameweek, category, str(entry["lesson"])[:400]):
+        scope = entry.get("scope") if entry.get("scope") in ("game", "model") else "model"
+        # game-scope lessons are true regardless of which LLM saved them;
+        # storing model=None keeps the get_active_lessons filter happy
+        # when the model later changes.
+        lesson_model = None if scope == "game" else active_model
+        if db.save_hermes_lesson(
+            gameweek, category, str(entry["lesson"])[:400],
+            model=lesson_model, scope=scope,
+        ):
             saved += 1
 
     logger.info(f"Saved {saved} new Hermes lessons from GW{gameweek}")

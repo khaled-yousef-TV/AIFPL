@@ -29,15 +29,29 @@ export interface HermesRunTypeInfo {
   description: string
 }
 
+/**
+ * Nav ordering follows the four-view intent (see TRACKED_SQUAD_PLAN.md):
+ *   Squad-shaped answers first (tracked benchmark, then your real team),
+ *   the weekly briefing (the evidence), the chip/scenario tools last.
+ *
+ * "Tracked" is the persistent squad Hermes manages week to week — pure
+ * benchmark. "My Team" answers the same question against your connected
+ * FPL squad. "Briefing" is the underlying agent-signal view that both feed
+ * off of. Everything after that is a scenario tool.
+ */
 export const HERMES_RUN_TYPES: HermesRunTypeInfo[] = [
+  { value: 'tracked', label: 'Tracked Squad', shortLabel: 'Tracked', description: 'The persistent Hermes-driven benchmark squad, week by week' },
+  { value: 'my_team', label: 'My Team', shortLabel: 'Mine', description: 'Personalized advice for your imported FPL team' },
   { value: 'briefing', label: 'Weekly Briefing', shortLabel: 'Briefing', description: 'Full analysis: squad, captaincy, chips, differentials' },
   { value: 'squad', label: 'Best Squad', shortLabel: 'Squad', description: 'Optimal 15-man squad with Hermes adjustments' },
   { value: 'wildcard', label: 'Wildcard', shortLabel: 'WC', description: 'Should you wildcard now? Full rebuild plan' },
   { value: 'free_hit', label: 'Free Hit', shortLabel: 'FH', description: 'One-week-only optimal squad' },
   { value: 'triple_captain', label: 'Triple Captain', shortLabel: 'TC', description: 'Highest-ceiling captaincy for TC' },
   { value: 'differentials', label: 'Differentials', shortLabel: 'Diffs', description: 'Low-ownership picks with strong signals' },
-  { value: 'my_team', label: 'My Team', shortLabel: 'Mine', description: 'Personalized advice for your imported FPL team' },
 ]
+
+/** Pseudo run types have no backend Hermes run — skip run polling/start for them. */
+export const PSEUDO_RUN_TYPES: HermesRunType[] = ['tracked']
 
 const ACTIVE_POLL_MS = 3000
 // Idle polling keeps nightly/server-started runs visible without a reload
@@ -107,6 +121,9 @@ export function useHermes(): HermesState {
 
   const startRun = useCallback(
     async (runType: HermesRunType, force = false, fplTeamId?: number) => {
+      // Pseudo run types (tracked squad) have no backend Hermes run to start —
+      // they render /api/tracked-squad + the linked my_team run instead.
+      if (PSEUDO_RUN_TYPES.includes(runType)) return
       if (activeRef.current.some((r) => r.run_type === runType)) return
       setErrors((s) => ({ ...s, [runType]: null }))
       try {

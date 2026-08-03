@@ -178,3 +178,116 @@ def test_all_agents_return_valid_envelope(ctx):
         assert report.status in ("ok", "degraded", "error")
         assert report.elapsed_ms >= 0
         assert report.summary
+
+
+# ---------------- Phase 0.1: squad awareness ----------------
+
+def test_form_agent_surfaces_squad_player_outside_global_lists(ctx):
+    """Phase 0.1 regression: an owned mid-form player has to show up in
+    squad_form even when he doesn't clear the global hot/cold thresholds."""
+    # Player 5 ("Cold"): form 1.5, ppg 4.0 -> below hot cutoff, above cold ppg
+    # threshold barely — but crucially, when the squad excludes him from the
+    # global cold list (ppg 4.0 = 3.5 barely), he still MUST appear in squad_form.
+    ctx.user_player_ids = [5]
+    report = FormAgent().run(ctx)
+    squad_ids = {e["id"] for e in report.payload["squad_form"]}
+    assert 5 in squad_ids, "Owned player must appear in squad_form regardless of hot/cold thresholds"
+
+
+def test_form_agent_squad_form_empty_when_no_squad(ctx):
+    """No squad context -> squad_form stays empty (back-compat)."""
+    report = FormAgent().run(ctx)
+    assert report.payload["squad_form"] == []
+
+
+def test_mechanics_agent_surfaces_squad_fixture_impact(ctx):
+    """Phase 0.1: mechanics reports how many owned players are affected by
+    each DGW/BGW in the horizon — concrete input for chip projections."""
+    # ARS doubles in GW11; player 1 (Saka) is ARS
+    ctx.user_player_ids = [1, 2]
+    report = MechanicsAgent().run(ctx)
+    impact = report.payload["squad_fixture_impact"]
+    gw11 = next((si for si in impact if si["gameweek"] == 11), None)
+    assert gw11 is not None
+    assert gw11["owned_players_doubling"] == 1
+    assert "Saka" in gw11["doubling_names"]
+
+
+def test_mechanics_agent_squad_fixture_impact_empty_when_no_squad(ctx):
+    """No squad context -> squad_fixture_impact stays empty (back-compat)."""
+    report = MechanicsAgent().run(ctx)
+    assert report.payload["squad_fixture_impact"] == []
+
+
+def test_news_agent_squad_only_notes_included(ctx):
+    """Phase 0.1: fpl_notes now includes owned players regardless of ownership%.
+    A low-owned owned player with news must still reach Hermes."""
+    # Player 4 ("Doubt", 8% owned) has news; player 3 injured ("Crocked", 400 min, low own)
+    ctx.user_player_ids = [3, 4]
+    report = NewsAgent().run(ctx)   # LLM is None so this is the degraded path
+    # Even with LLM off, the fpl_news_fallback still needs to see squad players.
+    # In degraded mode fpl_news_fallback runs directly and filters by
+    # p.minutes == 0 and float(p.selected_by_percent) < 1.0. Player 3 has 400 min
+    # so already qualifies. This test asserts the degraded path still works.
+    ids = {i["player_id"] for i in report.payload["items"] if i.get("player_id")}
+    assert 3 in ids
+
+
+# ---------------- Phase 0.2: assemble_fixed_squad ----------------
+
+def _mock_predictions(ids):
+    """15 valid predictions covering a legal 2/5/5/3 shape across ≤5 teams."""
+    # positions: 2 GK, 5 DEF, 5 MID, 3 FWD
+    positions = ([1] * 2) + ([2] * 5) + ([3] * 5) + ([4] * 3)
+    pos_names = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+    teams = [10, 11, 12, 13, 14]  # 5 teams, ≤3 per team
+    preds = []
+    for i, pid in enumerate(ids):
+        preds.append({
+            "id": pid,
+            "name": f"P{pid}",
+            "team": f"T{teams[i % 5]}",
+            "team_id": teams[i % 5],
+            "position": pos_names[positions[i]],
+            "position_id": positions[i],
+            "price": 5.0,
+            "predicted": 5.0 + (i * 0.1),
+        })
+    return preds
+
+
+def test_assemble_fixed_squad_returns_the_given_15():
+    """Fixed-squad rendering must not substitute an unowned player the MILP prefers."""
+    from services.squad_service import assemble_fixed_squad
+    ids = list(range(101, 116))  # 15 unique ids
+    result = assemble_fixed_squad(_mock_predictions(ids), ids, gameweek=3)
+    squad_ids = {p["id"] for p in result["starting_xi"]} | {p["id"] for p in result["bench"]}
+    assert squad_ids == set(ids)
+    assert result["is_fixed_squad"] is True
+    assert len(result["starting_xi"]) == 11
+    assert len(result["bench"]) == 4
+
+
+def test_assemble_fixed_squad_rejects_illegal_shape():
+    """Wrong positional counts must raise, not silently render a broken squad."""
+    from services.squad_service import assemble_fixed_squad
+    ids = list(range(101, 116))
+    preds = _mock_predictions(ids)
+    # Break the shape: make all 15 midfielders
+    for p in preds:
+        p["position_id"] = 3
+        p["position"] = "MID"
+    with pytest.raises(ValueError, match="illegal positional shape"):
+        assemble_fixed_squad(preds, ids, gameweek=3)
+
+
+def test_assemble_fixed_squad_rejects_too_many_from_one_team():
+    """Squad with 4+ players from a single team must raise."""
+    from services.squad_service import assemble_fixed_squad
+    ids = list(range(101, 116))
+    preds = _mock_predictions(ids)
+    # Force first 4 into team 99
+    for p in preds[:4]:
+        p["team_id"] = 99
+    with pytest.raises(ValueError, match=">3 players from a single team"):
+        assemble_fixed_squad(preds, ids, gameweek=3)

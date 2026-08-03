@@ -74,12 +74,22 @@ class BettingAgent(BaseAgent):
             odds_by_team[f.team_h] = (odds, True)
             odds_by_team[f.team_a] = (odds, False)
 
-        # Anytime-scorer estimates for the candidate pool (attackers only)
+        # Anytime-scorer estimates for the candidate pool (attackers only).
+        # When a squad is being reasoned about, union owned attackers into
+        # the pool so a mid-owned squad player isn't invisible to the odds
+        # signal just because he sits outside the global top-N.
         scorer_entries = []
         edges = []
         try:
             from services.prediction_service import compute_predictions
-            candidates = compute_predictions()[:ctx.top_n]
+            all_predictions = compute_predictions()
+            candidates = all_predictions[:ctx.top_n]
+            if ctx.user_player_ids:
+                owned = set(ctx.user_player_ids)
+                seen = {c["id"] for c in candidates}
+                for cand in all_predictions:
+                    if cand["id"] in owned and cand["id"] not in seen:
+                        candidates.append(cand)
         except Exception as e:
             logger.warning(f"Betting agent: predictions unavailable ({e})")
             candidates = []

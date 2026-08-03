@@ -363,10 +363,66 @@ class HermesLesson(Base):
     evidence = Column(JSON, nullable=True)
     weight = Column(Float, default=1.0)   # decays over time
     active = Column(Boolean, default=True, index=True)
+    # Model-switch continuity: "game" lessons (football facts) apply to any
+    # LLM; "model" lessons (self-calibration, e.g. "your boosts are
+    # overconfident") only apply to the model that earned them.
+    model = Column(String(100), nullable=True, index=True)
+    scope = Column(String(10), default="model")  # game | model
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):
         return f"<HermesLesson(gw={self.gameweek_learned}, category='{self.category}', active={self.active})>"
+
+
+class TrackedSquadState(Base):
+    """
+    The persistent Hermes-driven squad, one row per gameweek: the squad that
+    *enters* that gameweek. Written by the pre-deadline auto-apply job (or the
+    initial seed) and never mutated once the gameweek starts.
+    """
+    __tablename__ = "tracked_squad_state"
+
+    gameweek = Column(Integer, primary_key=True)
+
+    # 15 player ids, ordered: starting XI first (GK→FWD), then the 4 bench in
+    # substitution order. Autosub scoring depends on that ordering.
+    players = Column(JSON, nullable=False)
+    # {player_id (as str): price paid} — FPL selling price is purchase price
+    # plus half the (rounded-down) rise, so the buy price has to be kept.
+    purchase_prices = Column(JSON, nullable=False, default=dict)
+
+    captain_id = Column(Integer, nullable=False)
+    vice_id = Column(Integer, nullable=True)
+
+    bank = Column(Float, nullable=False, default=0.0)          # millions
+    free_transfers = Column(Integer, nullable=False, default=1)
+    chips_used = Column(JSON, nullable=False, default=list)    # ['wildcard', ...]
+    chip_active = Column(String(20), nullable=True)            # chip played THIS gameweek
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<TrackedSquadState(gw={self.gameweek}, captain={self.captain_id}, bank={self.bank})>"
+
+
+class TrackedSquadGW(Base):
+    """Per-gameweek ledger for the tracked squad: what it did and what it scored."""
+    __tablename__ = "tracked_squad_gw"
+
+    gameweek = Column(Integer, primary_key=True)
+
+    points_scored = Column(Integer, nullable=True)   # null until the GW finishes
+    captain_points = Column(Integer, nullable=True)
+    bench_points = Column(Integer, nullable=True)
+    transfer_cost = Column(Integer, nullable=False, default=0)
+    transfers_made = Column(JSON, nullable=False, default=list)  # [{out_id,in_id,...}]
+    autosubs = Column(JSON, nullable=True)                       # [{out_id,in_id}]
+    average_score = Column(Integer, nullable=True)               # FPL template baseline
+    hermes_run_id = Column(String(100), nullable=True)           # run that drove this GW
+    scored_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<TrackedSquadGW(gw={self.gameweek}, points={self.points_scored})>"
 
 
 def init_db(db_url: Optional[str] = None):
@@ -402,7 +458,33 @@ def init_db(db_url: Optional[str] = None):
     
     engine = create_engine(db_url, echo=False)
     Base.metadata.create_all(engine)
+    _apply_column_migrations(engine, logger_db)
     SessionLocal = sessionmaker(bind=engine)
     return engine, SessionLocal
+
+
+# create_all only ADDS missing tables — it never alters existing ones (there
+# is no migration framework in this project). Columns added to an existing
+# table are listed here and applied idempotently on startup.
+_COLUMN_MIGRATIONS = [
+    ("hermes_lessons", "model", "VARCHAR(100)"),
+    ("hermes_lessons", "scope", "VARCHAR(10)"),
+]
+
+
+def _apply_column_migrations(engine, logger_db) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    for table, column, ddl_type in _COLUMN_MIGRATIONS:
+        if table not in inspector.get_table_names():
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        if column in existing:
+            continue
+        # ADD COLUMN with this simple shape works on both SQLite and Postgres
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        logger_db.info(f"Migration: added column {table}.{column}")
 
 

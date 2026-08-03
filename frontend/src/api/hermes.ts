@@ -38,6 +38,7 @@ export type HermesRunType =
   | 'triple_captain'
   | 'differentials'
   | 'my_team'
+  | 'tracked'   // pseudo run type: renders /api/tracked-squad, not a backend Hermes run
 
 export interface HermesRun {
   run_id: string
@@ -143,8 +144,31 @@ export interface CalibrationProfile {
 }
 
 export interface CalibrationResponse {
+  model: string | null
   profile: CalibrationProfile
-  lessons: Array<{ id: number; gameweek_learned: number; category: string; lesson: string; weight: number }>
+  lessons: Array<{
+    id: number
+    gameweek_learned: number
+    category: string
+    lesson: string
+    weight: number
+    scope?: 'game' | 'model'
+    model?: string | null
+  }>
+}
+
+export interface TransferPlan {
+  recommendation: 'transfer' | 'hold'
+  reason: string
+  expected_gain: number | null
+  hit_cost: number
+}
+
+export interface ChipProjection {
+  gameweek: number | null
+  confidence: 'low' | 'medium' | 'high'
+  reason: string
+  requires_transfers: boolean
 }
 
 export interface BacktestSummary {

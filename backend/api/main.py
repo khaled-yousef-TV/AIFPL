@@ -191,6 +191,7 @@ from api.routes import suggested_squad as suggested_squad_router
 from api.routes import transfers as transfers_router
 from api.routes import hermes as hermes_router
 from api.routes import notifications as notifications_router
+from api.routes import tracked_squad as tracked_squad_router
 
 # Initialize dependencies for routes
 from services.dependencies import init_dependencies
@@ -214,6 +215,7 @@ app.include_router(suggested_squad_router.router, prefix="/api", tags=["squad"])
 app.include_router(transfers_router.router, prefix="/api", tags=["transfers"])
 app.include_router(hermes_router.router, prefix="/api/hermes", tags=["hermes"])
 app.include_router(notifications_router.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(tracked_squad_router.router, prefix="/api/tracked-squad", tags=["tracked-squad"])
 
 
 # ==================== Scheduler for Auto-Saving Selected Teams ====================
@@ -618,6 +620,126 @@ def run_hermes_predeadline_job():
         logger.error(f"Error in run_hermes_predeadline_job: {e}", exc_info=True)
 
 
+def run_tracked_squad_apply_job():
+    """
+    30 minutes after each GW deadline: run a fresh my_team Hermes briefing
+    against the tracked squad's 15, then apply the recommended transfer
+    (or hold, per Hermes's transfer_plan) to advance the tracked state.
+
+    This is what turns "Hermes advises" into "Hermes plays" — the tracked
+    squad becomes the season-long benchmark of pure Hermes strategy.
+    """
+    import time as _time
+    try:
+        from services import tracked_squad_service as svc
+        db = db_manager
+        state = db.get_tracked_squad_state()
+        if not state:
+            logger.info("Tracked squad not seeded — skipping auto-apply.")
+            return
+
+        # Idempotence: if the *next* GW's state already exists we already
+        # applied a transfer this window (scheduler retries land here safely).
+        if db.get_tracked_squad_state(gameweek=state["gameweek"] + 1):
+            logger.info(
+                f"Tracked squad already advanced past GW{state['gameweek']}; skipping."
+            )
+            return
+
+        from services.hermes_service import start_hermes_run
+
+        # Force a full run — single-run-per-type lock can collide with a
+        # user-triggered My Team run; retry a couple of times with backoff
+        # rather than skipping the gameweek entirely.
+        run_id = None
+        for attempt in range(3):
+            try:
+                outcome = start_hermes_run(
+                    "my_team",
+                    force=True,
+                    user_player_ids=state["players"],
+                    wait=True,
+                )
+                run_id = outcome.get("run_id")
+                break
+            except RuntimeError as e:
+                logger.info(f"my_team run collision, backing off ({attempt+1}/3): {e}")
+                _time.sleep(30 * (attempt + 1))
+        if run_id is None:
+            logger.error("Could not start tracked-squad my_team run after retries")
+            return
+
+        run = db.get_hermes_run(run_id)
+        if not run:
+            logger.error(f"Tracked-squad run {run_id} vanished before apply")
+            return
+
+        svc.apply_transfer(run)
+    except Exception as e:
+        logger.error(f"Error in run_tracked_squad_apply_job: {e}", exc_info=True)
+
+
+def schedule_next_tracked_squad_apply():
+    """Schedule the tracked-squad auto-apply 30 min after the next deadline."""
+    try:
+        next_gw = fpl_client.get_next_gameweek()
+        if not next_gw or not next_gw.deadline_time:
+            return
+
+        deadline = next_gw.deadline_time
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+
+        run_time = deadline + timedelta(minutes=30)
+        now = datetime.now(deadline.tzinfo) if getattr(deadline, 'tzinfo', None) else datetime.now()
+
+        if now >= run_time:
+            # Deadline already passed (server wake-up / late scheduling): fire
+            # once, in-line. Idempotence in the job body prevents double-apply.
+            logger.info(f"Past auto-apply window for GW{next_gw.id} — running inline")
+            run_tracked_squad_apply_job()
+            return
+
+        scheduler.add_job(
+            run_tracked_squad_apply_job,
+            DateTrigger(run_date=run_time),
+            id="tracked_squad_apply",
+            name="Tracked Squad Auto-Apply 30min After Deadline",
+            replace_existing=True,
+        )
+        logger.info(f"Scheduled tracked-squad auto-apply for GW{next_gw.id} at {run_time}")
+    except Exception as e:
+        logger.error(f"Error scheduling tracked-squad auto-apply: {e}")
+
+
+def run_tracked_squad_scoring_job():
+    """
+    Score every unscored finished GW for the tracked squad. Idempotent:
+    only touches rows whose `scored_at` is null and whose GW is marked
+    finished by FPL.
+    """
+    try:
+        from services import tracked_squad_service as svc
+        db = db_manager
+        fpl = fpl_client
+
+        # Only score gameweeks the tracked squad has entered.
+        for state in db.get_tracked_squad_states():
+            gw = state["gameweek"]
+            existing = db.get_tracked_squad_gw(gw)
+            if existing and existing.get("scored_at"):
+                continue
+            gw_meta = next((g for g in fpl.get_gameweeks() if g.id == gw), None)
+            if not gw_meta or not getattr(gw_meta, "finished", False):
+                continue
+            try:
+                svc.score_finished_gw(gw)
+            except Exception as e:
+                logger.error(f"Failed scoring tracked GW{gw}: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error in run_tracked_squad_scoring_job: {e}", exc_info=True)
+
+
 def schedule_next_hermes_predeadline():
     """Schedule a forced Hermes briefing 3 hours before the next deadline."""
     try:
@@ -789,6 +911,9 @@ async def startup_event():
         # Schedule the fresh pre-deadline Hermes briefing (3h before deadline)
         schedule_next_hermes_predeadline()
 
+        # Tracked-squad auto-apply 30 min after each deadline
+        schedule_next_tracked_squad_apply()
+
         # Backfill today's Hermes nightly sweep if enabled and missed (Render spin-down)
         run_hermes_nightly_job()
         
@@ -818,6 +943,13 @@ async def startup_event():
                 CronTrigger(**trigger_kwargs),  # Every 6 hours
                 id="check_and_schedule_hermes_predeadline",
                 name="Check and Schedule Pre-Deadline Hermes Briefing",
+                replace_existing=True
+            )
+            scheduler.add_job(
+                schedule_next_tracked_squad_apply,
+                CronTrigger(**trigger_kwargs),  # Every 6 hours
+                id="check_and_schedule_tracked_squad_apply",
+                name="Check and Schedule Tracked Squad Auto-Apply",
                 replace_existing=True
             )
             logger.info("Added check_and_schedule_selected_team job")
@@ -873,6 +1005,27 @@ async def startup_event():
             logger.info("Added hermes_learning_cycle job")
         except Exception as e:
             logger.error(f"Failed to add hermes_learning_cycle job: {e}", exc_info=True)
+
+        # Tracked-squad scoring at 07:00 UTC — after the learning cycle, when
+        # FPL has typically finalized bonus points for the finished GW.
+        # Idempotent: only touches unscored, finished gameweeks.
+        try:
+            trigger_kwargs = {"hour": 7, "minute": 0}
+            if UTC:
+                trigger_kwargs["timezone"] = UTC
+            scheduler.add_job(
+                run_tracked_squad_scoring_job,
+                CronTrigger(**trigger_kwargs),
+                id="tracked_squad_scoring",
+                name="Tracked Squad Scoring",
+                replace_existing=True,
+            )
+            # Also run once at startup so a Render-tier restart backfills anything
+            # missed while the server was asleep.
+            run_tracked_squad_scoring_job()
+            logger.info("Added tracked_squad_scoring job")
+        except Exception as e:
+            logger.error(f"Failed to add tracked_squad_scoring job: {e}", exc_info=True)
         
         # Log scheduler status
         logger.info(f"Scheduler is running: {scheduler.running}")

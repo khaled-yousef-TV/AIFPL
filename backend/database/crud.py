@@ -13,7 +13,7 @@ from .models import (
     Settings, GameWeekLog, Decision, Prediction,
     TransferHistory, PerformanceLog, SelectedTeam, DailySnapshot,
     TripleCaptainRecommendations, Task, WildcardTrajectory, HermesRun,
-    SeasonArchive, HermesLesson, init_db
+    SeasonArchive, HermesLesson, TrackedSquadState, TrackedSquadGW, init_db
 )
 # Import FplTeam - must be imported after other models to avoid circular imports
 try:
@@ -1158,13 +1158,22 @@ class DatabaseManager:
             logger.error(f"Failed to get Hermes runs for GW{gameweek}: {e}")
             return []
 
-    def get_evaluated_hermes_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent runs that have an evaluation (for the calibration profile)."""
+    def get_evaluated_hermes_runs(
+        self, limit: int = 50, model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent runs that have an evaluation (for the calibration profile).
+
+        When `model` is set, restrict to runs made with that model — trust
+        weights and hit-rates are behavioral facts about one LLM and must
+        not leak into a different model's calibration on provider switch.
+        """
         try:
             with self.get_session() as session:
-                runs = session.query(HermesRun).filter(
-                    HermesRun.evaluation.isnot(None)
-                ).order_by(HermesRun.created_at.desc()).limit(limit).all()
+                q = session.query(HermesRun).filter(HermesRun.evaluation.isnot(None))
+                if model:
+                    q = q.filter(HermesRun.model == model)
+                runs = q.order_by(HermesRun.created_at.desc()).limit(limit).all()
                 return [self._hermes_run_to_dict(r) for r in runs]
         except Exception as e:
             logger.error(f"Failed to get evaluated Hermes runs: {e}")
@@ -1245,8 +1254,16 @@ class DatabaseManager:
     def save_hermes_lesson(
         self, gameweek: int, category: str, lesson: str,
         evidence: Optional[Dict] = None,
+        model: Optional[str] = None,
+        scope: str = "model",
     ) -> bool:
-        """Save a lesson learned from a post-GW evaluation."""
+        """
+        Save a lesson learned from a post-GW evaluation.
+
+        scope="game" — a football fact ("promoted teams leak goals GW1-2"),
+        applies to any LLM. scope="model" — self-calibration ("your fade
+        calls hit only 40%"), only meaningful for the model that earned it.
+        """
         try:
             with self.get_session() as session:
                 session.add(HermesLesson(
@@ -1254,6 +1271,8 @@ class DatabaseManager:
                     category=category,
                     lesson=lesson,
                     evidence=evidence,
+                    model=model,
+                    scope=scope,
                 ))
                 session.commit()
                 return True
@@ -1261,13 +1280,26 @@ class DatabaseManager:
             logger.error(f"Failed to save Hermes lesson: {e}")
             return False
 
-    def get_active_lessons(self, limit: int = 15) -> List[Dict[str, Any]]:
-        """Get active lessons, newest/heaviest first."""
+    def get_active_lessons(
+        self, limit: int = 15, model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get active lessons, newest/heaviest first.
+
+        When `model` is set, returns game-scope lessons plus model-scope
+        lessons whose model matches — so switching provider drops the old
+        model's self-calibration but keeps the football knowledge intact.
+        """
         try:
             with self.get_session() as session:
-                rows = session.query(HermesLesson).filter(
-                    HermesLesson.active.is_(True)
-                ).order_by(
+                q = session.query(HermesLesson).filter(HermesLesson.active.is_(True))
+                if model:
+                    from sqlalchemy import or_
+                    q = q.filter(or_(
+                        HermesLesson.scope == "game",
+                        HermesLesson.model == model,
+                    ))
+                rows = q.order_by(
                     HermesLesson.weight.desc(), HermesLesson.gameweek_learned.desc()
                 ).limit(limit).all()
                 return [
@@ -1277,6 +1309,8 @@ class DatabaseManager:
                         "category": r.category,
                         "lesson": r.lesson,
                         "weight": r.weight,
+                        "scope": r.scope,
+                        "model": r.model,
                     }
                     for r in rows
                 ]
@@ -1297,6 +1331,150 @@ class DatabaseManager:
                 return sum(1 for r in rows if r.active)
         except Exception as e:
             logger.error(f"Failed to decay lessons: {e}")
+            return 0
+
+    # ==================== Tracked Squad ====================
+
+    @staticmethod
+    def _tracked_state_to_dict(row: TrackedSquadState) -> Dict[str, Any]:
+        return {
+            "gameweek": row.gameweek,
+            "players": row.players or [],
+            # JSON object keys are strings everywhere except SQLite+dict round
+            # trips — normalize to int ids so callers never have to care.
+            "purchase_prices": {int(k): v for k, v in (row.purchase_prices or {}).items()},
+            "captain_id": row.captain_id,
+            "vice_id": row.vice_id,
+            "bank": row.bank,
+            "free_transfers": row.free_transfers,
+            "chips_used": row.chips_used or [],
+            "chip_active": row.chip_active,
+            "created_at": (row.created_at.isoformat() + "Z") if row.created_at else None,
+        }
+
+    @staticmethod
+    def _tracked_gw_to_dict(row: TrackedSquadGW) -> Dict[str, Any]:
+        return {
+            "gameweek": row.gameweek,
+            "points_scored": row.points_scored,
+            "captain_points": row.captain_points,
+            "bench_points": row.bench_points,
+            "transfer_cost": row.transfer_cost or 0,
+            "transfers_made": row.transfers_made or [],
+            "autosubs": row.autosubs or [],
+            "average_score": row.average_score,
+            "hermes_run_id": row.hermes_run_id,
+            "scored_at": (row.scored_at.isoformat() + "Z") if row.scored_at else None,
+        }
+
+    def save_tracked_squad_state(self, gameweek: int, **fields) -> bool:
+        """Upsert the tracked squad state for a gameweek."""
+        allowed = {
+            "players", "purchase_prices", "captain_id", "vice_id",
+            "bank", "free_transfers", "chips_used", "chip_active",
+        }
+        try:
+            with self.get_session() as session:
+                row = session.query(TrackedSquadState).filter(
+                    TrackedSquadState.gameweek == gameweek
+                ).first()
+                if not row:
+                    row = TrackedSquadState(gameweek=gameweek)
+                    session.add(row)
+                for key, value in fields.items():
+                    if key in allowed:
+                        # purchase_prices keys must be JSON-serializable strings
+                        if key == "purchase_prices" and isinstance(value, dict):
+                            value = {str(k): v for k, v in value.items()}
+                        setattr(row, key, value)
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save tracked squad state for GW{gameweek}: {e}")
+            return False
+
+    def get_tracked_squad_state(self, gameweek: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """State for a gameweek, or the latest one when gameweek is None."""
+        try:
+            with self.get_session() as session:
+                query = session.query(TrackedSquadState)
+                if gameweek is not None:
+                    query = query.filter(TrackedSquadState.gameweek == gameweek)
+                row = query.order_by(TrackedSquadState.gameweek.desc()).first()
+                return self._tracked_state_to_dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get tracked squad state: {e}")
+            return None
+
+    def get_tracked_squad_states(self) -> List[Dict[str, Any]]:
+        """All tracked squad states, oldest gameweek first."""
+        try:
+            with self.get_session() as session:
+                rows = session.query(TrackedSquadState).order_by(
+                    TrackedSquadState.gameweek.asc()
+                ).all()
+                return [self._tracked_state_to_dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to list tracked squad states: {e}")
+            return []
+
+    def save_tracked_squad_gw(self, gameweek: int, **fields) -> bool:
+        """Upsert the ledger row for a gameweek."""
+        allowed = {
+            "points_scored", "captain_points", "bench_points", "transfer_cost",
+            "transfers_made", "autosubs", "average_score", "hermes_run_id", "scored_at",
+        }
+        try:
+            with self.get_session() as session:
+                row = session.query(TrackedSquadGW).filter(
+                    TrackedSquadGW.gameweek == gameweek
+                ).first()
+                if not row:
+                    row = TrackedSquadGW(gameweek=gameweek)
+                    session.add(row)
+                for key, value in fields.items():
+                    if key in allowed:
+                        setattr(row, key, value)
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save tracked squad GW{gameweek}: {e}")
+            return False
+
+    def get_tracked_squad_gw(self, gameweek: int) -> Optional[Dict[str, Any]]:
+        """Ledger row for one gameweek."""
+        try:
+            with self.get_session() as session:
+                row = session.query(TrackedSquadGW).filter(
+                    TrackedSquadGW.gameweek == gameweek
+                ).first()
+                return self._tracked_gw_to_dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get tracked squad GW{gameweek}: {e}")
+            return None
+
+    def get_tracked_squad_gws(self) -> List[Dict[str, Any]]:
+        """Full season ledger, oldest gameweek first."""
+        try:
+            with self.get_session() as session:
+                rows = session.query(TrackedSquadGW).order_by(
+                    TrackedSquadGW.gameweek.asc()
+                ).all()
+                return [self._tracked_gw_to_dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to list tracked squad gameweeks: {e}")
+            return []
+
+    def reset_tracked_squad(self) -> int:
+        """Wipe both tracked-squad tables (dev/reseed). Returns rows deleted."""
+        try:
+            with self.get_session() as session:
+                deleted = session.query(TrackedSquadState).delete()
+                deleted += session.query(TrackedSquadGW).delete()
+                session.commit()
+                return deleted
+        except Exception as e:
+            logger.error(f"Failed to reset tracked squad: {e}")
             return 0
 
 
