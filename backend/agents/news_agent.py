@@ -15,7 +15,7 @@ deterministic conversion of FPL news fields only.
 import json
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from pydantic import BaseModel
 
@@ -70,18 +70,8 @@ def _is_stale_result(result: Dict, upcoming_gw: int) -> bool:
     return False
 
 
-def build_search_queries(
-    top_player_names: List[str],
-    flagged_names: List[str],
-    squad_player_names: Optional[List[str]] = None,
-) -> List[str]:
-    """Bounded query set: hard news + incentive-oriented searches.
-
-    When a squad is being reasoned about, a couple of squad-specific queries
-    are folded in AT the total-query cap so news coverage always reaches the
-    manager's actual 15, not just the global top-N. The MAX_SEARCH_QUERIES
-    cap is preserved to keep token cost bounded.
-    """
+def build_search_queries(top_player_names: List[str], flagged_names: List[str]) -> List[str]:
+    """Bounded query set: hard news + incentive-oriented searches."""
     from datetime import datetime
     from data.european_teams import get_current_season
 
@@ -102,15 +92,6 @@ def build_search_queries(
         queries.append(f"{name} injury return news")
     for name in top_player_names[:1]:
         queries.append(f"{name} form record news")
-    # Squad-specific targeted queries — surface news on the owned players
-    # who otherwise wouldn't hit any of the queries above. Small budget so
-    # generic queries still fire; still capped by MAX_SEARCH_QUERIES below.
-    squad_names = squad_player_names or []
-    # De-dup against names we already targeted
-    already_targeted = set(flagged_names[:2]) | set(top_player_names[:1])
-    for name in squad_names:
-        if name not in already_targeted:
-            queries.append(f"{name} injury news team news")
     return queries[:MAX_SEARCH_QUERIES]
 
 
@@ -163,27 +144,10 @@ class NewsAgent(BaseAgent):
         ]
         flagged_names = [p.web_name for p in players if p.news and p.minutes > 0][:10]
 
-        # Squad-specific query targets — the highest-ownership-risk owned
-        # players (news/flagged first, then the rest). Cap conservatively so
-        # the total query list still fits in MAX_SEARCH_QUERIES.
-        squad_query_names: List[str] = []
-        owned_ids = set(ctx.user_player_ids or [])
-        if owned_ids:
-            owned_players = [p for p in players if p.id in owned_ids]
-            # News-flagged owned first, then by ownership as a proxy for "likely
-            # starter worth searching for" — bench keepers get de-prioritized.
-            owned_players.sort(
-                key=lambda p: (
-                    0 if p.news else 1,
-                    -float(p.selected_by_percent),
-                )
-            )
-            squad_query_names = [p.web_name for p in owned_players[:3]]
-
         search_used = False
         search_blocks = []
         if search is not None and getattr(search, "available", False):
-            for query in build_search_queries(top_names, flagged_names, squad_query_names):
+            for query in build_search_queries(top_names, flagged_names):
                 results = search.search(query, max_results=4)
                 results = [r for r in results if not _is_stale_result(r, ctx.gameweek)]
                 if results:
@@ -192,16 +156,9 @@ class NewsAgent(BaseAgent):
                     lines += [f"- {r['title']} ({r['url']}): {r['snippet']}" for r in results]
                     search_blocks.append("\n".join(lines))
 
-        # Always include owned players with news, regardless of ownership %,
-        # so a low-owned bench keeper's injury still reaches Hermes.
         fpl_notes = [
             f"- {p.web_name} ({p.status}, chance={p.chance_of_playing_next_round}): {p.news}"
-            for p in players
-            if p.news and (
-                p.minutes > 0
-                or float(p.selected_by_percent) >= 1.0
-                or p.id in owned_ids
-            )
+            for p in players if p.news and (p.minutes > 0 or float(p.selected_by_percent) >= 1.0)
         ][:25]
 
         from datetime import datetime

@@ -340,21 +340,13 @@ async def trigger_learning_cycle():
 
 @router.get("/calibration")
 async def get_calibration():
-    """
-    Hermes' running track record for the currently active model:
-    calibration profile + active lessons (game-scope + this model's own
-    self-calibration). A model switch resets the trust numbers but keeps
-    game-scope lessons visible.
-    """
+    """Hermes' running track record: calibration profile + active lessons."""
     try:
-        from services.hermes_evaluation_service import (
-            _active_model_name, get_calibration_profile,
-        )
+        from services.hermes_evaluation_service import get_calibration_profile
         deps = get_dependencies()
         return {
-            "model": _active_model_name(),
             "profile": get_calibration_profile(),
-            "lessons": deps.db_manager.get_active_lessons(model=_active_model_name()),
+            "lessons": deps.db_manager.get_active_lessons(),
         }
     except Exception as e:
         logger.error(f"Error fetching calibration: {e}", exc_info=True)

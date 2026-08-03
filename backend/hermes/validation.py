@@ -200,21 +200,6 @@ def parse_adjustments(
             problems.append(f"transfer ({t.out_id} -> {t.in_id}) references unknown ids")
     result.transfer_priorities = valid_transfers
 
-    # Hold/transfer consistency: an empty priorities list can only mean "hold".
-    # If the LLM claimed "transfer" but listed nothing, coerce to "hold" with a
-    # clear reason rather than serving a self-contradictory verdict.
-    if not result.transfer_priorities and result.transfer_plan.recommendation == "transfer":
-        problems.append(
-            "transfer_plan.recommendation=='transfer' but transfer_priorities is empty — forced to 'hold'"
-        )
-        result.transfer_plan.recommendation = "hold"
-        if not result.transfer_plan.reason:
-            result.transfer_plan.reason = (
-                "No transfer met the bar this week — rolling the free transfer."
-            )
-        result.transfer_plan.expected_gain = None
-        result.transfer_plan.hit_cost = 0
-
     # If the LLM hallucinated heavily AND we have nothing usable, force a retry
     if problems and not (result.adjustments or result.captain_ranking or result.narrative):
         raise HermesOutputError("; ".join(problems))

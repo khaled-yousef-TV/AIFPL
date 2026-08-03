@@ -45,32 +45,12 @@ Respond with a SINGLE JSON object, no prose outside it, matching exactly:
   "adjustments": [{"player_id": int, "multiplier": float, "action": "boost|fade|exclude|lock", "reason": str}],
   "captain_ranking": [int, ...],
   "triple_captain": {"play_now": bool, "player_id": int|null, "target_gameweek": int|null, "reason": str},
-  "chip_advice": {"wildcard_now": bool, "free_hit_now": bool, "bench_boost_now": bool, "target_gameweeks": {"chip": int}, "projection": {"wildcard|free_hit|bench_boost|triple_captain": {"gameweek": int|null, "confidence": "low|medium|high", "reason": str, "requires_transfers": bool}}, "reason": str},
+  "chip_advice": {"wildcard_now": bool, "free_hit_now": bool, "bench_boost_now": bool, "target_gameweeks": {"chip": int}, "reason": str},
   "differentials": [int, ...],
   "transfer_priorities": [{"out_id": int, "in_id": int, "urgency": "this_week|soon|watch", "reason": str}],
-  "transfer_plan": {"recommendation": "transfer|hold", "reason": str, "expected_gain": float|null, "hit_cost": int},
   "narrative": "markdown briefing for the user",
   "confidence": "low|medium|high"
-}
-
-Rules for `transfer_plan`:
-- Always emit an explicit verdict. `hold` is a valid, common answer — rolling to 2 \
-free transfers for a fixture swing is a real recommendation, not an empty output.
-- `hit_cost` is the raw points cost of extra transfers (-4 each above the free ones).
-- `expected_gain` is your best estimate of net points gained, after `hit_cost`, over \
-the horizon you're planning for.
-- `recommendation` must be `hold` whenever `transfer_priorities` is empty.
-
-Rules for `chip_advice.projection`:
-- When you know the manager's actual squad (my_team runs), project every chip \
-against THAT squad using the squad_fixture_impact signal — "you have 4 owners \
-doubling in GW7" is what makes a Bench Boost date real.
-- If no confirmed DGW/BGW yet, keep `confidence: "low"` and note it — do NOT \
-invent a double gameweek. Low confidence is honest and useful.
-- Set `requires_transfers: true` when the projected date only works after your \
-recommended transfers land.
-- Fill `projection` with all four chip keys even if some are `{"gameweek": null, \
-"confidence": "low", "reason": "no confirmed DGW/BGW in the horizon"}`."""
+}"""
 
 
 RUN_TYPE_INSTRUCTIONS = {
@@ -80,14 +60,7 @@ RUN_TYPE_INSTRUCTIONS = {
     "free_hit": "The user is considering a FREE HIT for the next gameweek only. Optimize purely for the single gameweek; long-term value is irrelevant.",
     "triple_captain": "Focus on the triple captain decision: rank captain candidates by ceiling (haul probability), not floor. Recommend whether to play TC now or target a later gameweek (double gameweeks are prime targets).",
     "differentials": "Focus on differentials: low-ownership players with strong underlying signals. Fill the differentials list with your best low-owned picks.",
-    "my_team": (
-        "Signals mark the user's current squad (in_user_team=true). Give personalized advice: "
-        "transfer_priorities (out->in with urgency), captain_ranking from their squad, and chip "
-        "timing for their specific situation. In `transfer_plan`, state EXPLICITLY whether to "
-        "transfer this week or hold — if holding, say what the free transfer is being saved for "
-        "(fixture swing, DGW window, a specific player becoming available). Do NOT leave "
-        "transfer_priorities empty AND recommend 'transfer' — pick one story and tell it."
-    ),
+    "my_team": "Signals mark the user's current squad (in_user_team=true). Give personalized advice: transfer_priorities (out->in with urgency), captain_ranking from their squad, and chip timing for their specific situation.",
     "season_plan": (
         "Produce a SEASON PLAN: a rolling strategy for the remaining gameweeks. In chip_advice."
         "target_gameweeks, map every remaining chip (wildcard, free_hit, bench_boost, "
@@ -188,26 +161,7 @@ def assemble_user_prompt(
     mech = reports.get("mechanics")
     if mech and mech.payload:
         m = dict(mech.payload)
-        # Squad fixture impact renders as its own compact block so it
-        # survives the payload trim and reads clearly.
-        squad_impact = m.pop("squad_fixture_impact", []) or []
         sections.append("## Game mechanics\n" + _compact(m, 2500))
-        if squad_impact:
-            lines = []
-            for si in squad_impact:
-                bits = []
-                if si.get("owned_players_doubling"):
-                    bits.append(
-                        f"DGW ({si['owned_players_doubling']} owned): "
-                        + ", ".join(si.get("doubling_names", []))
-                    )
-                if si.get("owned_players_blanking"):
-                    bits.append(
-                        f"BGW ({si['owned_players_blanking']} owned): "
-                        + ", ".join(si.get("blanking_names", []))
-                    )
-                lines.append(f"GW{si['gameweek']} — " + "; ".join(bits))
-            sections.append("## Squad fixture impact\n" + "\n".join(lines))
 
     avail = reports.get("availability")
     if avail and avail.payload.get("flagged"):
@@ -226,19 +180,11 @@ def assemble_user_prompt(
             f"{t['team']}|reversal={t['reversal_score']}|momentum={t['momentum']}"
             for t in form.payload.get("team_trends", [])[:8]
         ]
-        section = (
+        sections.append(
             "## Form\nHOT:\n" + ("\n".join(hot) or "none")
             + "\nCOLD:\n" + ("\n".join(cold) or "none")
             + "\nTEAM TRENDS (bounce-back first):\n" + ("\n".join(trends) or "none")
         )
-        squad_form = form.payload.get("squad_form", [])
-        if squad_form:
-            sq = [
-                f"{e['id']}|{e['name']}|{e['team']}|form={e['form']}|ppg={e['points_per_game']}|delta={e['delta']}"
-                for e in squad_form
-            ]
-            section += "\nSQUAD FORM (every owned player, coldest first):\n" + "\n".join(sq)
-        sections.append(section)
 
     var = reports.get("variability")
     if var and var.payload.get("players"):

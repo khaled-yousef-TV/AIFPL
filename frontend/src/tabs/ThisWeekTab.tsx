@@ -23,12 +23,6 @@ import { fetchLlmProviders, setLlmProvider, type LlmProvidersResponse } from '..
 import { HERMES_RUN_TYPES, type HermesRunTypeInfo } from '../hooks/useHermes'
 import { apiRequest } from '../api/client'
 import { formatDuration, formatRelative } from '../utils/time'
-import {
-  fetchTrackedSquad,
-  resetTrackedSquad,
-  seedTrackedSquad,
-  type TrackedSquadResponse,
-} from '../api/tracked-squad'
 
 // ==================== LLM provider switcher ====================
 
@@ -504,21 +498,7 @@ const ChipBox: React.FC<{ label: string; playNow: boolean; detail?: string }> = 
 
 const ChipsPanel: React.FC<{ chipAdvice: any; tripleCaptain: any }> = ({ chipAdvice, tripleCaptain }) => {
   const targets = chipAdvice?.target_gameweeks || {}
-  const projection = chipAdvice?.projection || {}
-  // Per-squad projection takes precedence over the generic target_gameweeks
-  // when it's present — Phase 0's squad-conditional dates are the more
-  // specific answer once a squad is loaded.
-  const detailFor = (chip: string, playNow: boolean) => {
-    if (playNow) return undefined
-    const proj = projection[chip]
-    if (proj && proj.gameweek != null) {
-      const confMark =
-        proj.confidence === 'high' ? '' :
-        proj.confidence === 'medium' ? ' (medium)' :
-        ' (provisional)'
-      const needsMark = proj.requires_transfers ? ' · needs transfers first' : ''
-      return `GW${proj.gameweek}${confMark}${needsMark}`
-    }
+  const target = (chip: string) => {
     const t = targets[chip]
     return t != null && t !== '' ? `GW${t}` : undefined
   }
@@ -526,66 +506,18 @@ const ChipsPanel: React.FC<{ chipAdvice: any; tripleCaptain: any }> = ({ chipAdv
     <>
       <h2 className="sec-h">Chips</h2>
       <div className="chip-grid">
-        <ChipBox label="Wildcard"    playNow={!!chipAdvice?.wildcard_now}    detail={detailFor('wildcard',    !!chipAdvice?.wildcard_now)} />
-        <ChipBox label="Free Hit"    playNow={!!chipAdvice?.free_hit_now}    detail={detailFor('free_hit',    !!chipAdvice?.free_hit_now)} />
-        <ChipBox label="Bench Boost" playNow={!!chipAdvice?.bench_boost_now} detail={detailFor('bench_boost', !!chipAdvice?.bench_boost_now)} />
+        <ChipBox label="Wildcard" playNow={!!chipAdvice?.wildcard_now} detail={target('wildcard')} />
+        <ChipBox label="Free Hit" playNow={!!chipAdvice?.free_hit_now} detail={target('free_hit')} />
+        <ChipBox label="Bench Boost" playNow={!!chipAdvice?.bench_boost_now} detail={target('bench_boost')} />
         <ChipBox
           label="Triple Capt."
           playNow={!!tripleCaptain?.play_now}
-          detail={
-            (() => {
-              if (tripleCaptain?.play_now) return undefined
-              const tc = projection['triple_captain']
-              if (tc && tc.gameweek != null) {
-                const confMark = tc.confidence === 'high' ? '' : tc.confidence === 'medium' ? ' (medium)' : ' (provisional)'
-                return `GW${tc.gameweek}${confMark}${tc.requires_transfers ? ' · needs transfers first' : ''}`
-              }
-              return tripleCaptain?.target_gameweek ? `GW${tripleCaptain.target_gameweek}` : undefined
-            })()
-          }
+          detail={tripleCaptain?.target_gameweek ? `GW${tripleCaptain.target_gameweek}` : undefined}
         />
       </div>
       {(chipAdvice?.reason?.trim() || tripleCaptain?.reason?.trim()) && (
         <p className="sec-note">{chipAdvice?.reason?.trim() || tripleCaptain?.reason?.trim()}</p>
       )}
-    </>
-  )
-}
-
-
-const TransferVerdict: React.FC<{
-  plan: { recommendation: 'transfer' | 'hold'; reason: string; expected_gain: number | null; hit_cost: number }
-  transferCount: number
-  degraded: boolean
-}> = ({ plan, transferCount, degraded }) => {
-  const isHold = plan.recommendation === 'hold'
-  const heading = degraded
-    ? 'Hermes LLM unavailable — deterministic signals only'
-    : isHold
-      ? 'Hold — roll the free transfer'
-      : transferCount === 1
-        ? 'Transfer this week'
-        : `Transfer this week (${transferCount} moves)`
-  const gainBits: string[] = []
-  if (plan.expected_gain != null) {
-    const sign = plan.expected_gain >= 0 ? '+' : ''
-    gainBits.push(`${sign}${plan.expected_gain.toFixed(1)} pts expected`)
-  }
-  if (plan.hit_cost) {
-    gainBits.push(`−${plan.hit_cost} pts hit`)
-  }
-  return (
-    <>
-      <h2 className="sec-h">
-        <span>Transfer verdict</span>
-        {gainBits.length > 0 && !degraded && (
-          <b className="tabular">{gainBits.join(' · ')}</b>
-        )}
-      </h2>
-      <p className={`sec-note ${degraded ? 'italic' : ''}`}>
-        <b className={degraded ? '' : 'text-content font-bold'}>{heading}.</b>
-        {plan.reason?.trim() && !degraded && <> {plan.reason}</>}
-      </p>
     </>
   )
 }
@@ -683,172 +615,6 @@ export interface ThisWeekTabProps {
   onStart: (runType: HermesRunType, force?: boolean, fplTeamId?: number) => void
 }
 
-// ==================== Tracked Squad view ====================
-
-const TrackedSquadView: React.FC<{
-  onViewChange: (v: HermesRunType) => void
-}> = ({ onViewChange }) => {
-  const [data, setData] = useState<TrackedSquadResponse | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const load = () => {
-    fetchTrackedSquad()
-      .then(setData)
-      .catch((e) => setErr(e?.message || 'Failed to load tracked squad'))
-  }
-  useEffect(() => { load() }, [])
-
-  const seed = async () => {
-    setBusy(true)
-    setErr(null)
-    try {
-      await seedTrackedSquad()
-      load()
-    } catch (e: any) {
-      setErr(e?.message || 'Seed failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const reset = async () => {
-    if (!confirm('Wipe the tracked squad and its full ledger? This cannot be undone.')) return
-    setBusy(true)
-    try {
-      await resetTrackedSquad()
-      load()
-    } catch (e: any) {
-      setErr(e?.message || 'Reset failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (data == null && err == null) {
-    return (
-      <div className="px-4 sm:px-6 py-6 text-content-subtle">Loading tracked squad…</div>
-    )
-  }
-
-  if (data && !data.seeded) {
-    return (
-      <div className="px-4 sm:px-6 py-6 max-w-[70ch]">
-        <h2 className="sec-h"><span>Tracked squad not seeded</span></h2>
-        <p className="sec-note">
-          The tracked squad is a persistent 15 that Hermes manages week to week — auto-applying its
-          own transfer recommendations after every deadline and banking the actual points. It becomes
-          the season-long benchmark of pure Hermes strategy, comparable against your real team and the
-          template average.
-        </p>
-        <p className="sec-note">
-          Seed it from the most recent <b>Best Squad</b> run. If you haven't run one yet, do that
-          first via the{' '}
-          <button className="btn-link !p-0 !inline" onClick={() => onViewChange('squad')}>
-            Best Squad view
-          </button>
-          .
-        </p>
-        {err && (
-          <p className="sec-note text-danger">
-            <AlertCircle className="w-3.5 h-3.5 inline mr-1 -mt-0.5" aria-hidden />
-            {err}
-          </p>
-        )}
-        <div className="flex gap-3 mt-3">
-          <button onClick={seed} disabled={busy} className="btn btn-hermes">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <Sparkles className="w-4 h-4" aria-hidden />}
-            {busy ? 'Seeding…' : 'Seed from Best Squad'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (!data) return null
-  const state = data.state!
-  const squad = data.squad
-  const ledger = data.ledger || []
-  const players = data.players || {}
-  const nameFor = (pid: number) => players[String(pid)]?.name ?? `#${pid}`
-  const cumulative = ledger.reduce((sum, r) => sum + (r.points_scored ?? 0) - r.transfer_cost, 0)
-  const scoredCount = ledger.filter((r) => r.points_scored != null).length
-  const templateCumulative = ledger.reduce((sum, r) => sum + (r.average_score ?? 0), 0)
-  const vsTemplate = scoredCount > 0 && templateCumulative > 0 ? cumulative - templateCumulative : null
-
-  return (
-    <div className="px-4 sm:px-6 py-5">
-      {/* State header */}
-      <h2 className="sec-h">
-        <span>Currently in GW{state.gameweek}</span>
-        <b className="tabular">£{state.bank.toFixed(1)}m bank · {state.free_transfers} FT</b>
-      </h2>
-      {state.chip_active && (
-        <p className="sec-note">Chip active this GW: <b>{state.chip_active}</b></p>
-      )}
-
-      {/* Same UI as Best Squad — pitch, teamsheet, bench */}
-      {squad && <PitchView squad={squad} adjustments={[]} />}
-
-      {/* Ledger */}
-      <h2 className="sec-h sec-gap">
-        <span>Season ledger</span>
-        {scoredCount > 0 && (
-          <b className="tabular">
-            {cumulative} pts {vsTemplate != null && (
-              <span className={vsTemplate >= 0 ? 'text-success' : 'text-danger'}>
-                {vsTemplate >= 0 ? '+' : ''}{vsTemplate} vs template
-              </span>
-            )}
-          </b>
-        )}
-      </h2>
-      {ledger.length === 0 && history.length <= 1 ? (
-        <p className="sec-note">No gameweeks played yet — check back after GW{state.gameweek} finishes.</p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {ledger.map((row) => (
-            <div key={row.gameweek} className="ledger">
-              <span className="d tabular">GW{row.gameweek}</span>
-              <span className="n">
-                {row.points_scored != null ? `${row.points_scored} pts` : 'pending'}
-                {row.transfer_cost > 0 && (
-                  <span className="text-danger"> (−{row.transfer_cost} hit)</span>
-                )}
-              </span>
-              <span className="r">
-                {row.transfers_made.length === 0 && 'held'}
-                {row.transfers_made.length > 0 && row.transfers_made.map((t: any, i: number) => (
-                  <span key={i}>
-                    {t.held ? `held — ${t.reason}` : `${nameFor(t.out_id)} → ${nameFor(t.in_id)}`}
-                    {i < row.transfers_made.length - 1 && '; '}
-                  </span>
-                ))}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {err && (
-        <p className="sec-note text-danger sec-gap">
-          <AlertCircle className="w-3.5 h-3.5 inline mr-1 -mt-0.5" aria-hidden />
-          {err}
-        </p>
-      )}
-      <p className="sec-note sec-gap text-content-subtle">
-        Every deadline, 30 min after locking, Hermes gets a fresh briefing on this exact 15 and
-        writes the next gameweek's row. On a degraded run (LLM unavailable) or an illegal
-        recommendation, the ledger records "held" with a reason rather than fabricating a move.
-      </p>
-      <div className="flex gap-3 mt-3">
-        <button onClick={reset} disabled={busy} className="btn-link text-danger">Reset tracked squad</button>
-      </div>
-    </div>
-  )
-}
-
-
 const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
   view, onViewChange, runs, activeByType, errors, status, avgDurationMs, onStart,
 }) => {
@@ -862,7 +628,6 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
   const [team, setTeam] = useState(() => getStoredTeam())
   const [picksNote, setPicksNote] = useState(false)
 
-  const isTracked = view === 'tracked'
   // my_team needs a connected team before Hermes can run
   const needsTeamSetup = view === 'my_team' && !team
   const start = (force?: boolean) => onStart(view, force, view === 'my_team' ? team?.id : undefined)
@@ -880,11 +645,7 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
   let headline: string
   let standfirst: string | undefined
 
-  if (isTracked) {
-    kicker = 'Tracked squad · pure Hermes benchmark'
-    headline = 'Tracked squad'
-    standfirst = "Hermes manages this 15 week to week. It is a benchmark, not advice for your team."
-  } else if (isRunning) {
+  if (isRunning) {
     kicker = `${info.label} · running`
     headline = 'Hermes is thinking'
     standfirst = `Agents → LLM → optimizer. Elapsed ${formatDuration(elapsed)}${
@@ -936,16 +697,24 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
         )}
       </section>
 
-      {/* the old flat run-type nav is gone — the App shell owns primary
-          navigation. The tab still exposes an onViewChange callback so its
-          embedded links (e.g. the tracked empty-state "Best Squad view" link)
-          can jump to another scenario. */}
-
-      {/* ---------- tracked squad view (short-circuits) ---------- */}
-      {isTracked && <TrackedSquadView onViewChange={onViewChange} />}
+      {/* ---------- numbered run-type nav ---------- */}
+      <nav className="run-nav scrollbar-hide" aria-label="Run type">
+        {HERMES_RUN_TYPES.map((rt, i) => (
+          <button
+            key={rt.value}
+            onClick={() => onViewChange(rt.value)}
+            className="run-nav-item"
+            aria-current={view === rt.value ? 'page' : undefined}
+          >
+            <i aria-hidden="true">{String(i + 1).padStart(2, '0')}</i>
+            {rt.label}
+            {activeByType[rt.value] && <Loader2 className="w-3 h-3 animate-spin" aria-hidden />}
+          </button>
+        ))}
+      </nav>
 
       {/* ---------- run controls ---------- */}
-      {!isTracked && !needsTeamSetup && (
+      {!needsTeamSetup && (
         <div className="flex items-center gap-4 flex-wrap px-4 sm:px-6 py-3.5 border-b border-border">
           <button onClick={() => start(false)} disabled={isRunning} className="btn btn-hermes">
             {isRunning ? (
@@ -1012,7 +781,7 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
       </div>
 
       {/* ---------- My Team setup gate ---------- */}
-      {!isTracked && needsTeamSetup && (
+      {needsTeamSetup && (
         <div className="px-4 sm:px-6 py-5">
           <TeamSetup
             onSaved={(t, picksAvailable) => {
@@ -1024,7 +793,7 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
       )}
 
       {/* ---------- in-flight progress ---------- */}
-      {!isTracked && isRunning && (
+      {isRunning && (
         <div className="px-4 sm:px-6 py-5">
           <h2 className="sec-h">
             <span>Running {info.label.toLowerCase()}</span>
@@ -1040,24 +809,14 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
       )}
 
       {/* ---------- the plate ---------- */}
-      {!isTracked && showReport && (
+      {showReport && (
         <div className="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr]">
           <div className="px-4 sm:px-6 py-5 min-w-0">
             {squad && <PitchView squad={squad} adjustments={adjustments} />}
 
-            {run.result?.transfer_plan && (
-              <div className={squad ? 'sec-gap' : ''}>
-                <TransferVerdict
-                  plan={run.result.transfer_plan}
-                  transferCount={run.result?.transfer_priorities?.length ?? 0}
-                  degraded={run.status === 'degraded'}
-                />
-              </div>
-            )}
-
             {run.result?.transfer_priorities?.length > 0 && (
               <>
-                <h2 className={`sec-h ${run.result?.transfer_plan ? 'sec-gap' : squad ? 'sec-gap' : ''}`}>
+                <h2 className={`sec-h ${squad ? 'sec-gap' : ''}`}>
                   <span>Transfer priorities</span>
                   <b className="tabular">{run.result.transfer_priorities.length}</b>
                 </h2>
@@ -1151,7 +910,7 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
       )}
 
       {/* ---------- honest empty state ---------- */}
-      {!isTracked && !run && !isRunning && !needsTeamSetup && (
+      {!run && !isRunning && !needsTeamSetup && (
         <div className="px-4 sm:px-6 py-5 max-w-[70ch]">
           <h2 className="sec-h">About this run</h2>
           <p className="text-sm text-content-muted leading-relaxed">{info.description}</p>

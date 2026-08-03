@@ -129,7 +129,6 @@ class HermesOrchestrator:
         result = self._apply(
             run_type, adjustments, deps, budget, gameweek, reports,
             names=names, trust_weights=trust_weights,
-            user_player_ids=user_player_ids,
         )
 
         progress(95, "Finalizing")
@@ -211,7 +210,6 @@ class HermesOrchestrator:
         reports: Dict[str, AgentReport],
         names: Dict[int, str],
         trust_weights: Optional[Dict[str, float]] = None,
-        user_player_ids: Optional[List[int]] = None,
     ) -> Dict:
         """
         Feed Hermes adjustments into the deterministic optimizers.
@@ -221,11 +219,7 @@ class HermesOrchestrator:
         badly calibrated Hermes automatically loses influence over the MILP.
         """
         from hermes.evaluation import apply_trust
-        from services.squad_service import (
-            assemble_fixed_squad,
-            assemble_squad_result,
-            compute_player_predictions,
-        )
+        from services.squad_service import assemble_squad_result, compute_player_predictions
 
         result: Dict = {}
         trust = trust_weights or {}
@@ -261,48 +255,18 @@ class HermesOrchestrator:
                     for p in predictions
                 ]
 
-            # my_team with a known 15: render THAT squad on the pitch, not a
-            # from-scratch MILP rebuild. Also keep the MILP output alongside
-            # as the reference "what a full rebuild would look like" (the
-            # wildcard advice reads it later).
-            fixed_squad_types = {"my_team"}
-            if run_type in fixed_squad_types and user_player_ids and len(user_player_ids) == 15:
-                try:
-                    result["squad"] = assemble_fixed_squad(
-                        predictions, list(user_player_ids), gameweek,
-                        method_name="my_team",
-                        excluded_ids=excluded or None,
-                    )
-                except ValueError as e:
-                    # Squad missing predictions (rare — e.g. a player retired
-                    # mid-season and got filtered): fall through to the MILP
-                    # path rather than failing the whole run.
-                    logger.warning(f"Fixed-squad rendering failed, falling back to MILP: {e}")
-                    result["fixed_squad_error"] = str(e)
-
-                # Optimal-rebuild reference alongside
-                try:
-                    result["optimal_squad"] = assemble_squad_result(
-                        predictions, budget, "hermes", gameweek,
-                        locked_ids=locked or None, excluded_ids=excluded or None,
-                    )
-                except ValueError as e:
-                    logger.warning(f"Optimal-squad reference skipped: {e}")
-
-            if "squad" not in result:
-                try:
-                    result["squad"] = assemble_squad_result(
-                        predictions, budget, "hermes", gameweek,
-                        locked_ids=locked or None, excluded_ids=excluded or None,
-                    )
-                except ValueError as e:
-                    # Over-constrained (too many excludes / tiny budget): keep the
-                    # rest of the recommendation rather than failing the whole run.
-                    logger.warning(f"Squad assembly skipped: {e}")
-                    result["squad_error"] = str(e)
+            try:
+                result["squad"] = assemble_squad_result(
+                    predictions, budget, "hermes", gameweek,
+                    locked_ids=locked or None, excluded_ids=excluded or None,
+                )
+            except ValueError as e:
+                # Over-constrained (too many excludes / tiny budget): keep the
+                # rest of the recommendation rather than failing the whole run.
+                logger.warning(f"Squad assembly skipped: {e}")
+                result["squad_error"] = str(e)
 
         if adjustments:
-            result["transfer_plan"] = adjustments.transfer_plan.model_dump()
             result["captain_ranking"] = [
                 {"id": pid, "name": names.get(pid, "?")}
                 for pid in adjustments.captain_ranking

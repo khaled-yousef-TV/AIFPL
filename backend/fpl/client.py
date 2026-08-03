@@ -232,25 +232,9 @@ class FPLClient:
         Returns:
             {player_id: total_points} for the gameweek
         """
-        return {
-            pid: stats.get("total_points", 0)
-            for pid, stats in self.get_event_live_stats(gameweek).items()
-        }
-
-    def get_event_live_stats(self, gameweek: int) -> Dict[int, Dict[str, Any]]:
-        """
-        Full per-player stat block for a (finished or live) gameweek.
-
-        Same single API call as get_event_live, but keeps `minutes` and the
-        rest — the tracked squad needs minutes to apply autosubs and the
-        captain/vice rule.
-
-        Returns:
-            {player_id: stats dict} for the gameweek
-        """
         data = self._get(f"event/{gameweek}/live/")
         return {
-            el["id"]: el.get("stats", {}) or {}
+            el["id"]: el.get("stats", {}).get("total_points", 0)
             for el in data.get("elements", [])
         }
     

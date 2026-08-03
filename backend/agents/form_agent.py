@@ -78,49 +78,17 @@ class FormAgent(BaseAgent):
             reverse=True,
         )
 
-        # Squad form: every owned player, regardless of minutes/status. A
-        # rotated or newly-flagged owned player must still surface here even
-        # if he doesn't clear the global hot/cold thresholds.
-        squad_form: list = []
-        if ctx.user_player_ids:
-            owned = set(ctx.user_player_ids)
-            for p in players:
-                if p.id not in owned:
-                    continue
-                form = float(p.form)
-                ppg = float(p.points_per_game)
-                squad_form.append(FormEntry(
-                    id=p.id,
-                    name=p.web_name,
-                    team=short_names.get(p.team, "???"),
-                    position=p.position,
-                    form=form,
-                    points_per_game=ppg,
-                    delta=round(form - ppg, 2),
-                ))
-            # Cold owned players first — the ones the manager most needs to see
-            squad_form.sort(key=lambda e: e.delta)
-
         payload = FormSignals(
             hot_players=hot,
             cold_players=cold,
             team_trends=trend_entries,
-            squad_form=squad_form,
         )
 
         hot_names = ", ".join(e.name for e in hot[:3])
         bounce = ", ".join(t.team for t in trend_entries[:3])
-        squad_note = ""
-        if squad_form:
-            coldest = [e for e in squad_form if e.delta < 0][:2]
-            if coldest:
-                squad_note = " Squad cold spots: " + ", ".join(
-                    f"{e.name} ({e.delta:+.1f})" for e in coldest
-                ) + "."
         summary = (
             f"Hot: {hot_names or 'none'}. "
             f"{len(cold)} good players in poor form. "
             f"Top bounce-back teams: {bounce or 'none'}."
-            + squad_note
         )
         return summary, payload, "ok"

@@ -131,15 +131,6 @@ class SquadRules(BaseModel):
     )
 
 
-class SquadFixtureImpact(BaseModel):
-    """How the next-N fixture window impacts the manager's actual 15."""
-    gameweek: int
-    owned_players_doubling: int = 0   # count of squad players whose team doubles
-    owned_players_blanking: int = 0   # count of squad players whose team blanks
-    doubling_names: List[str] = Field(default_factory=list)
-    blanking_names: List[str] = Field(default_factory=list)
-
-
 class MechanicsSignals(BaseModel):
     current_gameweek: int
     next_gameweek: int
@@ -154,10 +145,6 @@ class MechanicsSignals(BaseModel):
     price_fall_candidates: List[PriceChangeCandidate] = Field(default_factory=list)
     squad_rules: SquadRules = Field(default_factory=SquadRules)
     chip_guidance: List[str] = Field(default_factory=list)
-    # Squad-conditional fixture impact — only populated when a squad is
-    # being reasoned about. Concrete "you have 4 players doubling in GW7"
-    # is what makes chip projections meaningful.
-    squad_fixture_impact: List[SquadFixtureImpact] = Field(default_factory=list)
 
 
 # ==================== Availability agent ====================
@@ -208,10 +195,6 @@ class FormSignals(BaseModel):
     hot_players: List[FormEntry] = Field(default_factory=list)
     cold_players: List[FormEntry] = Field(default_factory=list)
     team_trends: List[TeamTrendEntry] = Field(default_factory=list)
-    # Form entries for every squad player — ignores the MIN_MINUTES filter
-    # so a benched/rotated owned player still shows up. Empty when no squad
-    # is being reasoned about.
-    squad_form: List[FormEntry] = Field(default_factory=list)
 
 
 # ==================== Variability agent ====================
