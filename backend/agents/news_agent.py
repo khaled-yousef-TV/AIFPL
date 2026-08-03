@@ -26,7 +26,7 @@ from .schemas import NewsItem, NewsSignals
 logger = logging.getLogger(__name__)
 
 MAX_SEARCH_QUERIES = 8
-MAX_ITEMS = 25
+MAX_ITEMS = 15
 
 NEWS_SYSTEM_PROMPT = """You are an FPL news analyst. Given search results and official FPL \
 injury notes, extract items relevant to Fantasy Premier League decisions for the upcoming \
@@ -44,7 +44,7 @@ Respond with ONLY a JSON object:
 "sentiment": float (-1..1), "impact": "out|doubt|boost|neutral|incentive",
 "incentive_type": "record_chase|golden_boot|milestone|contract|call_up|revenge|other"|null,
 "behavioral_implication": str|null, "source_url": str|null}]}
-Only include items genuinely useful for FPL decisions. Max 25 items.
+Only include items genuinely useful for FPL decisions. Max 15 items.
 Discard stale results: ignore any search result about a previous season, a completed \
 record chase, or a player's former club — search engines sometimes return old articles \
 (check each result's URL and text against the stated upcoming gameweek and season). \
@@ -216,7 +216,7 @@ class NewsAgent(BaseAgent):
         )
 
         try:
-            raw, _usage = llm.complete(NEWS_SYSTEM_PROMPT, user_prompt, max_tokens=5000)
+            raw, _usage = llm.complete(NEWS_SYSTEM_PROMPT, user_prompt, max_tokens=3000)
             items = self._parse_items(raw, ctx)
         except Exception as e:
             logger.error(f"News agent LLM call failed: {e}", exc_info=True)
