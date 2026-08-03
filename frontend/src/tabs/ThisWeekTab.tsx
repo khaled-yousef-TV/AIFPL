@@ -947,15 +947,15 @@ const ThisWeekTab: React.FC<ThisWeekTabProps> = ({
       {/* ---------- run controls ---------- */}
       {!isTracked && !needsTeamSetup && (
         <div className="flex items-center gap-4 flex-wrap px-4 sm:px-6 py-3.5 border-b border-border">
-          <button onClick={() => start(false)} disabled={isRunning} className="btn btn-hermes">
+          <button onClick={() => start(!!squad)} disabled={isRunning} className="btn btn-hermes">
             {isRunning ? (
               <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
             ) : (
               <Sparkles className="w-4 h-4" aria-hidden />
             )}
-            {isRunning ? 'Hermes is thinking…' : 'Ask Hermes'}
+            {isRunning ? 'Hermes is thinking…' : squad ? 'Re-run fresh' : 'Ask Hermes'}
           </button>
-          {!isRunning && run && (
+          {!isRunning && run && !squad && (
             <button onClick={() => start(true)} className="btn-link">
               Re-run fresh
             </button>

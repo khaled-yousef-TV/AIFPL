@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
 
 import type { GameWeekInfo } from './types'
@@ -35,10 +36,20 @@ const TopNav: React.FC<{
   activeByType: Record<string, unknown>
 }> = ({ route, onRoute, activeByType }) => {
   const [openMenu, setOpenMenu] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const scenarioActive =
     route.top === 'scenario' &&
     SCENARIO_ITEMS.find((s) => s.runType === route.runType)?.label
   const anyScenarioRunning = SCENARIO_ITEMS.some((s) => activeByType[s.runType])
+
+  const toggleMenu = () => {
+    if (!openMenu && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect()
+      setMenuPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    }
+    setOpenMenu((s) => !s)
+  }
 
   // Close on outside-click / Escape. The onMouseLeave approach fired before
   // onClick could register on the menu items — clicks got lost.
@@ -73,7 +84,8 @@ const TopNav: React.FC<{
       ))}
       <div className="relative" data-scenarios-menu>
         <button
-          onClick={() => setOpenMenu((s) => !s)}
+          ref={triggerRef}
+          onClick={toggleMenu}
           className="run-nav-item"
           aria-current={route.top === 'scenario' ? 'page' : undefined}
           aria-expanded={openMenu}
@@ -84,30 +96,34 @@ const TopNav: React.FC<{
           {anyScenarioRunning && <Loader2 className="w-3 h-3 animate-spin" aria-hidden />}
           <ChevronDown className="w-3 h-3" aria-hidden />
         </button>
-        {openMenu && (
-          <div
-            role="menu"
-            className="absolute z-20 mt-1 right-0 min-w-[240px] rounded border border-border bg-bg shadow-lg py-1"
-          >
-            {SCENARIO_ITEMS.map((s) => (
-              <button
-                key={s.runType}
-                role="menuitem"
-                onClick={() => {
-                  onRoute({ top: 'scenario', runType: s.runType })
-                  setOpenMenu(false)
-                }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-surface-1 flex items-center justify-between gap-3"
-              >
-                <span>
-                  <span className="block">{s.label}</span>
-                  <span className="block text-content-subtle text-xs">{s.description}</span>
-                </span>
-                {activeByType[s.runType] && <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />}
-              </button>
-            ))}
-          </div>
-        )}
+        {openMenu &&
+          createPortal(
+            <div
+              role="menu"
+              data-scenarios-menu
+              className="fixed z-50 min-w-[240px] rounded border border-border bg-bg shadow-lg py-1"
+              style={menuPos ?? undefined}
+            >
+              {SCENARIO_ITEMS.map((s) => (
+                <button
+                  key={s.runType}
+                  role="menuitem"
+                  onClick={() => {
+                    onRoute({ top: 'scenario', runType: s.runType })
+                    setOpenMenu(false)
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-1 flex items-center justify-between gap-3"
+                >
+                  <span>
+                    <span className="block">{s.label}</span>
+                    <span className="block text-content-subtle text-xs">{s.description}</span>
+                  </span>
+                  {activeByType[s.runType] && <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )}
       </div>
     </nav>
   )
