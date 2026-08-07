@@ -1,0 +1,20 @@
+{
+  "budget": 1000,
+  "players": [
+    {"id": 1, "name": "Goalkeeper One", "position": "GK", "club": "Arsenal", "cost": 55, "projected_points": 4.1},
+    {"id": 2, "name": "Goalkeeper Two", "position": "GK", "club": "Everton", "cost": 40, "projected_points": 2.8},
+    {"id": 3, "name": "Defender One", "position": "DEF", "club": "Arsenal", "cost": 60, "projected_points": 5.0},
+    {"id": 4, "name": "Defender Two", "position": "DEF", "club": "Liverpool", "cost": 60, "projected_points": 4.8},
+    {"id": 5, "name": "Defender Three", "position": "DEF", "club": "Chelsea", "cost": 50, "projected_points": 4.0},
+    {"id": 6, "name": "Defender Four", "position": "DEF", "club": "Aston Villa", "cost": 45, "projected_points": 3.6},
+    {"id": 7, "name": "Defender Five", "position": "DEF", "club": "Brighton", "cost": 40, "projected_points": 3.1},
+    {"id": 8, "name": "Midfielder One", "position": "MID", "club": "Liverpool", "cost": 125, "projected_points": 7.2},
+    {"id": 9, "name": "Midfielder Two", "position": "MID", "club": "Arsenal", "cost": 105, "projected_points": 6.5},
+    {"id": 10, "name": "Midfielder Three", "position": "MID", "club": "Man City", "cost": 85, "projected_points": 5.5},
+    {"id": 11, "name": "Midfielder Four", "position": "MID", "club": "Spurs", "cost": 65, "projected_points": 4.9},
+    {"id": 12, "name": "Midfielder Five", "position": "MID", "club": "Leeds", "cost": 50, "projected_points": 3.2},
+    {"id": 13, "name": "Forward One", "position": "FWD", "club": "Man City", "cost": 90, "projected_points": 7.5},
+    {"id": 14, "name": "Forward Two", "position": "FWD", "club": "Newcastle", "cost": 75, "projected_points": 5.1},
+    {"id": 15, "name": "Forward Three", "position": "FWD", "club": "Fulham", "cost": 55, "projected_points": 3.4}
+  ]
+}
