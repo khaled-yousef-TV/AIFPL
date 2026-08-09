@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup H — Stadium Cutaway</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif; background: #05070d; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .night { position: fixed; inset: 0; background: radial-gradient(1200px 600px at 50% 8%, #1c2a4d 0%, #0a1020 55%, #04060c 100%); }
+  .moon { position: fixed; top: 40px; right: 90px; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 40% 40%, #fdfce8, #e8e4c0); box-shadow: 0 0 60px 20px rgba(255,252,220,.35); }
+  .stars { position: fixed; inset: 0; background-image: radial-gradient(1px 1px at 60px 40px, rgba(255,255,255,.7), transparent), radial-gradient(1px 1px at 180px 90px, rgba(255,255,255,.5), transparent), radial-gradient(1px 1px at 300px 30px, rgba(255,255,255,.6), transparent), radial-gradient(1px 1px at 420px 120px, rgba(255,255,255,.4), transparent); background-size: 460px 200px; }
+  .stage { position: relative; width: 1180px; height: 640px; z-index: 2; }
+  /* floodlights */
+  .light { position: absolute; top: -8px; width: 8px; height: 130px; background: linear-gradient(180deg, #fefce8 0%, rgba(254,252,232,.15) 70%, transparent); transform-origin: top center; }
+  .light.l1 { left: 120px; transform: rotate(14deg); } .light.l2 { left: 290px; transform: rotate(6deg); }
+  .light.r1 { right: 120px; transform: rotate(-14deg); } .light.r2 { right: 290px; transform: rotate(-6deg); }
+  .glow { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 900px; height: 240px; background: radial-gradient(ellipse, rgba(255,250,210,.20), transparent 65%); }
+  /* stands */
+  .stands { position: absolute; left: 0; right: 0; top: 60px; height: 130px; background-image: radial-gradient(2px 2px at 14px 16px, #2c3a63, transparent), radial-gradient(2px 2px at 44px 34px, #35446f, transparent), radial-gradient(2px 2px at 82px 10px, #2c3a63, transparent), radial-gradient(2px 2px at 120px 30px, #35446f, transparent); background-size: 140px 50px; opacity: .85; }
+  .roof { position: absolute; left: -30px; right: -30px; top: 48px; height: 16px; background: linear-gradient(180deg, #11182c, #0a0f1e); border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+  /* scoreboard */
+  .board { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: #02040a; border: 3px solid #38e8a0; border-radius: 6px; padding: 8px 22px 10px; text-align: center; box-shadow: 0 0 30px rgba(56,232,160,.4), 0 12px 40px rgba(0,0,0,.7); }
+  .board .led { font-family: "SF Mono", Menlo, monospace; font-size: 30px; font-weight: 700; color: #38e8a0; letter-spacing: 3px; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px rgba(56,232,160,.9); }
+  .board .cap { font-size: 8px; letter-spacing: 4px; color: #38e8a0; opacity: .8; }
+  /* pitch */
+  .pitch { position: absolute; left: 50%; top: 96px; transform: translateX(-50%); width: 860px; height: 500px; border: 4px solid #fff; border-radius: 8px; background: repeating-linear-gradient(90deg, #15803d 0 54px, #16a34a 54px 108px); box-shadow: 0 30px 90px rgba(0,0,0,.7); }
+  .pline { position: absolute; left: 0; right: 0; top: 50%; border-top: 3px solid rgba(255,255,255,.8); }
+  .pcircle { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 100px; height: 100px; border: 3px solid rgba(255,255,255,.8); border-radius: 50%; }
+  .pbox { position: absolute; left: 8%; width: 84%; height: 90px; border: 3px solid rgba(255,255,255,.8); }
+  .pbox.t { top: 0; border-top: 0; } .pbox.b { bottom: 0; border-bottom: 0; }
+  .pitch-caption { position: absolute; top: -24px; left: 0; font-size: 11px; letter-spacing: 3px; color: #d1fae5; opacity: .85; }
+  /* players as figures */
+  .fig { position: absolute; transform: translate(-50%,-50%); text-align: center; }
+  .fig .body { width: 16px; height: 24px; margin: 0 auto; border-radius: 8px 8px 3px 3px; border: 2px solid #fff; position: relative; }
+  .fig .head { width: 9px; height: 9px; border-radius: 50%; background: #ffe0bd; margin: -12px auto 2px; border: 1px solid rgba(0,0,0,.3); }
+  .fig .tag { font-size: 10px; font-weight: 800; margin-top: 3px; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+  .fig .role { font-size: 7px; letter-spacing: 1px; color: #dcfce7; opacity: .8; }
+  .fig.gk .body { background: #ca8a04; } .fig.def .body { background: #b91c1c; } .fig.mid .body { background: #1d4ed8; } .fig.fwd .body { background: #15803d; }
+  .fig.cap .armband { position: absolute; top: 3px; right: -7px; width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 10px rgba(251,191,36,1); }
+  /* corner flags = chips */
+  .flag { position: absolute; width: 2px; height: 34px; background: #fff; }
+  .flag::before { content: attr(data-txt); position: absolute; top: -4px; left: 2px; background: #052e16; border: 1px solid #4ade80; font-size: 9px; font-weight: 800; padding: 3px 7px; border-radius: 3px; color: #4ade80; letter-spacing: 1px; }
+  .flag.f1 { left: 60px; top: 44px; } .flag.f2 { right: 60px; top: 44px; } .flag.f3 { left: 60px; bottom: 44px; } .flag.f4 { right: 60px; bottom: 44px; }
+  /* dugouts */
+  .dugout { position: absolute; top: 60px; width: 150px; height: 120px; background: rgba(3,8,16,.85); border: 2px solid #38e8a0; border-radius: 8px; padding: 6px 8px; }
+  .dugout .lbl { font-size: 8px; letter-spacing: 2px; color: #38e8a0; margin-bottom: 4px; }
+  .dugout .item { font-size: 9px; padding: 2px 0; border-bottom: 1px dashed rgba(56,232,160,.3); color: #d1fae5; }
+  .dugout.out { left: -8px; } .dugout.in { right: -8px; }
+  .dugout .arr { position: absolute; top: 50%; font-size: 16px; color: #4ade80; }
+  .dugout.out .arr { right: -14px; } .dugout.in .arr { left: -14px; }
+  /* tunnel */
+  .tunnel { position: absolute; left: 50%; transform: translateX(-50%); bottom: -6px; width: 130px; height: 26px; background: linear-gradient(180deg, #060b18, #02040a); border: 2px solid #38e8a0; border-bottom: 0; border-radius: 6px 6px 0 0; text-align: center; padding-top: 4px; font-size: 10px; letter-spacing: 3px; color: #38e8a0; }
+  /* bench side strips */
+  .side-note { position: absolute; top: 96px; width: 130px; font-size: 9px; color: #c8f7dd; line-height: 1.5; }
+  .side-note b { color: #fff; }
+  .side-note.left { left: 0; text-align: right; } .side-note.right { right: 0; }
+  .sample { position: fixed; top: 14px; left: 14px; z-index: 5; border: 1px solid #f59e0b; color: #fbbf24; font-size: 10px; padding: 4px 10px; border-radius: 999px; letter-spacing: 2px; background: rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+<div class="night"></div>
+<div class="stars"></div>
+<div class="moon"></div>
+<div class="sample">SAMPLE</div>
+<div class="stage">
+  <div class="roof"></div>
+  <div class="stands"></div>
+  <div class="glow"></div>
+  <div class="light l1"></div><div class="light l2"></div><div class="light r1"></div><div class="light r2"></div>
+  <div class="board">
+    <div class="cap">AIFPL STADIUM &middot; GW1 2026-27</div>
+    <div class="led" id="timer">00d 00h 00m 00s</div>
+    <div class="cap">KICK-OFF (DEADLINE) FRI 21 AUG 17:30 UTC</div>
+  </div>
+  <div class="pitch">
+    <div class="pitch-caption">THE PITCH &middot; 1-4-5-1 &middot; CAPTAIN B.FERNANDES</div>
+    <div class="pline"></div><div class="pcircle"></div><div class="pbox t"></div><div class="pbox b"></div>
+    <div class="fig fwd" style="left:50%; top:10%"><div class="head"></div><div class="body"></div><div class="tag">Thiago</div><div class="role">BRE</div></div>
+    <div class="fig mid" style="left:16%; top:36%"><div class="head"></div><div class="body"></div><div class="tag">Anderson</div><div class="role">MCI</div></div>
+    <div class="fig mid" style="left:34%; top:38%"><div class="head"></div><div class="body"></div><div class="tag">Rice</div><div class="role">ARS</div></div>
+    <div class="fig mid cap" style="left:51%; top:35%"><div class="head"></div><div class="body"><div class="armband"></div></div><div class="tag">B.Fernandes</div><div class="role">MUN</div></div>
+    <div class="fig mid" style="left:68%; top:38%"><div class="head"></div><div class="body"></div><div class="tag">Gibbs-White</div><div class="role">NFO</div></div>
+    <div class="fig mid" style="left:85%; top:36%"><div class="head"></div><div class="body"></div><div class="tag">Semenyo</div><div class="role">MCI</div></div>
+    <div class="fig def" style="left:17%; top:63%"><div class="head"></div><div class="body"></div><div class="tag">Gabriel</div><div class="role">ARS</div></div>
+    <div class="fig def" style="left:37%; top:66%"><div class="head"></div><div class="body"></div><div class="tag">Tarkowski</div><div class="role">EVE</div></div>
+    <div class="fig def" style="left:58%; top:66%"><div class="head"></div><div class="body"></div><div class="tag">Virgil</div><div class="role">LIV</div></div>
+    <div class="fig def" style="left:80%; top:63%"><div class="head"></div><div class="body"></div><div class="tag">Gu&eacute;hi</div><div class="role">MCI</div></div>
+    <div class="fig gk" style="left:50%; top:88%"><div class="head"></div><div class="body"></div><div class="tag">Raya</div><div class="role">ARS</div></div>
+    <div class="flag f1" data-txt="WC &#10003;"></div><div class="flag f2" data-txt="BB &#10003;"></div>
+    <div class="flag f3" data-txt="TC &#10003;"></div><div class="flag f4" data-txt="FH &#10003;"></div>
+  </div>
+  <div class="dugout out">
+    <div class="lbl">EXITING &mdash; TRANSFERRED OUT</div>
+    <div class="item">Jo&atilde;o Pedro (CHE) <span style="color:#fbbf24">sample</span></div>
+    <div class="item">Haaland (MCI) <span style="color:#fbbf24">sample</span></div>
+    <div class="arr">&#8594;</div>
+  </div>
+  <div class="dugout in">
+    <div class="lbl">ENTERING &mdash; TRANSFERRED IN</div>
+    <div class="item">Thiago (BRE) <span style="color:#4ade80">+2.1</span></div>
+    <div class="item">Semenyo (MCI) <span style="color:#4ade80">+1.4</span></div>
+    <div class="arr">&#8592;</div>
+  </div>
+  <div class="side-note left">
+    <b>TELEGRAM</b><br>notify 13:30 UTC<br>refresh 16:00 UTC<br>bank &pound;0.0m &middot; 1 FT
+  </div>
+  <div class="side-note right">
+    <b>BENCH</b><br>Dubravka (TOT)<br>Fredricson (MUN)<br>Scarlett (TOT) &middot; Danns (LIV)<br>scorecard 34.2 <span style="color:#4ade80">sample</span>
+  </div>
+  <div class="tunnel">&#9660; TUNNEL &#9660;</div>
+</div>
+<script>
+  const t = Date.parse("2026-08-21T17:30:00Z");
+  setInterval(() => { const s = Math.max(0, Math.floor((t - Date.now())/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const x = s%60; document.getElementById("timer").textContent = `${String(d).padStart(2,"0")}d ${String(h).padStart(2,"0")}h ${String(m).padStart(2,"0")}m ${String(x).padStart(2,"0")}s`; }, 1000);
+</script>
+</body>
+</html>

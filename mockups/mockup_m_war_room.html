@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AIFPL War Room — Strategic Season Overview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Courier New", monospace; background: #1a1a2e; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 22px; }
+  .room { background: linear-gradient(135deg, #0f0f23, #1a1a2e); padding: 20px; border-radius: 12px; box-shadow: inset 0 0 80px rgba(0,0,0,.5); border: 2px solid #2a2a4a; }
+  .board { width: 1260px; max-width: 96vw; background: #0d1117; border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.7), 0 0 40px rgba(56,189,248,.08); padding: 26px 34px 20px; position: relative; border: 1px solid #21262d; }
+  .board::after { content: ""; position: absolute; inset: 0; border-radius: 12px; background: linear-gradient(105deg, transparent 0 40%, rgba(56,189,248,.04) 48%, transparent 56%); pointer-events: none; }
+  .glow-dot { position: absolute; top: -8px; right: 26px; width: 16px; height: 16px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 20px #38bdf8; animation: pulse 2s ease-in-out infinite; }
+  .glow-dot.l { right: auto; left: 26px; animation-delay: .5s; }
+  @keyframes pulse { 0%,100% { opacity: .6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #21262d; padding-bottom: 8px; margin-bottom: 18px; }
+  h1 { font-size: 26px; color: #58a6ff; font-weight: 700; letter-spacing: 1px; animation: glow-in 1.2s ease backwards; }
+  @keyframes glow-in { from { opacity: 0; text-shadow: 0 0 30px #58a6ff; } }
+  .date { font-size: 13px; color: #8b949e; }
+  .tag { background: rgba(31,111,235,.13); color: #58a6ff; border: 1px solid #1f6feb; border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 700; animation: blink 2s ease-in-out infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+  .grid-top { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .stat-card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; position: relative; overflow: hidden; animation: slide-up .6s cubic-bezier(.2,1.2,.4,1) backwards; }
+  .stat-card:nth-child(1) { animation-delay: .1s; } .stat-card:nth-child(2) { animation-delay: .2s; } .stat-card:nth-child(3) { animation-delay: .3s; }
+  @keyframes slide-up { from { transform: translateY(30px); opacity: 0; } }
+  .stat-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--accent), transparent); }
+  .stat-card .label { font-size: 10px; color: #8b949e; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+  .stat-card .value { font-size: 36px; font-weight: 700; color: #f0f6fc; font-variant-numeric: tabular-nums; }
+  .stat-card .delta { font-size: 12px; margin-top: 4px; }
+  .stat-card .delta.up { color: #3fb950; } .stat-card .delta.down { color: #f85149; }
+  .stat-card .sparkline { display: flex; align-items: end; gap: 2px; height: 30px; margin-top: 10px; }
+  .stat-card .sparkline .bar { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; opacity: .7; }
+  .grid-main { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .panel { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 18px; position: relative; }
+  .panel h2 { font-size: 13px; color: #58a6ff; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
+  .rank-chart { position: relative; height: 200px; }
+  .rank-chart svg { width: 100%; height: 100%; }
+  .rank-line { fill: none; stroke: #38bdf8; stroke-width: 2.5; stroke-linecap: round; animation: draw-line 2s ease forwards; }
+  .rank-area { fill: url(#rankGrad); opacity: .3; }
+  @keyframes draw-line { from { stroke-dasharray: 800; stroke-dashoffset: 800; } to { stroke-dashoffset: 0; } }
+  .chip-timeline { display: flex; flex-direction: column; gap: 10px; }
+  .chip-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; animation: slide-in .5s ease backwards; }
+  .chip-row:nth-child(1) { animation-delay: .4s; } .chip-row:nth-child(2) { animation-delay: .5s; } .chip-row:nth-child(3) { animation-delay: .6s; } .chip-row:nth-child(4) { animation-delay: .7s; }
+  @keyframes slide-in { from { transform: translateX(30px); opacity: 0; } }
+  .chip-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; }
+  .chip-icon.wc { background: #da3633; color: #fff; } .chip-icon.bb { background: #f0883e; color: #fff; } .chip-icon.tc { background: #a371f7; color: #fff; } .chip-icon.fh { background: #3fb950; color: #fff; }
+  .chip-info .name { font-size: 13px; color: #f0f6fc; font-weight: 700; }
+  .chip-info .meta { font-size: 11px; color: #8b949e; }
+  .chip-status { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+  .chip-status.ready { background: rgba(63,185,80,.13); color: #3fb950; border: 1px solid rgba(63,185,80,.27); }
+  .chip-status.used { background: rgba(248,81,73,.13); color: #f85149; border: 1px solid rgba(248,81,73,.27); }
+  .transfer-log { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .log-panel { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; }
+  .log-panel h3 { font-size: 11px; color: #58a6ff; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+  .log-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+  .log-row:last-child { border-bottom: 0; }
+  .log-row .gw { color: #8b949e; font-weight: 700; min-width: 36px; }
+  .log-row .out { color: #f85149; text-decoration: line-through; }
+  .log-row .arrow { color: #484f58; }
+  .log-row .in { color: #3fb950; }
+  .log-row .pts { margin-left: auto; color: #f0883e; font-weight: 700; }
+  .narrative { margin-top: 18px; background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 18px; position: relative; }
+  .narrative h2 { font-size: 13px; color: #58a6ff; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
+  .narrative-text { font-size: 14px; color: #c9d1d9; line-height: 1.6; }
+  .narrative-text .hl { color: #38bdf8; font-weight: 700; }
+  .narrative-text .warn { color: #f0883e; }
+  .narrative-cursor { display: inline-block; width: 2px; height: 14px; background: #58a6ff; animation: cursor-blink 1s step-end infinite; vertical-align: middle; margin-left: 2px; }
+  @keyframes cursor-blink { 50% { opacity: 0; } }
+  .sample { position: absolute; bottom: 8px; right: 22px; font-size: 10px; color: #484f58; }
+  .loader { position: fixed; inset: 0; z-index: 50; background: #0d1117; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; animation: loadout .7s ease 2.2s forwards; }
+  .loader .ring { width: 80px; height: 80px; border-radius: 50%; border: 3px solid #21262d; border-top-color: #38bdf8; animation: ringspin 1s linear infinite; }
+  @keyframes ringspin { to { transform: rotate(360deg); } }
+  .loader .txt { font-size: 18px; color: #58a6ff; letter-spacing: 2px; }
+  .loader .sub { font-size: 12px; color: #484f58; }
+  @keyframes loadout { to { opacity: 0; visibility: hidden; } }
+  .board { animation: boardin .8s cubic-bezier(.2,1.2,.4,1) 1s backwards; }
+  @keyframes boardin { from { transform: scale(.96); opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="loader">
+  <div class="ring"></div>
+  <div class="txt">LOADING WAR ROOM</div>
+  <div class="sub">AIFPL &middot; strategic overview</div>
+</div>
+<div class="room">
+<div class="board">
+  <div class="glow-dot"></div><div class="glow-dot l"></div>
+  <header>
+    <h1>WAR ROOM &mdash; Season Dashboard</h1>
+    <div class="date">Season 2026/27 &middot; GW 6 of 38 <span class="tag">LIVE</span></div>
+  </header>
+
+  <div class="grid-top">
+    <div class="stat-card" style="--accent:#38bdf8">
+      <div class="label">Overall Rank</div>
+      <div class="value">142,831</div>
+      <div class="delta up">+28,419 since GW1</div>
+      <div class="sparkline">
+        <div class="bar" style="height:40%"></div><div class="bar" style="height:55%"></div><div class="bar" style="height:48%"></div>
+        <div class="bar" style="height:62%"></div><div class="bar" style="height:78%"></div><div class="bar" style="height:85%"></div>
+      </div>
+    </div>
+    <div class="stat-card" style="--accent:#3fb950">
+      <div class="label">Total Points</div>
+      <div class="value">387</div>
+      <div class="delta up">+68 last GW (above avg)</div>
+      <div class="sparkline">
+        <div class="bar" style="height:35%"></div><div class="bar" style="height:50%"></div><div class="bar" style="height:45%"></div>
+        <div class="bar" style="height:70%"></div><div class="bar" style="height:65%"></div><div class="bar" style="height:90%"></div>
+      </div>
+    </div>
+    <div class="stat-card" style="--accent:#a371f7">
+      <div class="label">GW Points Avg</div>
+      <div class="value">64.5</div>
+      <div class="delta up">+8.2 above template</div>
+      <div class="sparkline">
+        <div class="bar" style="height:55%"></div><div class="bar" style="height:42%"></div><div class="bar" style="height:60%"></div>
+        <div class="bar" style="height:58%"></div><div class="bar" style="height:72%"></div><div class="bar" style="height:80%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-main">
+    <div class="panel">
+      <h2>Rank Trajectory</h2>
+      <div class="rank-chart">
+        <svg viewBox="0 0 600 200">
+          <defs><linearGradient id="rankGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#38bdf8" stop-opacity=".4"/><stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/></linearGradient></defs>
+          <path class="rank-area" d="M0,160 L100,140 200,125 300,110 400,85 500,55 600,40 600,200 0,200Z"/>
+          <path class="rank-line" d="M0,160 L100,140 200,125 300,110 400,85 500,55 600,40"/>
+          <circle cx="600" cy="40" r="5" fill="#38bdf8"><animate attributeName="r" values="5;8;5" dur="2s" repeatCount="indefinite"/></circle>
+        </svg>
+        <div style="position:absolute;top:5px;right:10px;font-size:10px;color:#8b949e">GW1</div>
+        <div style="position:absolute;top:5px;left:10px;font-size:10px;color:#8b949e">10M</div>
+        <div style="position:absolute;bottom:5px;left:10px;font-size:10px;color:#8b949e">1</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Chip Timeline</h2>
+      <div class="chip-timeline">
+        <div class="chip-row">
+          <div class="chip-icon wc">WC</div>
+          <div class="chip-info"><div class="name">Wildcard</div><div class="meta">Best used GW 8-12</div></div>
+          <div class="chip-status ready">READY</div>
+        </div>
+        <div class="chip-row">
+          <div class="chip-icon bb">BB</div>
+          <div class="chip-info"><div class="name">Bench Boost</div><div class="meta">DGW target: GW 17</div></div>
+          <div class="chip-status ready">READY</div>
+        </div>
+        <div class="chip-row">
+          <div class="chip-icon tc">TC</div>
+          <div class="chip-info"><div class="name">Triple Captain</div><div class="meta">DGW target: GW 24</div></div>
+          <div class="chip-status ready">READY</div>
+        </div>
+        <div class="chip-row">
+          <div class="chip-icon fh">FH</div>
+          <div class="chip-info"><div class="name">Free Hit</div><div class="meta">Blank GW backup</div></div>
+          <div class="chip-status ready">READY</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="transfer-log">
+    <div class="log-panel">
+      <h3>Recent Transfers</h3>
+      <div class="log-row"><span class="gw">GW1</span><span class="out">Haaland</span><span class="arrow">&rarr;</span><span class="in">Semenyo</span><span class="pts">+1.4</span></div>
+      <div class="log-row"><span class="gw">GW1</span><span class="out">J.Pedro</span><span class="arrow">&rarr;</span><span class="in">Thiago</span><span class="pts">+2.1</span></div>
+      <div class="log-row"><span class="gw">GW3</span><span class="out">Rice</span><span class="arrow">&rarr;</span><span class="in">Eze</span><span class="pts">+3.8</span></div>
+      <div class="log-row"><span class="gw">GW5</span><span class="out">Virgil</span><span class="arrow">&rarr;</span><span class="in">Colwill</span><span class="pts">-0.5</span></div>
+    </div>
+    <div class="log-panel">
+      <h3>Hit History</h3>
+      <div class="log-row"><span class="gw">GW3</span><span style="color:#f85149">-4 hit (1 extra transfer)</span><span class="pts">NET +3.8</span></div>
+      <div class="log-row"><span class="gw">GW5</span><span style="color:#8b949e">0 hits</span><span class="pts">FREE</span></div>
+      <div class="log-row"><span style="color:#8b949e">Total hits taken: 1</span></div>
+      <div class="log-row"><span style="color:#3fb950">Hit ROI: +3.8 pts</span></div>
+    </div>
+  </div>
+
+  <div class="narrative">
+    <h2>Season Narrative</h2>
+    <div class="narrative-text">
+      Strong start. The <span class="hl">Haaland punt</span> in GW1 paid off with a <span class="hl">+6.3 differential</span> on captain B.Fernandes. The <span class="warn">Rice &rarr; Eze</span> swap in GW3 was the season's best move (+3.8 net). Current trajectory suggests a <span class="hl">top-100K finish</span> if the mid-price midfield strategy holds. Next inflection point: <span class="warn">GW8 Wildcard</span> window opens &mdash; decide whether to reload or hold.
+      <span class="narrative-cursor"></span>
+    </div>
+  </div>
+
+  <div class="sample">INTERACTIVE APP MOCKUP &mdash; SAMPLE DATA</div>
+</div>
+</div>
+</body>
+</html>

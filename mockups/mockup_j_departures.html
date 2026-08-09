@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup J — Departure Board</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; background: #0c0c0e; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 30px; }
+  .board { width: 1200px; background: #050507; border-radius: 10px; padding: 26px 30px; box-shadow: 0 40px 120px rgba(0,0,0,.8), inset 0 0 120px rgba(255,255,255,.02); border: 1px solid #1c1c22; position: relative; }
+  .board::after { content: ""; position: absolute; inset: 0; border-radius: 10px; background: linear-gradient(180deg, rgba(255,255,255,.04), transparent 12%, transparent 88%, rgba(0,0,0,.35)); pointer-events: none; }
+  .masthead { text-align: center; padding: 6px 0 18px; border-bottom: 2px solid #f59e0b; margin-bottom: 16px; }
+  .masthead h1 { font-size: 26px; letter-spacing: 10px; font-weight: 800; color: #f59e0b; }
+  .masthead .sub { font-size: 11px; letter-spacing: 4px; color: #999; margin-top: 2px; }
+  .flap-row { display: flex; justify-content: space-between; align-items: center; background: #0a0a0d; border: 1px solid #1e1e26; padding: 10px 16px; margin-bottom: 8px; border-radius: 4px; }
+  .flap-row .label { font-size: 10px; letter-spacing: 3px; color: #f59e0b; width: 190px; }
+  .flap-row .value { font-family: "Courier New", monospace; font-size: 15px; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+  .flap-row .meta { font-size: 11px; color: #888; }
+  .flap-row .flag { font-size: 12px; font-weight: 700; }
+  .flag.g { color: #4ade80; } .flag.r { color: #f87171; } .flag.y { color: #fbbf24; }
+  .grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-top: 14px; }
+  .panel { border: 1px solid #1e1e26; border-radius: 4px; background: #0a0a0d; padding: 12px 14px; }
+  .panel h2 { font-size: 11px; letter-spacing: 3px; color: #f59e0b; margin-bottom: 10px; }
+  .row { display: grid; grid-template-columns: 40px 1fr 90px 70px 60px; gap: 6px; padding: 7px 4px; border-bottom: 1px dashed #1c1c24; font-size: 13px; align-items: center; }
+  .row:last-child { border-bottom: 0; }
+  .row .pos { font-size: 10px; color: #888; }
+  .row .pts { text-align: right; font-family: "Courier New", monospace; color: #fbbf24; }
+  .row .club { font-size: 10px; color: #888; }
+  .row.cap { background: rgba(245,158,11,.07); }
+  .row.cap .name::after { content: "  (C)"; color: #f59e0b; font-weight: 700; }
+  .th { display: grid; grid-template-columns: 40px 1fr 90px 70px 60px; gap: 6px; padding: 4px; font-size: 9px; letter-spacing: 2px; color: #666; }
+  .clock { font-family: "Courier New", monospace; font-size: 44px; font-weight: 700; color: #f59e0b; letter-spacing: 3px; font-variant-numeric: tabular-nums; text-shadow: 0 0 24px rgba(245,158,11,.45); }
+  .clock-label { font-size: 9px; letter-spacing: 3px; color: #777; margin-top: 2px; }
+  .transfer-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 4px; border-bottom: 1px dashed #1c1c24; font-size: 13px; }
+  .transfer-row:last-child { border-bottom: 0; }
+  .transfer-row .code { font-family: "Courier New", monospace; color: #fbbf24; font-weight: 700; }
+  .transfer-row .stat { font-family: "Courier New", monospace; font-size: 12px; }
+  .dep .stat { color: #f87171; } .arr .stat { color: #4ade80; }
+  .chips-flap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .chip-flap { border: 1px solid #26262e; background: #0c0c10; text-align: center; padding: 10px 4px; border-radius: 4px; }
+  .chip-flap .a { font-family: "Courier New", monospace; font-size: 18px; font-weight: 700; color: #4ade80; }
+  .chip-flap .s { font-size: 8px; letter-spacing: 2px; color: #888; }
+  .sample { position: absolute; top: 14px; right: 20px; font-size: 10px; letter-spacing: 2px; color: #f59e0b; border: 1px solid #f59e0b; padding: 3px 10px; border-radius: 3px; }
+  .flip { display: inline-block; animation: flipin .5s ease backwards; }
+  @keyframes flipin { from { transform: rotateX(90deg); opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="board">
+  <div class="sample">SAMPLE</div>
+  <div class="masthead">
+    <h1>AIFPL MANAGEMENT</h1>
+    <div class="sub">GAMEWEEK 1 &middot; 2026-27 &middot; ALL DECISIONS SUBJECT TO PROJECTION</div>
+  </div>
+  <div class="flap-row">
+    <div class="label">NEXT DEADLINE</div>
+    <div class="clock" id="timer">00d 00h 00m</div>
+    <div class="meta">FRI 21 AUG 17:30 UTC &middot; TELEGRAM 13:30 &middot; REFRESH 16:00</div>
+  </div>
+  <div class="flap-row">
+    <div class="label">CAPTAIN</div>
+    <div class="value">B.FERNANDES (MUN) &times;2</div>
+    <div class="flag g">PROJ 6.03</div>
+  </div>
+  <div class="flap-row">
+    <div class="label">BANK / FREE TRANSFERS</div>
+    <div class="value">&pound;0.0M &middot; 1 FT</div>
+    <div class="flag y">SOURCES 3/3</div>
+  </div>
+  <div class="grid">
+    <div class="panel">
+      <h2>TEAM SHEET &mdash; DEPARTURES (STARTERS)</h2>
+      <div class="th"><span>POS</span><span>PLAYER</span><span>CLUB</span><span>COST</span><span>PROJ</span></div>
+      <div class="row cap"><span class="pos">MID</span><span class="name">B.Fernandes</span><span class="club">MUN</span><span>12.0</span><span class="pts">6.03</span></div>
+      <div class="row"><span class="pos">MID</span><span class="name">Semenyo</span><span class="club">MCI</span><span>8.5</span><span class="pts">4.79</span></div>
+      <div class="row"><span class="pos">DEF</span><span class="name">Gabriel</span><span class="club">ARS</span><span>8.0</span><span class="pts">4.77</span></div>
+      <div class="row"><span class="pos">MID</span><span class="name">Rice</span><span class="club">ARS</span><span>7.5</span><span class="pts">4.70</span></div>
+      <div class="row"><span class="pos">MID</span><span class="name">Gibbs-White</span><span class="club">NFO</span><span>8.0</span><span class="pts">4.34</span></div>
+      <div class="row"><span class="pos">FWD</span><span class="name">Thiago</span><span class="club">BRE</span><span>8.0</span><span class="pts">4.26</span></div>
+      <div class="row"><span class="pos">DEF</span><span class="name">Gu&eacute;hi</span><span class="club">MCI</span><span>6.0</span><span class="pts">4.12</span></div>
+      <div class="row"><span class="pos">MID</span><span class="name">Anderson</span><span class="club">MCI</span><span>6.5</span><span class="pts">4.06</span></div>
+      <div class="row"><span class="pos">GK</span><span class="name">Raya</span><span class="club">ARS</span><span>6.0</span><span class="pts">4.05</span></div>
+      <div class="row"><span class="pos">DEF</span><span class="name">Virgil</span><span class="club">LIV</span><span>6.5</span><span class="pts">3.78</span></div>
+      <div class="row"><span class="pos">DEF</span><span class="name">Tarkowski</span><span class="club">EVE</span><span>6.0</span><span class="pts">3.60</span></div>
+      <div style="margin-top:6px; font-size:10px; color:#666">STAND-BY: DUBRAVKA &middot; FREDRICSON &middot; SCARLETT &middot; DANNS</div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>TRANSFER MANIFEST</h2>
+        <div class="transfer-row dep"><span><span class="code">OUT</span> Jo&atilde;o Pedro (CHE)</span><span class="stat">-4.0</span></div>
+        <div class="transfer-row arr"><span><span class="code">IN</span> Thiago (BRE)</span><span class="stat">+2.1 (sample)</span></div>
+        <div class="transfer-row dep"><span><span class="code">OUT</span> Haaland (MCI)</span><span class="stat">-5.7</span></div>
+        <div class="transfer-row arr"><span><span class="code">IN</span> Semenyo (MCI)</span><span class="stat">+1.4 (sample)</span></div>
+        <div class="transfer-row"><span><span class="code">GW1</span> Squad adopted &mdash; 15 in</span><span class="stat" style="color:#fbbf24">PRE-SEASON</span></div>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>CHIP GATES &mdash; ALL OPEN</h2>
+        <div class="chips-flap">
+          <div class="chip-flap"><div class="a">WC</div><div class="s">WILDCARD</div></div>
+          <div class="chip-flap"><div class="a">BB</div><div class="s">BENCH BOOST</div></div>
+          <div class="chip-flap"><div class="a">TC</div><div class="s">TRIPLE CAP</div></div>
+          <div class="chip-flap"><div class="a">FH</div><div class="s">FREE HIT</div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>FLIGHT STATUS</h2>
+        <div class="transfer-row"><span>Hermes decision</span><span class="stat" style="color:#4ade80">adopt_initial</span></div>
+        <div class="transfer-row"><span>Scorecard GW1</span><span class="stat" style="color:#4ade80">34.2 / 27.9 +6.3 (sample)</span></div>
+        <div class="transfer-row"><span>Telegram notify</span><span class="stat" style="color:#fbbf24">13:30 UTC</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const t = Date.parse("2026-08-21T17:30:00Z");
+  setInterval(() => { const s = Math.max(0, Math.floor((t - Date.now())/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); document.getElementById("timer").textContent = `${String(d).padStart(2,"0")}d ${String(h).padStart(2,"0")}h ${String(m).padStart(2,"0")}m`; }, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "source": "official-fpl-api:bootstrap-static",
+    "fetched_at": "2026-08-09T00:00:00Z"
+  },
+  "payload": {
+    "teams": [
+      {"id": 1, "name": "Arsenal", "short_name": "ARS", "code": 3},
+      {"id": 2, "name": "Aston Villa", "short_name": "AVL", "code": 7},
+      {"id": 3, "name": "Bournemouth", "short_name": "BOU", "code": 91},
+      {"id": 4, "name": "Brentford", "short_name": "BRE", "code": 94},
+      {"id": 5, "name": "Brighton", "short_name": "BHA", "code": 36},
+      {"id": 6, "name": "Chelsea", "short_name": "CHE", "code": 8},
+      {"id": 7, "name": "Coventry City", "short_name": "COV", "code": 9},
+      {"id": 8, "name": "Crystal Palace", "short_name": "CRY", "code": 31},
+      {"id": 9, "name": "Everton", "short_name": "EVE", "code": 11},
+      {"id": 10, "name": "Fulham", "short_name": "FUL", "code": 54},
+      {"id": 11, "name": "Hull City", "short_name": "HUL", "code": 88},
+      {"id": 12, "name": "Ipswich Town", "short_name": "IPS", "code": 40},
+      {"id": 13, "name": "Leeds", "short_name": "LEE", "code": 2},
+      {"id": 14, "name": "Liverpool", "short_name": "LIV", "code": 14},
+      {"id": 15, "name": "Man City", "short_name": "MCI", "code": 43},
+      {"id": 16, "name": "Man Utd", "short_name": "MUN", "code": 1},
+      {"id": 17, "name": "Newcastle", "short_name": "NEW", "code": 4},
+      {"id": 18, "name": "Nott'm Forest", "short_name": "NFO", "code": 17},
+      {"id": 19, "name": "Spurs", "short_name": "TOT", "code": 6},
+      {"id": 20, "name": "Sunderland", "short_name": "SUN", "code": 56}
+    ]
+  }
+}

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFPL Squad Command</title>
+<style>
+  :root {
+    --ink: #34453d;
+    --muted: #7d8b83;
+    --paper: #fbf7ef;
+    --panel: #fffdf9;
+    --line: #e9e1d7;
+    --green: #6d9b82;
+    --lime: #f4e6a1;
+    --orange: #e4a27f;
+    --red: #cf8581;
+    --blue: #83a9bf;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    padding: 24px;
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: #d9d5df;
+  }
+  button { font: inherit; }
+  .app {
+    width: min(1380px, 100%);
+    margin: auto;
+    overflow: hidden;
+    border: 1px solid #c8c5cd;
+    border-radius: 22px;
+    background: var(--paper);
+    box-shadow: 0 30px 90px rgba(74, 67, 80, .2);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 28px;
+    color: #fffdf9;
+    background: #718b7c;
+  }
+  .brand { display: flex; align-items: center; }
+  .brand-name { font-size: 15px; font-weight: 800; letter-spacing: .08em; }
+  .brand-sub { margin-top: 2px; color: #e0e9df; font-size: 11px; }
+  .top-actions { display: flex; align-items: center; gap: 16px; }
+  .sync { display: flex; align-items: center; gap: 7px; color: #edf5eb; font-size: 11px; }
+  .sync i { width: 7px; height: 7px; border-radius: 50%; background: #70d993; box-shadow: 0 0 0 4px rgba(112, 217, 147, .12); }
+  .avatar { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #d6e4d5; border-radius: 50%; color: #fff7c7; font-size: 11px; font-weight: 800; }
+  .content { padding: 28px; }
+  .headline { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 23px; }
+  .eyebrow { margin-bottom: 7px; color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+  h1 { font-size: clamp(28px, 4vw, 45px); line-height: .98; letter-spacing: -.055em; }
+  .headline-copy { max-width: 620px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+  .deadline {
+    min-width: 238px;
+    padding: 14px 16px;
+    border: 1px solid #e4d59c;
+    border-radius: 13px;
+    background: #fff6cf;
+  }
+  .deadline-label { display: flex; justify-content: space-between; color: #60704c; font-size: 10px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+  .deadline-time { margin-top: 4px; color: var(--ink); font-family: "SFMono-Regular", Consolas, monospace; font-size: 25px; font-weight: 800; letter-spacing: -.06em; }
+  .deadline-note { margin-top: 4px; color: #77845f; font-size: 10px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(330px, .75fr); gap: 19px; align-items: stretch; }
+  .card { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 8px 24px rgba(42, 62, 47, .05); }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 17px 19px 13px; border-bottom: 1px solid var(--line); }
+  .card-title { font-size: 12px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+  .card-meta { color: var(--muted); font-size: 11px; }
+  .pitch-card { display: flex; min-height: 100%; flex-direction: column; overflow: hidden; }
+  .pitch-area { display: flex; flex: 1; min-height: 0; align-items: flex-start; gap: 13px; padding: 18px; background: #edf5ed; }
+  .pitch {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    height: 100%;
+    aspect-ratio: auto;
+    overflow: hidden;
+    border: 2px solid rgba(75, 126, 91, .56);
+    border-radius: 12px;
+    background: repeating-linear-gradient(90deg, #d5ead0 0, #d5ead0 12.5%, #cde5c9 12.5%, #cde5c9 25%);
+  }
+  .pitch::before { content: ""; position: absolute; inset: 0 10%; border-right: 2px solid rgba(75, 126, 91, .58); border-left: 2px solid rgba(75, 126, 91, .58); }
+  .pitch::after { content: ""; position: absolute; left: 10%; right: 10%; top: 50%; border-top: 2px solid rgba(75, 126, 91, .58); }
+  .circle { position: absolute; left: 50%; top: 50%; width: 19%; aspect-ratio: 1; border: 2px solid rgba(75, 126, 91, .58); border-radius: 50%; transform: translate(-50%, -50%); }
+  .box { position: absolute; left: 31%; width: 38%; height: 16%; border: 2px solid rgba(75, 126, 91, .58); }
+  .box.top { top: 0; border-top: 0; } .box.bottom { bottom: 0; border-bottom: 0; }
+  .player { position: absolute; z-index: 2; width: 84px; padding: 5px 4px 4px; border: 2px solid #fffdf9; border-radius: 9px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; }
+  .player:hover { z-index: 5; box-shadow: 0 9px 17px rgba(78, 105, 84, .28); transform: translate(-50%, -50%) scale(1.08) rotate(-2deg); }
+  .club-badge { display: grid; width: 22px; height: 22px; margin: 0 auto 2px; place-items: center; overflow: hidden; border: 1px solid #d9e2d5; border-radius: 50%; background: #fffdf9; }
+  .club-badge img { display: block; width: 18px; height: 18px; object-fit: contain; }
+  .club-code { color: var(--green); font-size: 7px; font-weight: 900; letter-spacing: -.03em; }
+  .player .player-name { display: block; min-height: 19px; overflow: visible; font-size: 9px; font-weight: 700; line-height: 1.05; overflow-wrap: normal; white-space: normal; }
+  .player .points { display: block; margin-top: 2px; color: #527962; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 800; }
+  .player.gk { background: #efd49a; } .player.def { background: #b7d7c1; } .player.mid { background: #b9d2e2; } .player.fwd { background: #e9b9a5; }
+  .player.captain { background: #f4e6a1; border-color: #fffdf9; outline: 3px solid rgba(228, 194, 107, .6); }
+  .badge { position: absolute; top: -8px; right: -8px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 9px; font-weight: 900; }
+  .p1 { left: 50%; top: 12%; transform: translate(-50%, -50%); } .p2 { left: 18%; top: 35%; transform: translate(-50%, -50%); } .p3 { left: 41%; top: 37%; transform: translate(-50%, -50%); } .p4 { left: 65%; top: 37%; transform: translate(-50%, -50%); } .p5 { left: 87%; top: 35%; transform: translate(-50%, -50%); }
+  .p6 { left: 14%; top: 65%; transform: translate(-50%, -50%); } .p7 { left: 37%; top: 66%; transform: translate(-50%, -50%); } .p8 { left: 61%; top: 66%; transform: translate(-50%, -50%); } .p9 { left: 84%; top: 65%; transform: translate(-50%, -50%); } .p10 { left: 50%; top: 88%; transform: translate(-50%, -50%); }
+  .bench { align-self: flex-start; width: 118px; min-height: 0; flex: 0 0 118px; padding: 11px 10px; border: 1px dashed #a8bd9f; border-radius: 11px; background: rgba(255,255,255,.55); }
+  .bench-title { margin-bottom: 8px; color: var(--green); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-align: center; }
+  .bench-player { padding: 8px 5px; border-top: 1px solid #d6e4d0; text-align: center; }
+  .bench-player:first-of-type { border-top: 0; } .bench-top { display: flex; align-items: center; gap: 5px; text-align: left; } .bench-top .club-badge { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; } .bench-top .club-badge img { width: 16px; height: 16px; } .bench-player strong { display: block; font-size: 10px; } .bench-player small { color: var(--muted); font-size: 9px; }
+  .decision-card { overflow: hidden; }
+  .decision-hero { padding: 19px; background: #718b7c; }
+  .decision-label { color: #fff4bc; font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
+  .decision-action { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 8px; color: #fffdf9; }
+  .decision-action strong { font-size: 29px; letter-spacing: -.05em; } .decision-action span { color: #e0eadf; font-size: 11px; }
+  .decision-copy { margin-top: 11px; color: #eff5ed; font-size: 12px; line-height: 1.55; }
+  .confidence { margin-top: 16px; }
+  .confidence-row { display: flex; justify-content: space-between; color: #f0f5e9; font-size: 10px; font-weight: 700; }
+  .confidence-bar { height: 7px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: #9aac9a; }
+  .confidence-bar i { display: block; width: 78%; height: 100%; border-radius: inherit; background: #f4e6a1; }
+  .decision-body { padding: 18px 19px; }
+  .mini-head { margin-bottom: 10px; color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+  .move { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .move:last-child { border-bottom: 0; } .move .out { color: var(--red); text-decoration: line-through; } .move .in { color: var(--green); font-weight: 800; } .move .arrow { color: #aab8ac; }
+  .move .gain { margin-left: auto; color: var(--green); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 800; }
+  .captain-box { display: flex; align-items: center; gap: 11px; margin-top: 17px; padding: 11px; border: 1px solid #d4e2ae; border-radius: 10px; background: #f3f9d9; }
+  .cap-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--ink); background: var(--lime); font-weight: 900; }
+  .captain-box strong { display: block; font-size: 13px; } .captain-box span { color: #687650; font-size: 10px; }
+  .side-stack { display: grid; gap: 19px; }
+  .horizon { padding: 17px 19px; }
+  .horizon-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+  .horizon-head h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; } .horizon-total { color: var(--green); font-family: "SFMono-Regular", Consolas, monospace; font-size: 18px; font-weight: 900; }
+  .horizon-row { display: flex; align-items: center; gap: 9px; margin-top: 9px; }
+  .horizon-row label { width: 28px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
+  .track { flex: 1; height: 9px; overflow: hidden; border-radius: 99px; background: #edf0ea; } .track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #73aa78, var(--green)); }
+  .horizon-row b { width: 29px; color: var(--ink); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; text-align: right; }
+  .health { padding: 17px 19px; }
+  .health-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; } .health-head h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; } .healthy { color: var(--green); font-size: 10px; font-weight: 900; }
+  .health-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; } .health-item:last-child { border-bottom: 0; }
+  .health-item i { width: 7px; height: 7px; border-radius: 50%; background: #5fc783; } .health-item strong { margin-left: auto; color: var(--ink); font-size: 10px; }
+  .bottom-grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 19px; margin-top: 19px; }
+  .bottom-card { min-height: 148px; padding: 17px 19px; }
+  .bottom-card h2 { margin-bottom: 13px; color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
+  .score { display: flex; align-items: baseline; gap: 8px; } .score strong { font-size: 34px; letter-spacing: -.07em; } .score span { color: var(--green); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; font-weight: 800; }
+  .score-note { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+  .history { display: flex; gap: 6px; align-items: end; height: 65px; padding-top: 4px; border-bottom: 1px solid var(--line); }
+  .history i { flex: 1; min-width: 8px; border-radius: 4px 4px 0 0; background: var(--green); opacity: .75; } .history i:nth-child(2n) { background: var(--orange); opacity: .65; }
+  .history-labels { display: flex; justify-content: space-between; margin-top: 6px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
+  .telegram { display: flex; align-items: center; gap: 11px; padding: 11px; border-radius: 10px; background: #edf7ff; }
+  .telegram-mark { display: grid; width: 33px; height: 33px; place-items: center; border-radius: 50%; color: white; background: #2a9bd8; font-size: 16px; font-weight: 800; }
+  .telegram strong { display: block; font-size: 12px; } .telegram span { display: block; margin-top: 3px; color: #5f8091; font-size: 10px; }
+  .footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; color: var(--muted); font-size: 10px; }
+  .footer strong { color: var(--green); } .sample { letter-spacing: .12em; text-transform: uppercase; }
+  @media (max-width: 930px) {
+    body { padding: 10px; } .content { padding: 19px; } .topbar { padding: 15px 19px; }
+    .headline { align-items: stretch; flex-direction: column; } .deadline { min-width: 0; } .layout { grid-template-columns: 1fr; }
+    .pitch { height: auto; aspect-ratio: .86 / 1; }
+    .side-stack { grid-template-columns: 1fr 1fr; } .bottom-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 620px) {
+    .top-actions .sync { display: none; } .brand-sub { display: none; } .topbar { padding: 13px 15px; }
+    .headline-copy { font-size: 12px; } .pitch-area { padding: 10px; } .bench { width: 89px; flex-basis: 89px; padding: 8px 5px; }
+    .player { width: 64px; padding: 4px 3px; } .player .club-badge { width: 18px; height: 18px; } .player .club-badge img { width: 15px; height: 15px; } .player .player-name, .player .points { font-size: 8px; }
+    .side-stack, .bottom-grid { grid-template-columns: 1fr; } .bottom-card { min-height: 0; } .footer { align-items: flex-start; flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <nav class="topbar">
+    <div class="brand"><div><div class="brand-name">AIFPL</div><div class="brand-sub">Autonomous fantasy management</div></div></div>
+    <div class="top-actions"><div class="sync"><i></i> Sources synced 4 min ago</div><div class="avatar">KY</div></div>
+  </nav>
+  <section class="content">
+    <div class="headline">
+      <div><div class="eyebrow" id="gameweek-label">Loading current gameweek...</div><h1>Your squad, with a point of view.</h1><p class="headline-copy" id="decision-summary">Reading the latest Hermes decision from the backend.</p></div>
+      <div class="deadline"><div class="deadline-label"><span>Deadline</span><span id="deadline-gameweek">--</span></div><div class="deadline-time" id="countdown">--:--:--</div><div class="deadline-note">Deadline and schedule loaded from FPL data</div></div>
+    </div>
+
+    <div class="layout">
+      <section class="card pitch-card">
+        <div class="card-head"><div class="card-title">Recommended XI</div><div class="card-meta" id="lineup-meta">Loading lineup...</div></div>
+        <div class="pitch-area">
+          <div class="pitch">
+            <div class="circle"></div><div class="box top"></div><div class="box bottom"></div>
+            <div id="lineup-players"></div>
+          </div>
+          <aside class="bench"><div class="bench-title">SUBS</div><div id="bench-players"></div></aside>
+        </div>
+      </section>
+
+      <div class="side-stack">
+        <section class="card decision-card">
+          <div class="decision-hero"><div class="decision-label">Hermes recommendation</div><div class="decision-action"><strong id="decision-action">Loading...</strong><span id="decision-model">backend</span></div><p class="decision-copy" id="decision-copy">Loading the committed explanation.</p><div class="confidence"><div class="confidence-row"><span>Projection source</span><span id="projection-status">loading</span></div><div class="confidence-bar"><i id="projection-fill"></i></div></div></div>
+          <div class="decision-body"><div class="mini-head">Decision changes</div><div id="transfer-list"><div class="move"><span class="in">Loading transfers...</span></div></div><div class="captain-box"><div class="cap-mark">C</div><div><strong id="captain-name">Captain: loading</strong><span id="captain-detail">Projected points loading</span></div></div></div>
+        </section>
+        <section class="card horizon"><div class="horizon-head"><h2>Current XI horizon</h2><div class="horizon-total" id="horizon-total">--</div></div><div id="horizon-rows"><div class="horizon-row"><label>--</label><div class="track"><i style="width: 0%"></i></div><b>--</b></div></div></section>
+        <section class="card health"><div class="health-head"><h2>Decision inputs</h2><span class="healthy" id="input-status">LOADING</span></div><div id="input-list"><div class="health-item"><i></i>Loading backend inputs<strong>...</strong></div></div></section>
+      </div>
+    </div>
+
+    <div class="bottom-grid">
+      <section class="card bottom-card"><h2>Scorecard</h2><div id="scorecard-content"><div class="score"><strong>--</strong><span>not scored</span></div><p class="score-note">No scored decision is available yet. Scorecards appear after the gameweek completes.</p></div></section>
+      <section class="card bottom-card"><h2>Squad state</h2><div class="score"><strong id="bank-value">--</strong><span id="free-transfer-value">--</span></div><p class="score-note" id="squad-state-note">Loading bank and free transfers from Hermes state.</p></section>
+      <section class="card bottom-card"><h2>Notification status</h2><div class="telegram"><div class="telegram-mark">&gt;</div><div><strong>Telegram is configured</strong><span>Deadline reminders are managed by the scheduler</span></div></div></section>
+    </div>
+    <footer class="footer"><span><strong id="footer-model">backend</strong> &middot; <span id="footer-methodology">loading methodology</span></span><span class="sample">AIFPL product mockup &middot; live backend data</span></footer>
+  </section>
+</main>
+<script>
+  const apiBase = window.AIFPL_API_BASE || (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin);
+  async function loadClubLogos() {
+    try {
+      const response = await fetch(`${apiBase}/teams/current`);
+      if (!response.ok) throw new Error(`team catalog request failed: ${response.status}`);
+      const teams = await response.json();
+      const byId = new Map(teams.map(team => [String(team.id), team]));
+      document.querySelectorAll(".club-badge[data-team-id]").forEach(badge => {
+        const team = byId.get(badge.dataset.teamId);
+        if (!team) return;
+        const image = new Image();
+        image.alt = `${team.name} crest`;
+        image.decoding = "async";
+        image.onload = () => badge.replaceChildren(image);
+        image.src = new URL(team.logo_url, apiBase).href;
+      });
+    } catch (error) {
+      console.info("AIFPL backend unavailable; showing club-code fallbacks.", error);
+    }
+  }
+  loadClubLogos();
+
+  const deadline = Date.parse("2026-08-21T17:30:00Z");
+  const countdown = document.getElementById("countdown");
+  function tick() {
+    const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600).toString().padStart(2, "0");
+    const minutes = Math.floor((remaining % 3600) / 60).toString().padStart(2, "0");
+    const seconds = (remaining % 60).toString().padStart(2, "0");
+    countdown.textContent = `${days}d ${hours}:${minutes}:${seconds}`;
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>

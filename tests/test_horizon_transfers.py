@@ -46,3 +46,16 @@ def test_horizon_planner_executes_and_rolls_over_a_free_upgrade() -> None:
     assert [player.player_id for player in plan.gameweeks[0].incoming] == [16]
     assert plan.gameweeks[0].hit_cost == 0
     assert [week.free_transfers_before for week in plan.gameweeks] == [1, 1, 2]
+
+
+def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
+    )
+
+    first = plan.gameweeks[0]
+    assert len(first.resulting_squad) == 15
+    assert len(first.starting_xi) == 11
+    assert plan.solver_status in ("OPTIMAL", "FEASIBLE")
+    assert {player.player_id for player in first.resulting_squad} >= {1, 2, 13, 14, 15}
+    assert all(week.gameweek == gameweek for week, gameweek in zip(plan.gameweeks, (1, 2, 3)))

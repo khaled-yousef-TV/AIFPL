@@ -74,6 +74,28 @@ def scheduler_settings() -> SchedulerSettings:
 
 
 @dataclass(frozen=True)
+class TelegramSettings:
+    bot_token: str
+    chat_id: str
+    enabled: bool
+    notify_lead_minutes: int
+
+
+def telegram_settings() -> TelegramSettings:
+    settings = TelegramSettings(
+        bot_token=os.environ.get("AIFPL_TELEGRAM_BOT_TOKEN", ""),
+        chat_id=os.environ.get("AIFPL_TELEGRAM_CHAT_ID", ""),
+        enabled=os.environ.get("AIFPL_TELEGRAM_ENABLED", "false").lower() in ("1", "true", "yes"),
+        notify_lead_minutes=int(os.environ.get("AIFPL_TELEGRAM_NOTIFY_LEAD_MINUTES", "240")),
+    )
+    if settings.enabled and (not settings.bot_token or not settings.chat_id):
+        raise ValueError("AIFPL_TELEGRAM_BOT_TOKEN and AIFPL_TELEGRAM_CHAT_ID are required when telegram is enabled")
+    if settings.notify_lead_minutes < 0:
+        raise ValueError("AIFPL_TELEGRAM_NOTIFY_LEAD_MINUTES must not be negative")
+    return settings
+
+
+@dataclass(frozen=True)
 class HermesSettings:
     base_url: str
     model: str

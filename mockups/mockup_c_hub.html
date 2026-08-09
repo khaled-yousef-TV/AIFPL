@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup C — Card Hub</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%); color: #0f172a; min-height: 100vh; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .brand { font-size: 22px; font-weight: 800; }
+  .brand i { font-style: normal; background: #0f172a; color: #fff; padding: 2px 10px; border-radius: 8px; margin-right: 8px; }
+  .sample { background: #fef3c7; color: #92400e; font-size: 10px; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+  .card { background: #fff; border-radius: 18px; box-shadow: 0 8px 24px rgba(15,23,42,0.07); padding: 18px; }
+  .card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #94a3b8; margin-bottom: 12px; }
+  .c4 { grid-column: span 4; } .c6 { grid-column: span 6; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+  .deadline { text-align: center; }
+  .deadline .num { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; color: #0f172a; }
+  .deadline .lbl { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+  .mini-row { display: flex; justify-content: space-between; margin-top: 14px; font-size: 13px; }
+  .mini-row b { font-weight: 700; }
+  .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .chip { border-radius: 14px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+  .chip .abbr { font-size: 18px; font-weight: 800; }
+  .chip .st { font-size: 11px; color: #16a34a; font-weight: 600; margin-top: 2px; }
+  .chip.on { background: #f0fdf4; border-color: #bbf7d0; }
+  .chip.off { opacity: 0.55; } .chip.off .st { color: #94a3b8; }
+  .pitch { aspect-ratio: 0.75; max-height: 460px; margin: 0 auto; border-radius: 16px; background: linear-gradient(180deg, #1f7a45 0%, #166534 60%, #14532d 100%); position: relative; border: 2px solid #0f3d22; overflow: hidden; }
+  .pitch::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 44px, rgba(255,255,255,0.06) 44px 46px); }
+  .mid { position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid rgba(255,255,255,0.4); }
+  .circle { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 16%; aspect-ratio: 1; border: 2px solid rgba(255,255,255,0.4); border-radius: 50%; }
+  .b16 { position: absolute; left: 10%; width: 80%; height: 15%; border: 2px solid rgba(255,255,255,0.4); }
+  .b16.t { top: 0; border-top: 0; } .b16.b { bottom: 0; border-bottom: 0; }
+  .pl { position: absolute; transform: translate(-50%,-50%); width: 88px; border-radius: 12px; background: rgba(255,255,255,0.95); box-shadow: 0 4px 10px rgba(0,0,0,0.25); padding: 7px 6px 5px; text-align: center; }
+  .pl .nm { font-size: 11px; font-weight: 700; }
+  .pl .cl { font-size: 9px; color: #64748b; }
+  .pl .pp { font-size: 10px; color: #0f766e; font-weight: 700; margin-top: 1px; }
+  .pl.gk .dot { background: #facc15; } .pl.def .dot { background: #ef4444; } .pl.mid .dot { background: #3b82f6; } .pl.fwd .dot { background: #22c55e; }
+  .pl .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 3px; }
+  .cap-badge { background: #f59e0b; color: #fff; font-size: 8px; font-weight: 800; border-radius: 4px; padding: 1px 4px; margin-left: 2px; }
+  .feed div { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+  .feed div:last-child { border-bottom: 0; }
+  .feed .who b { font-weight: 600; }
+  .up { color: #16a34a; font-weight: 700; } .down { color: #dc2626; font-weight: 700; }
+  .muted { color: #94a3b8; font-size: 11px; }
+  .bar { height: 6px; background: #f1f5f9; border-radius: 999px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #0f766e; border-radius: 999px; }
+  .squad-row { display: grid; grid-template-columns: 22px 1fr 1fr 60px 80px; gap: 8px; align-items: center; padding: 6px 0; font-size: 12px; border-bottom: 1px solid #f8fafc; }
+  .squad-row .p { font-weight: 600; } .squad-row .pts { text-align: right; font-variant-numeric: tabular-nums; }
+  .health span { display: inline-block; margin-right: 16px; font-size: 12px; color: #475569; }
+  .ok { color: #16a34a; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i>AIFPL</i>Management Hub <span class="sample">sample</span></div>
+    <div style="font-size:13px; color:#475569">Gameweek 1 &middot; 2026-27</div>
+  </header>
+  <div class="grid">
+    <div class="card c4 deadline">
+      <h3>Next deadline</h3>
+      <div class="num" id="timer">--:--:--</div>
+      <div class="lbl">GW1 closes Fri 21 Aug 17:30 UTC</div>
+      <div class="mini-row"><span>Telegram notify</span><b id="notify">--:--</b></div>
+      <div class="mini-row"><span>Scheduler refresh</span><b>16:00 UTC</b></div>
+    </div>
+    <div class="card c4">
+      <h3>Captain &amp; account</h3>
+      <div class="mini-row"><span>Armband</span><b>B.Fernandes (MUN)</b></div>
+      <div class="mini-row"><span>GW1 projection</span><b>6.03 &times;2 = 12.1</b></div>
+      <div class="mini-row"><span>Bank</span><b>&pound;0.0m</b></div>
+      <div class="mini-row"><span>Free transfers</span><b>1</b></div>
+      <div class="mini-row"><span>Chip advice</span><b style="color:#16a34a">None</b></div>
+    </div>
+    <div class="card c4">
+      <h3>Chips</h3>
+      <div class="chips">
+        <div class="chip on"><div class="abbr">WC</div><div class="st">Available</div></div>
+        <div class="chip on"><div class="abbr">BB</div><div class="st">Available</div></div>
+        <div class="chip on"><div class="abbr">TC</div><div class="st">Available</div></div>
+        <div class="chip on"><div class="abbr">FH</div><div class="st">Available</div></div>
+      </div>
+    </div>
+
+    <div class="card c8">
+      <h3>Starting XI &middot; 1-4-5-1</h3>
+      <div class="pitch">
+        <div class="mid"></div><div class="circle"></div><div class="b16 t"></div><div class="b16 b"></div>
+        <div class="pl fwd" style="left:50%; top:11%"><span class="dot"></span><div class="nm">Thiago</div><div class="cl">BRE</div><div class="pp">4.3</div></div>
+        <div class="pl mid" style="left:14%; top:37%"><span class="dot"></span><div class="nm">Anderson</div><div class="cl">MCI</div><div class="pp">4.1</div></div>
+        <div class="pl mid" style="left:33%; top:39%"><span class="dot"></span><div class="nm">Rice</div><div class="cl">ARS</div><div class="pp">4.7</div></div>
+        <div class="pl mid" style="left:52%; top:37%"><span class="dot"></span><div class="nm">B.Fernandes<span class="cap-badge">C</span></div><div class="cl">MUN</div><div class="pp">6.0</div></div>
+        <div class="pl mid" style="left:71%; top:39%"><span class="dot"></span><div class="nm">Gibbs-White</div><div class="cl">NFO</div><div class="pp">4.3</div></div>
+        <div class="pl mid" style="left:88%; top:37%"><span class="dot"></span><div class="nm">Semenyo</div><div class="cl">MCI</div><div class="pp">4.8</div></div>
+        <div class="pl def" style="left:17%; top:62%"><span class="dot"></span><div class="nm">Gabriel</div><div class="cl">ARS</div><div class="pp">4.8</div></div>
+        <div class="pl def" style="left:38%; top:65%"><span class="dot"></span><div class="nm">Tarkowski</div><div class="cl">EVE</div><div class="pp">3.6</div></div>
+        <div class="pl def" style="left:59%; top:65%"><span class="dot"></span><div class="nm">Virgil</div><div class="cl">LIV</div><div class="pp">3.8</div></div>
+        <div class="pl def" style="left:80%; top:62%"><span class="dot"></span><div class="nm">Gu&eacute;hi</div><div class="cl">MCI</div><div class="pp">4.1</div></div>
+        <div class="pl gk" style="left:50%; top:88%"><span class="dot"></span><div class="nm">Raya</div><div class="cl">ARS</div><div class="pp">4.1</div></div>
+      </div>
+      <div style="text-align:center; margin-top:10px; font-size:12px; color:#64748b">Bench: Dubravka (TOT) &middot; Fredricson (MUN) &middot; Scarlett (TOT) &middot; Danns (LIV)</div>
+    </div>
+
+    <div class="card c4">
+      <h3>Latest transfers</h3>
+      <div class="feed">
+        <div><span class="who">Pre-season</span><b>15 players in</b></div>
+        <div><span class="who">Jo&atilde;o Pedro &#8594; Thiago <span class="muted">sample</span></span><span class="up">+2.1</span></div>
+        <div><span class="who">Haaland &#8594; Semenyo <span class="muted">sample</span></span><span class="up">+1.4</span></div>
+        <div><span class="who">Mbeumo &#8594; Anderson <span class="muted">sample</span></span><span class="down">-0.8</span></div>
+      </div>
+      <div style="height:12px"></div>
+      <h3>Last scorecard <span class="muted">sample</span></h3>
+      <div class="mini-row"><span>GW1 projected</span><b>27.9</b></div>
+      <div class="mini-row"><span>GW1 actual</span><b class="up">34.2 (+6.3)</b></div>
+      <div class="mini-row"><span>Transfer delta</span><b class="up">+5.0</b></div>
+    </div>
+
+    <div class="card c6">
+      <h3>Squad value &middot; GW1 projections</h3>
+      <div class="squad-row"><span class="p">Raya</span><span>GK &middot; ARS</span><span class="pts">6.0m</span><span class="pts">4.1</span><div class="bar"><i style="width:68%"></i></div></div>
+      <div class="squad-row"><span class="p">B.Fernandes (C)</span><span>MID &middot; MUN</span><span class="pts">12.0m</span><span class="pts">6.0</span><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="squad-row"><span class="p">Semenyo</span><span>MID &middot; MCI</span><span class="pts">8.5m</span><span class="pts">4.8</span><div class="bar"><i style="width:80%"></i></div></div>
+      <div class="squad-row"><span class="p">Gabriel</span><span>DEF &middot; ARS</span><span class="pts">8.0m</span><span class="pts">4.8</span><div class="bar"><i style="width:79%"></i></div></div>
+      <div class="squad-row"><span class="p">Rice</span><span>MID &middot; ARS</span><span class="pts">7.5m</span><span class="pts">4.7</span><div class="bar"><i style="width:78%"></i></div></div>
+      <div class="squad-row"><span class="p">Thiago</span><span>FWD &middot; BRE</span><span class="pts">8.0m</span><span class="pts">4.3</span><div class="bar"><i style="width:71%"></i></div></div>
+      <div class="squad-row"><span class="p">Gibbs-White</span><span>MID &middot; NFO</span><span class="pts">8.0m</span><span class="pts">4.3</span><div class="bar"><i style="width:71%"></i></div></div>
+      <div class="squad-row"><span class="p">Gu&eacute;hi</span><span>DEF &middot; MCI</span><span class="pts">6.0m</span><span class="pts">4.1</span><div class="bar"><i style="width:68%"></i></div></div>
+    </div>
+
+    <div class="card c6">
+      <h3>System status</h3>
+      <div class="health">
+        <span><span class="ok">&#9679;</span> bootstrap healthy</span>
+        <span><span class="ok">&#9679;</span> fixtures healthy</span>
+        <span><span class="ok">&#9679;</span> odds healthy</span>
+        <span>&#9675; event markets n/a</span>
+      </div>
+      <div style="height:14px"></div>
+      <h3>Schedule</h3>
+      <div class="mini-row"><span>Next deadline</span><b>Fri 21 Aug 17:30 UTC</b></div>
+      <div class="mini-row"><span>Telegram notification</span><b>13:30 UTC &middot; sent</b></div>
+      <div class="mini-row"><span>Scheduler refresh</span><b>16:00 UTC &middot; loop running</b></div>
+      <div class="mini-row"><span>Hermes</span><b>adopt_initial &middot; deepseek-v4-flash</b></div>
+    </div>
+  </div>
+</div>
+<script>
+  const t1 = Date.parse("2026-08-21T17:30:00Z"), t2 = Date.parse("2026-08-21T13:30:00Z");
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const x = s%60; return d > 0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m ${x}s`; };
+  setInterval(() => { const n = Date.now(); document.getElementById("timer").textContent = fmt(t1 - n); document.getElementById("notify").textContent = fmt(t2 - n); }, 1000);
+</script>
+</body>
+</html>

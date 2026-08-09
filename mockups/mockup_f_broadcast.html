@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup F — Matchday Broadcast</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; background: #000; color: #fff; overflow-x: hidden; }
+  .bars::before, .bars::after { content: ""; position: fixed; left: 0; right: 0; height: 40px; background: #000; z-index: 20; }
+  .bars::before { top: 0; } .bars::after { bottom: 0; }
+  .screen { position: relative; height: 100vh; background: radial-gradient(900px 500px at 50% 38%, #14532d 0%, #0b2f1a 55%, #050f09 100%); overflow: hidden; }
+  .flood { position: absolute; top: -40%; left: 50%; transform: translateX(-50%); width: 900px; height: 500px; background: radial-gradient(ellipse at center, rgba(255,255,220,.28), transparent 60%); animation: sway 7s ease-in-out infinite alternate; }
+  @keyframes sway { from { transform: translateX(-55%); } to { transform: translateX(-45%); } }
+  /* channel bug top-left */
+  .bug { position: absolute; top: 56px; left: 24px; background: #0b1f14; border-left: 6px solid #22c55e; padding: 8px 16px; font-size: 13px; font-weight: 800; letter-spacing: 2px; z-index: 5; }
+  .bug small { color: #86efac; font-weight: 400; letter-spacing: 1px; }
+  /* scoreboard graphic top-right */
+  .scoreboard { position: absolute; top: 56px; right: 24px; background: rgba(5,15,9,.85); border: 1px solid rgba(34,197,94,.4); border-radius: 6px; padding: 10px 18px; display: flex; gap: 18px; align-items: center; z-index: 5; }
+  .sb-cell { text-align: center; }
+  .sb-cell .lbl { font-size: 8px; letter-spacing: 2px; color: #86efac; }
+  .sb-cell .val { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sb-cell .val.small { font-size: 15px; }
+  .sb-sep { width: 1px; height: 34px; background: rgba(34,197,94,.35); }
+  /* main center: broadcast pitch */
+  .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .pitch-tv { width: min(78vw, 880px); aspect-ratio: 0.66; position: relative; border: 3px solid rgba(255,255,255,.75); border-radius: 6px; background: repeating-linear-gradient(90deg, #16a34a 0 60px, #1cb055 60px 120px); box-shadow: 0 30px 120px rgba(0,0,0,.65); }
+  .tv-mid { position: absolute; left: 0; right: 0; top: 50%; border-top: 3px solid rgba(255,255,255,.6); }
+  .tv-c { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 20%; aspect-ratio: 1; border: 3px solid rgba(255,255,255,.6); border-radius: 50%; }
+  .tv-box { position: absolute; left: 8%; width: 84%; height: 15%; border: 3px solid rgba(255,255,255,.6); }
+  .tv-box.t { top: 0; border-top: 0; } .tv-box.b { bottom: 0; border-bottom: 0; }
+  .tv-pl { position: absolute; transform: translate(-50%,-50%); width: 108px; text-align: center; }
+  .tv-pl .shirt { width: 44px; height: 44px; margin: 0 auto; border-radius: 50% 50% 45% 45%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: #fff; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 8px 18px rgba(0,0,0,.5); position: relative; }
+  .tv-pl.gk .shirt { background: #ca8a04; } .tv-pl.def .shirt { background: #b91c1c; } .tv-pl.mid .shirt { background: #1d4ed8; } .tv-pl.fwd .shirt { background: #15803d; }
+  .tv-pl .name { font-size: 11px; font-weight: 700; margin-top: 4px; text-shadow: 0 1px 3px #000; }
+  .tv-pl .club { font-size: 8px; color: #d1fae5; letter-spacing: 1px; }
+  .tv-pl .armband { position: absolute; top: -8px; right: 8px; width: 20px; height: 20px; border-radius: 50%; background: #fbbf24; color: #000; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 12px rgba(251,191,36,.9); }
+  .halo { animation: halo 2.4s ease-in-out infinite; }
+  @keyframes halo { 0%,100% { box-shadow: 0 8px 18px rgba(0,0,0,.5), 0 0 0 rgba(251,191,36,0); } 50% { box-shadow: 0 8px 18px rgba(0,0,0,.5), 0 0 26px rgba(251,191,36,.9); } }
+  /* lower third */
+  .lower { position: absolute; bottom: 78px; left: 50%; transform: translateX(-50%); width: min(860px, 92vw); background: linear-gradient(90deg, rgba(6,20,12,.94), rgba(10,30,18,.94)); border-left: 6px solid #22c55e; padding: 12px 18px; z-index: 5; }
+  .lower h2 { font-size: 17px; font-weight: 800; letter-spacing: 1px; }
+  .lower p { font-size: 12px; color: #a7f3d0; margin-top: 2px; }
+  .lower .tag { display: inline-block; background: #22c55e; color: #052e16; font-size: 9px; font-weight: 800; letter-spacing: 1.5px; padding: 2px 8px; border-radius: 3px; margin-right: 8px; }
+  /* ticker */
+  .ticker { position: absolute; bottom: 44px; left: 0; right: 0; height: 34px; background: #052e16; border-top: 1px solid #15803d; border-bottom: 1px solid #15803d; overflow: hidden; z-index: 5; }
+  .ticker .in { display: inline-block; white-space: nowrap; padding-left: 100%; animation: scroll 26s linear infinite; font-size: 12px; line-height: 34px; }
+  .ticker .in span { margin-right: 60px; } .ticker .in .hl { color: #86efac; font-weight: 700; }
+  @keyframes scroll { to { transform: translateX(-100%); } }
+  /* right rail on broadcast = chip bugs */
+  .chips-tv { position: absolute; right: 24px; top: 130px; display: flex; flex-direction: column; gap: 8px; z-index: 5; }
+  .chip-tv { display: flex; align-items: center; gap: 10px; background: rgba(5,15,9,.8); border: 1px solid rgba(34,197,94,.4); border-radius: 4px; padding: 6px 12px; }
+  .chip-tv .a { font-size: 16px; font-weight: 800; color: #4ade80; }
+  .chip-tv .s { font-size: 9px; letter-spacing: 1px; color: #a7f3d0; }
+  .chip-tv .st { margin-left: auto; font-size: 9px; color: #4ade80; font-weight: 700; }
+  /* left rail: deadlines */
+  .deadline-tv { position: absolute; left: 24px; top: 130px; z-index: 5; }
+  .dt { background: rgba(5,15,9,.85); border: 1px solid rgba(34,197,94,.4); border-radius: 4px; padding: 8px 14px; margin-bottom: 8px; }
+  .dt .l { font-size: 8px; letter-spacing: 2px; color: #86efac; }
+  .dt .v { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sample { color: #fbbf24; border: 1px solid #fbbf24; font-size: 9px; padding: 2px 8px; border-radius: 999px; }
+</style>
+</head>
+<body class="bars">
+<div class="screen">
+  <div class="flood"></div>
+  <div class="bug">AIFPL <small>&middot; MANAGEMENT HUB &middot; GW1 2026-27 <span class="sample">SAMPLE</span></small></div>
+  <div class="scoreboard">
+    <div class="sb-cell"><div class="lbl">DEADLINE</div><div class="val small" id="timer">--:--:--</div></div>
+    <div class="sb-sep"></div>
+    <div class="sb-cell"><div class="lbl">BANK</div><div class="val">&pound;0.0</div></div>
+    <div class="sb-sep"></div>
+    <div class="sb-cell"><div class="lbl">FT</div><div class="val">1</div></div>
+    <div class="sb-sep"></div>
+    <div class="sb-cell"><div class="lbl">PRED GW1</div><div class="val small">27.9</div></div>
+  </div>
+  <div class="deadline-tv">
+    <div class="dt"><div class="l">NEXT DEADLINE</div><div class="v" id="timer2">--:--</div></div>
+    <div class="dt"><div class="l">TELEGRAM</div><div class="v">13:30 UTC</div></div>
+    <div class="dt"><div class="l">REFRESH</div><div class="v">16:00 UTC</div></div>
+  </div>
+  <div class="chips-tv">
+    <div class="chip-tv"><span class="a">WC</span><span class="s">WILDCARD</span><span class="st">OK</span></div>
+    <div class="chip-tv"><span class="a">BB</span><span class="s">BENCH BOOST</span><span class="st">OK</span></div>
+    <div class="chip-tv"><span class="a">TC</span><span class="s">TRIPLE CAP</span><span class="st">OK</span></div>
+    <div class="chip-tv"><span class="a">FH</span><span class="s">FREE HIT</span><span class="st">OK</span></div>
+  </div>
+  <div class="stage">
+    <div class="pitch-tv">
+      <div class="tv-mid"></div><div class="tv-c"></div><div class="tv-box t"></div><div class="tv-box b"></div>
+      <div class="tv-pl fwd" style="left:50%; top:10%"><div class="shirt">T</div><div class="name">Thiago</div><div class="club">BRE</div></div>
+      <div class="tv-pl mid" style="left:14%; top:36%"><div class="shirt">A</div><div class="name">Anderson</div><div class="club">MCI</div></div>
+      <div class="tv-pl mid" style="left:33%; top:38%"><div class="shirt">R</div><div class="name">Rice</div><div class="club">ARS</div></div>
+      <div class="tv-pl mid halo" style="left:51%; top:35%"><div class="shirt">B</div><div class="armband">C</div><div class="name">B.Fernandes</div><div class="club">MUN</div></div>
+      <div class="tv-pl mid" style="left:69%; top:38%"><div class="shirt">G</div><div class="name">Gibbs-White</div><div class="club">NFO</div></div>
+      <div class="tv-pl mid" style="left:87%; top:36%"><div class="shirt">S</div><div class="name">Semenyo</div><div class="club">MCI</div></div>
+      <div class="tv-pl def" style="left:16%; top:63%"><div class="shirt">G</div><div class="name">Gabriel</div><div class="club">ARS</div></div>
+      <div class="tv-pl def" style="left:37%; top:66%"><div class="shirt">T</div><div class="name">Tarkowski</div><div class="club">EVE</div></div>
+      <div class="tv-pl def" style="left:59%; top:66%"><div class="shirt">V</div><div class="name">Virgil</div><div class="club">LIV</div></div>
+      <div class="tv-pl def" style="left:80%; top:63%"><div class="shirt">G</div><div class="name">Gu&eacute;hi</div><div class="club">MCI</div></div>
+      <div class="tv-pl gk" style="left:50%; top:88%"><div class="shirt">R</div><div class="name">Raya</div><div class="club">ARS</div></div>
+    </div>
+  </div>
+  <div class="lower">
+    <h2><span class="tag">LINEUP</span>Starting XI &middot; 1-4-5-1</h2>
+    <p>Captain B.Fernandes (MUN) &middot; Bench: Dubravka, Fredricson, Scarlett, Danns &middot; Chip advice: none</p>
+  </div>
+  <div class="ticker"><div class="in">
+    <span><span class="hl">TRANSFERS</span> GW1: squad adopted &mdash; 15 in (unlimited)</span>
+    <span>Jo&atilde;o Pedro &#8594; Thiago <span class="hl">+2.1</span> <span style="color:#fbbf24">[sample]</span></span>
+    <span>Haaland &#8594; Semenyo <span class="hl">+1.4</span> <span style="color:#fbbf24">[sample]</span></span>
+    <span><span class="hl">SOURCES</span> bootstrap &#10003; fixtures &#10003; odds &#10003;</span>
+    <span><span class="hl">SCORECARD GW1</span> 34.2 vs 27.9 predicted <span class="hl">+6.3</span> <span style="color:#fbbf24">[sample]</span></span>
+  </div></div>
+</div>
+<script>
+  const t = Date.parse("2026-08-21T17:30:00Z");
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const x = s%60; return `${d}d ${h}h ${m}m ${x}s`; };
+  const fmt2 = ms => { const s = Math.max(0, Math.floor(ms/1000)); const h = Math.floor(s/3600); const m = Math.floor(s%3600/60); const x = s%60; return `${h}h ${m}m ${x}s`; };
+  setInterval(() => { const n = Date.now(); document.getElementById("timer").textContent = fmt(t - n); document.getElementById("timer2").textContent = fmt2(t - n); }, 1000);
+</script>
+</body>
+</html>

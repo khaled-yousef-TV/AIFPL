@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup D — FPL Classic</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; background: #f2f4f6; color: #222; }
+  .top { background: linear-gradient(180deg, #0e3a1e 0%, #14532d 100%); color: #fff; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+  .top .logo { font-weight: 800; font-size: 18px; letter-spacing: 0.3px; }
+  .top .logo span { color: #4ade80; }
+  .tabs { display: flex; gap: 4px; margin-top: 8px; }
+  .tab { background: rgba(255,255,255,0.12); border-radius: 6px 6px 0 0; padding: 8px 16px; font-size: 13px; font-weight: 600; }
+  .tab.active { background: #f2f4f6; color: #14532d; }
+  .sample { background: #fbbf24; color: #451a03; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+  .banner { background: #fff7ed; border-bottom: 2px solid #fed7aa; color: #7c2d12; padding: 8px 20px; font-size: 13px; display: flex; gap: 24px; flex-wrap: wrap; }
+  .banner b { color: #9a3412; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 18px; display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+  .pitch-card { background: #fff; border: 1px solid #dde3e8; border-radius: 4px; padding: 14px; }
+  .pitch-card h3 { font-size: 14px; color: #14532d; margin-bottom: 10px; }
+  .pitch { border: 2px solid #166534; border-radius: 4px; background: repeating-linear-gradient(90deg, #22c55e 0 36px, #25ce64 36px 72px); position: relative; aspect-ratio: 0.72; }
+  .hline { position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid rgba(255,255,255,0.5); }
+  .hcircle { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 17%; aspect-ratio: 1; border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; }
+  .hbox { position: absolute; left: 11%; width: 78%; height: 15%; border: 2px solid rgba(255,255,255,0.5); }
+  .hbox.t { top: 0; border-top: 0; } .hbox.b { bottom: 0; border-bottom: 0; }
+  .pl { position: absolute; transform: translate(-50%,-50%); width: 92px; background: #fff; border: 2px solid; border-radius: 3px; text-align: center; padding: 4px 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .pl.gk { border-color: #eab308; } .pl.def { border-color: #dc2626; } .pl.mid { border-color: #2563eb; } .pl.fwd { border-color: #16a34a; }
+  .pl .nm { font-size: 11px; font-weight: 700; }
+  .pl .cl { font-size: 9px; color: #777; }
+  .pl .pp { font-size: 9px; color: #14532d; font-weight: 700; }
+  .pl .armband { color: #d97706; font-weight: 800; }
+  .side { display: flex; flex-direction: column; gap: 16px; }
+  .panel { background: #fff; border: 1px solid #dde3e8; border-radius: 4px; padding: 14px; }
+  .panel h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: #14532d; margin-bottom: 10px; }
+  .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #f0f2f4; font-size: 13px; }
+  .row:last-child { border-bottom: 0; }
+  .row b { font-weight: 700; }
+  .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .chip { text-align: center; border: 1px solid #dde3e8; border-radius: 4px; padding: 8px 4px; font-size: 11px; }
+  .chip .a { font-weight: 800; font-size: 14px; color: #14532d; }
+  .chip .s { color: #16a34a; font-weight: 700; }
+  .chip.used .s { color: #9ca3af; } .chip.used { background: #f3f4f6; }
+  .feed { font-size: 13px; }
+  .feed div { padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
+  .feed .t { font-size: 11px; color: #9ca3af; }
+  .arrow { color: #16a34a; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 6px 6px; border-bottom: 1px solid #f0f2f4; text-align: left; }
+  th { color: #6b7280; font-size: 10px; text-transform: uppercase; }
+  .gk-t { color: #b45309; } .def-t { color: #dc2626; } .mid-t { color: #2563eb; } .fwd-t { color: #16a34a; }
+  .scorecard-banner { grid-column: 1 / -1; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; padding: 12px 16px; font-size: 13px; display: flex; gap: 28px; }
+  .scorecard-banner b { color: #166534; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">AIFPL <span>MANAGEMENT HUB</span></div>
+  <div style="display:flex; align-items:center; gap:10px">
+    <span style="font-size:13px">GW1 &middot; 2026-27</span>
+    <span class="sample">sample</span>
+  </div>
+</div>
+<div class="tabs" style="padding:0 20px">
+  <div class="tab active">Dashboard</div><div class="tab">Squad</div><div class="tab">Transfers</div><div class="tab">Chips</div><div class="tab">Scorecards</div><div class="tab">Health</div>
+</div>
+<div class="banner">
+  <span>GW1 deadline: <b id="timer">--:--:--</b></span>
+  <span>Telegram notify: <b>Fri 21 Aug 13:30 UTC</b></span>
+  <span>Refresh: <b>16:00 UTC</b></span>
+  <span>Bank <b>&pound;0.0m</b></span>
+  <span>FT <b>1</b></span>
+</div>
+<div class="wrap">
+  <div class="pitch-card">
+    <h3>STARTING XI &middot; 1-4-5-1</h3>
+    <div class="pitch">
+      <div class="hline"></div><div class="hcircle"></div><div class="hbox t"></div><div class="hbox b"></div>
+      <div class="pl fwd" style="left:50%; top:11%"><div class="nm">Thiago</div><div class="cl">BRE</div><div class="pp">4.3</div></div>
+      <div class="pl mid" style="left:15%; top:37%"><div class="nm">Anderson</div><div class="cl">MCI</div><div class="pp">4.1</div></div>
+      <div class="pl mid" style="left:33%; top:39%"><div class="nm">Rice</div><div class="cl">ARS</div><div class="pp">4.7</div></div>
+      <div class="pl mid" style="left:51%; top:37%"><div class="nm">B.Fernandes <span class="armband">(C)</span></div><div class="cl">MUN</div><div class="pp">6.0</div></div>
+      <div class="pl mid" style="left:70%; top:39%"><div class="nm">Gibbs-White</div><div class="cl">NFO</div><div class="pp">4.3</div></div>
+      <div class="pl mid" style="left:87%; top:37%"><div class="nm">Semenyo</div><div class="cl">MCI</div><div class="pp">4.8</div></div>
+      <div class="pl def" style="left:17%; top:62%"><div class="nm">Gabriel</div><div class="cl">ARS</div><div class="pp">4.8</div></div>
+      <div class="pl def" style="left:38%; top:65%"><div class="nm">Tarkowski</div><div class="cl">EVE</div><div class="pp">3.6</div></div>
+      <div class="pl def" style="left:59%; top:65%"><div class="nm">Virgil</div><div class="cl">LIV</div><div class="pp">3.8</div></div>
+      <div class="pl def" style="left:80%; top:62%"><div class="nm">Gu&eacute;hi</div><div class="cl">MCI</div><div class="pp">4.1</div></div>
+      <div class="pl gk" style="left:50%; top:88%"><div class="nm">Raya</div><div class="cl">ARS</div><div class="pp">4.1</div></div>
+    </div>
+    <div style="margin-top:8px; font-size:12px; color:#6b7280">Bench: Dubravka (TOT) &middot; Fredricson (MUN) &middot; Scarlett (TOT) &middot; Danns (LIV)</div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h4>Chip status</h4>
+      <div class="chips">
+        <div class="chip"><div class="a">WC</div><div class="s">Available</div></div>
+        <div class="chip"><div class="a">BB</div><div class="s">Available</div></div>
+        <div class="chip"><div class="a">TC</div><div class="s">Available</div></div>
+        <div class="chip"><div class="a">FH</div><div class="s">Available</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h4>Latest transfers</h4>
+      <div class="feed">
+        <div><span class="t">GW1 &middot; pre-season</span><br>Squad adopted &mdash; 15 in <span class="arrow">&#8592;</span></div>
+        <div><span class="t">sample</span><br>Jo&atilde;o Pedro <span class="arrow">&#8594;</span> Thiago</div>
+        <div><span class="t">sample</span><br>Haaland <span class="arrow">&#8594;</span> Semenyo</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h4>Hermes</h4>
+      <div class="row"><span>Model</span><b>deepseek-v4-flash</b></div>
+      <div class="row"><span>Action</span><b>adopt_initial</b></div>
+      <div class="row"><span>Horizon</span><b>4 GW</b></div>
+      <div class="row"><span>Risk / hits</span><b>0.4 / 0.8</b></div>
+    </div>
+  </div>
+
+  <div class="pitch-card">
+    <h4>Squad &middot; projections</h4>
+    <table>
+      <tr><th></th><th>Player</th><th>Club</th><th>Cost</th><th>GW1</th><th>GW1-6</th></tr>
+      <tr><td class="gk-t">GK</td><td><b>Raya</b></td><td>ARS</td><td>6.0</td><td>4.1</td><td>20.6</td></tr>
+      <tr><td class="def-t">DEF</td><td><b>Gabriel</b></td><td>ARS</td><td>8.0</td><td>4.8</td><td>24.2</td></tr>
+      <tr><td class="def-t">DEF</td><td><b>Tarkowski</b></td><td>EVE</td><td>6.0</td><td>3.6</td><td>22.4</td></tr>
+      <tr><td class="def-t">DEF</td><td><b>Virgil</b></td><td>LIV</td><td>6.5</td><td>3.8</td><td>23.3</td></tr>
+      <tr><td class="def-t">DEF</td><td><b>Gu&eacute;hi</b></td><td>MCI</td><td>6.0</td><td>4.1</td><td>23.6</td></tr>
+      <tr><td class="mid-t">MID</td><td><b>B.Fernandes (C)</b></td><td>MUN</td><td>12.0</td><td>6.0</td><td>32.4</td></tr>
+      <tr><td class="mid-t">MID</td><td><b>Semenyo</b></td><td>MCI</td><td>8.5</td><td>4.8</td><td>27.4</td></tr>
+      <tr><td class="mid-t">MID</td><td><b>Rice</b></td><td>ARS</td><td>7.5</td><td>4.7</td><td>23.8</td></tr>
+      <tr><td class="mid-t">MID</td><td><b>Gibbs-White</b></td><td>NFO</td><td>8.0</td><td>4.3</td><td>24.8</td></tr>
+      <tr><td class="mid-t">MID</td><td><b>Anderson</b></td><td>MCI</td><td>6.5</td><td>4.1</td><td>23.2</td></tr>
+      <tr><td class="fwd-t">FWD</td><td><b>Thiago</b></td><td>BRE</td><td>8.0</td><td>4.3</td><td>26.2</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h4>Scorecards <span style="color:#9ca3af; text-transform:none">sample</span></h4>
+    <table>
+      <tr><th>GW</th><th>Action</th><th>Pred</th><th>Actual</th><th>Delta</th></tr>
+      <tr><td>1</td><td>adopt_initial</td><td>27.9</td><td>34.2</td><td style="color:#16a34a"><b>+6.3</b></td></tr>
+      <tr><td>0</td><td>hold</td><td>28.1</td><td>26.4</td><td style="color:#dc2626">-1.7</td></tr>
+    </table>
+  </div>
+</div>
+<div class="scorecard-banner" style="margin:0 auto; max-width:1200px; margin-bottom:20px">
+  <span>Sources: <b>bootstrap &#10003;</b> <b>fixtures &#10003;</b> <b>odds &#10003;</b></span>
+  <span>Scheduler: <b>loop running</b> &middot; next notify <b>13:30 UTC</b></span>
+  <span>Chip advice: <b>none recommended</b></span>
+</div>
+<script>
+  const t = Date.parse("2026-08-21T17:30:00Z");
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const x = s%60; return `${d}d ${h}h ${m}m ${x}s`; };
+  setInterval(() => document.getElementById("timer").textContent = fmt(t - Date.now()), 1000);
+</script>
+</body>
+</html>

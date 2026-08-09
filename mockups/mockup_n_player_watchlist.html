@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AIFPL Player Watchlist — Transfer Target Comparison</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #0f172a; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 22px; }
+  .shell { background: #1e293b; padding: 20px; border-radius: 16px; box-shadow: inset 0 0 60px rgba(0,0,0,.4); }
+  .board { width: 1200px; max-width: 96vw; background: #0f172a; border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,.6); padding: 28px 34px 22px; position: relative; border: 1px solid #1e293b; }
+  .board::after { content: ""; position: absolute; inset: 0; border-radius: 16px; background: linear-gradient(135deg, transparent 60%, rgba(59,130,246,.04)); pointer-events: none; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; padding-bottom: 12px; border-bottom: 1px solid #1e293b; }
+  h1 { font-size: 22px; color: #f8fafc; font-weight: 700; }
+  h1 span { color: #3b82f6; }
+  .search-box { display: flex; gap: 8px; }
+  .search-box input { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 14px; color: #f8fafc; font-size: 13px; width: 220px; outline: none; }
+  .search-box input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+  .search-box button { background: #3b82f6; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .search-box button:hover { background: #2563eb; }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .player-card { background: #1e293b; border-radius: 14px; padding: 20px; position: relative; border: 1px solid #334155; animation: card-in .6s cubic-bezier(.2,1.2,.4,1) backwards; overflow: hidden; }
+  .player-card:nth-child(1) { animation-delay: .1s; } .player-card:nth-child(2) { animation-delay: .2s; } .player-card:nth-child(3) { animation-delay: .3s; }
+  @keyframes card-in { from { transform: translateY(40px) scale(.95); opacity: 0; } }
+  .player-card.recommended { border-color: #3b82f6; box-shadow: 0 0 30px rgba(59,130,246,.12); }
+  .player-card.recommended::before { content: "RECOMMENDED"; position: absolute; top: 12px; right: -28px; background: #3b82f6; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 1px; padding: 3px 32px; transform: rotate(40deg); }
+  .player-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .player-avatar { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .player-avatar.fwd { background: linear-gradient(135deg, #059669, #10b981); }
+  .player-avatar.mid { background: linear-gradient(135deg, #2563eb, #3b82f6); }
+  .player-avatar.def { background: linear-gradient(135deg, #dc2626, #ef4444); }
+  .player-name { font-size: 18px; font-weight: 700; color: #f8fafc; }
+  .player-team { font-size: 12px; color: #94a3b8; }
+  .player-pos { font-size: 10px; font-weight: 700; color: #fff; background: #475569; padding: 2px 8px; border-radius: 4px; margin-top: 2px; display: inline-block; }
+
+  .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
+  .stat-row:last-child { border-bottom: 0; }
+  .stat-row .key { color: #94a3b8; }
+  .stat-row .val { color: #f8fafc; font-weight: 600; }
+  .stat-row .val.green { color: #34d399; } .stat-row .val.red { color: #f87171; } .stat-row .val.blue { color: #60a5fa; }
+
+  .fixture-strip { display: flex; gap: 4px; margin: 14px 0; }
+  .fixture { flex: 1; text-align: center; padding: 6px 4px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+  .fixture.easy { background: #065f4622; color: #34d399; border: 1px solid #065f4644; }
+  .fixture.med { background: #92400e22; color: #fbbf24; border: 1px solid #92400e44; }
+  .fixture.hard { background: #7f1d1d22; color: #f87171; border: 1px solid #7f1d1d44; }
+  .fixture .opp { font-size: 11px; font-weight: 700; }
+  .fixture .loc { font-size: 8px; color: #94a3b8; }
+
+  .why-box { margin-top: 14px; background: #0f172a; border-radius: 8px; padding: 12px; }
+  .why-box h4 { font-size: 10px; color: #3b82f6; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
+  .why-box li { font-size: 12px; color: #cbd5e1; padding: 3px 0; list-style: none; }
+  .why-box li::before { content: "+ "; color: #34d399; font-weight: 700; }
+  .why-box li.neg::before { content: "- "; color: #f87171; }
+
+  .proj-chart { margin-top: 18px; background: #1e293b; border-radius: 12px; padding: 18px; border: 1px solid #334155; }
+  .proj-chart h3 { font-size: 13px; color: #f8fafc; margin-bottom: 12px; }
+  .proj-bars { display: flex; gap: 6px; align-items: end; height: 120px; }
+  .proj-bars .col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .proj-bars .bar-wrap { width: 100%; display: flex; gap: 2px; align-items: end; height: 100px; }
+  .proj-bars .bar { flex: 1; border-radius: 3px 3px 0 0; animation: grow-bar .8s cubic-bezier(.2,1.2,.4,1) backwards; }
+  @keyframes grow-bar { from { height: 0; } }
+  .proj-bars .bar.a { background: #3b82f6; } .proj-bars .bar.b { background: #60a5fa; opacity: .6; }
+  .proj-bars .lbl { font-size: 9px; color: #94a3b8; text-align: center; }
+  .proj-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: #94a3b8; }
+  .proj-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .proj-legend .l1::before { background: #3b82f6; } .proj-legend .l2::before { background: #60a5fa; opacity: .6; }
+
+  .matrix { margin-top: 18px; background: #1e293b; border-radius: 12px; padding: 18px; border: 1px solid #334155; }
+  .matrix h3 { font-size: 13px; color: #f8fafc; margin-bottom: 12px; }
+  .matrix-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .matrix-table th { color: #94a3b8; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 8px; text-align: left; border-bottom: 1px solid #334155; }
+  .matrix-table td { padding: 8px; color: #e2e8f0; border-bottom: 1px solid #1e293b; }
+  .matrix-table tr:hover td { background: #1e293b; }
+  .matrix-table .highlight-row td { background: rgba(59,130,246,.08); }
+
+  .sample { position: absolute; bottom: 8px; right: 22px; font-size: 10px; color: #475569; }
+  .loader { position: fixed; inset: 0; z-index: 50; background: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; animation: loadout .7s ease 2s forwards; }
+  .loader .ring { width: 80px; height: 80px; border-radius: 50%; border: 3px solid #1e293b; border-top-color: #3b82f6; animation: ringspin 1s linear infinite; }
+  @keyframes ringspin { to { transform: rotate(360deg); } }
+  .loader .txt { font-size: 18px; color: #3b82f6; letter-spacing: 2px; }
+  .loader .sub { font-size: 12px; color: #475569; }
+  @keyframes loadout { to { opacity: 0; visibility: hidden; } }
+  .board { animation: boardin .8s cubic-bezier(.2,1.2,.4,1) .8s backwards; }
+  @keyframes boardin { from { transform: scale(.96); opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="loader">
+  <div class="ring"></div>
+  <div class="txt">SCOUTING PLAYERS</div>
+  <div class="sub">AIFPL &middot; watchlist comparison</div>
+</div>
+<div class="shell">
+<div class="board">
+  <header>
+    <h1><span>Watchlist</span> &mdash; Transfer Targets</h1>
+    <div class="search-box">
+      <input type="text" placeholder="Search players..." />
+      <button>Compare</button>
+    </div>
+  </header>
+
+  <div class="compare-grid">
+    <div class="player-card recommended">
+      <div class="player-header">
+        <div class="player-avatar mid">MB</div>
+        <div><div class="player-name">M. Beier</div><div class="player-team">CHE &middot; #9</div><div class="player-pos">MID</div></div>
+      </div>
+      <div class="stat-row"><span class="key">Price</span><span class="val">&pound;6.2m</span></div>
+      <div class="stat-row"><span class="key">Form (5 GW)</span><span class="val green">6.8</span></div>
+      <div class="stat-row"><span class="key">Points per &pound;m</span><span class="val green">1.10</span></div>
+      <div class="stat-row"><span class="key">Ownership</span><span class="val">8.2%</span></div>
+      <div class="stat-row"><span class="key">xGI (90 min)</span><span class="val blue">0.62</span></div>
+      <div class="fixture-strip">
+        <div class="fixture easy"><div class="opp">BUR</div><div class="loc">H</div></div>
+        <div class="fixture easy"><div class="opp">BOU</div><div class="loc">A</div></div>
+        <div class="fixture med"><div class="opp">WHU</div><div class="loc">H</div></div>
+        <div class="fixture med"><div class="opp">NFO</div><div class="loc">A</div></div>
+        <div class="fixture hard"><div class="opp">ARS</div><div class="loc">H</div></div>
+        <div class="fixture easy"><div class="opp">LEI</div><div class="loc">A</div></div>
+      </div>
+      <div class="why-box">
+        <h4>Why Buy</h4>
+        <ul>
+          <li>Underlying stats elite: 0.62 xGI/90 from midfield</li>
+          <li>4 of next 6 fixtures are easy (FDR &le; 2)</li>
+          <li>Price rising &mdash; buy before +0.2m jump</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="player-card">
+      <div class="player-header">
+        <div class="player-avatar fwd">OW</div>
+        <div><div class="player-name">O. Watkins</div><div class="player-team">AVL &middot; #11</div><div class="player-pos">FWD</div></div>
+      </div>
+      <div class="stat-row"><span class="key">Price</span><span class="val">&pound;7.8m</span></div>
+      <div class="stat-row"><span class="key">Form (5 GW)</span><span class="val green">5.4</span></div>
+      <div class="stat-row"><span class="key">Points per &pound;m</span><span class="val">0.69</span></div>
+      <div class="stat-row"><span class="key">Ownership</span><span class="val">32.1%</span></div>
+      <div class="stat-row"><span class="key">xGI (90 min)</span><span class="val blue">0.58</span></div>
+      <div class="fixture-strip">
+        <div class="fixture med"><div class="opp">CRY</div><div class="loc">H</div></div>
+        <div class="fixture hard"><div class="opp">LIV</div><div class="loc">A</div></div>
+        <div class="fixture hard"><div class="opp">MCI</div><div class="loc">H</div></div>
+        <div class="fixture easy"><div class="opp">SOU</div><div class="loc">A</div></div>
+        <div class="fixture easy"><div class="opp">WOL</div><div class="loc">H</div></div>
+        <div class="fixture med"><div class="opp">BHA</div><div class="loc">A</div></div>
+      </div>
+      <div class="why-box">
+        <h4>Why Buy</h4>
+        <ul>
+          <li>Proven FPL asset, consistent returns</li>
+          <li>High ownership = safe template pick</li>
+        </ul>
+        <ul>
+          <li class="neg">Next 3 fixtures tough (LIV, MCI)</li>
+          <li class="neg">Expensive &mdash; blocks funds for mid upgrade</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="player-card">
+      <div class="player-header">
+        <div class="player-avatar mid">JN</div>
+        <div><div class="player-name">J. Nypan</div><div class="player-team">ARS &middot; #29</div><div class="player-pos">MID</div></div>
+      </div>
+      <div class="stat-row"><span class="key">Price</span><span class="val">&pound;5.4m</span></div>
+      <div class="stat-row"><span class="key">Form (5 GW)</span><span class="val green">5.2</span></div>
+      <div class="stat-row"><span class="key">Points per &pound;m</span><span class="val green">0.96</span></div>
+      <div class="stat-row"><span class="key">Ownership</span><span class="val">4.5%</span></div>
+      <div class="stat-row"><span class="key">xGI (90 min)</span><span class="val blue">0.41</span></div>
+      <div class="fixture-strip">
+        <div class="fixture hard"><div class="opp">MUN</div><div class="loc">A</div></div>
+        <div class="fixture easy"><div class="opp">BRE</div><div class="loc">H</div></div>
+        <div class="fixture easy"><div class="opp">FUL</div><div class="loc">A</div></div>
+        <div class="fixture med"><div class="opp">TOT</div><div class="loc">H</div></div>
+        <div class="fixture easy"><div class="opp">IPS</div><div class="loc">A</div></div>
+        <div class="fixture med"><div class="opp">NEW</div><div class="loc">H</div></div>
+      </div>
+      <div class="why-box">
+        <h4>Why Buy</h4>
+        <ul>
+          <li>Enabler &mdash; frees &pound;1.0m+ for premiums</li>
+          <li>Arsenal rotation risk low with 89% starts</li>
+        </ul>
+        <ul>
+          <li class="neg">Lower ceiling than Beier</li>
+          <li class="neg">Differential &mdash; hurts if wrong</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="proj-chart">
+    <h3>Projected Points &mdash; Next 6 Gameweeks</h3>
+    <div class="proj-bars">
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:65%"></div><div class="bar b" style="height:50%"></div></div><div class="lbl">GW7</div></div>
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:72%"></div><div class="bar b" style="height:55%"></div></div><div class="lbl">GW8</div></div>
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:60%"></div><div class="bar b" style="height:45%"></div></div><div class="lbl">GW9</div></div>
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:55%"></div><div class="bar b" style="height:48%"></div></div><div class="lbl">GW10</div></div>
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:40%"></div><div class="bar b" style="height:52%"></div></div><div class="lbl">GW11</div></div>
+      <div class="col"><div class="bar-wrap"><div class="bar a" style="height:68%"></div><div class="bar b" style="height:42%"></div></div><div class="lbl">GW12</div></div>
+    </div>
+    <div class="proj-legend">
+      <span class="l1">Beier (6 GW horizon)</span>
+      <span class="l2">Watkins (6 GW horizon)</span>
+    </div>
+  </div>
+
+  <div class="matrix">
+    <h3>Comparison Matrix</h3>
+    <table class="matrix-table">
+      <tr><th>Player</th><th>Price</th><th>Form</th><th>pts/&pound;m</th><th>6GW Proj</th><th>Own%</th><th>xGI/90</th><th>Avg FDR</th></tr>
+      <tr class="highlight-row"><td>M. Beier (CHE)</td><td>&pound;6.2m</td><td>6.8</td><td>1.10</td><td>38.2</td><td>8.2%</td><td>0.62</td><td>2.1</td></tr>
+      <tr><td>O. Watkins (AVL)</td><td>&pound;7.8m</td><td>5.4</td><td>0.69</td><td>32.5</td><td>32.1%</td><td>0.58</td><td>3.2</td></tr>
+      <tr><td>J. Nypan (ARS)</td><td>&pound;5.4m</td><td>5.2</td><td>0.96</td><td>28.1</td><td>4.5%</td><td>0.41</td><td>2.4</td></tr>
+    </table>
+  </div>
+
+  <div class="sample">INTERACTIVE APP MOCKUP &mdash; SAMPLE DATA</div>
+</div>
+</div>
+</body>
+</html>

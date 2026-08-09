@@ -10,7 +10,9 @@ from pydantic import BaseModel
 
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import freshness_hours
+from aifpl.market_odds import EventMarketStore
 from aifpl.odds import OddsSnapshotStore
+from aifpl.player_evidence import PlayerEvidenceStore
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 
 
@@ -65,6 +67,8 @@ class SourceHealthChecker:
                 "event_live", now, lambda: snapshots.latest_event_live(current_event),
             ))
         records.append(self._check_odds(now))
+        records.append(self._check_event_markets(now))
+        records.append(self._check_player_evidence(now))
         overall = "healthy" if all(record.status in ("healthy", "not_applicable") for record in records) else "degraded"
         stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
         path = self.root / "health" / "sources" / f"{stamp}.json"
@@ -103,6 +107,36 @@ class SourceHealthChecker:
             return SourceHealthRecord(source="odds", status="missing", checked_at=now, detail=str(exc))
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             return SourceHealthRecord(source="odds", status="invalid", checked_at=now, detail=str(exc))
+
+    def _check_event_markets(self, now: datetime) -> SourceHealthRecord:
+        try:
+            store = EventMarketStore(self.root)
+            path = store.latest_path()
+            rows = store.latest()
+            if not rows:
+                raise ValueError("Event-market catalog contains no usable quotes")
+            raw_path = self.root / "raw" / "odds" / "the_odds_api" / "epl_event_markets" / f"{path.stem}.json"
+            document = json.loads(raw_path.read_text(encoding="utf-8"))
+            fetched_at = datetime.fromisoformat(document["fetched_at"])
+            return self._freshness_record("event_markets", path, fetched_at, now)
+        except FileNotFoundError as exc:
+            return SourceHealthRecord(source="event_markets", status="missing", checked_at=now, detail=str(exc))
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            return SourceHealthRecord(source="event_markets", status="invalid", checked_at=now, detail=str(exc))
+
+    def _check_player_evidence(self, now: datetime) -> SourceHealthRecord:
+        try:
+            store = PlayerEvidenceStore(self.root)
+            path = store.latest_path()
+            rows = store.latest()
+            if not rows:
+                raise ValueError("Player evidence catalog contains no records")
+            fetched_at = datetime.fromisoformat(rows[0].fetched_at)
+            return self._freshness_record("player_evidence", path, fetched_at, now)
+        except FileNotFoundError as exc:
+            return SourceHealthRecord(source="player_evidence", status="missing", checked_at=now, detail=str(exc))
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            return SourceHealthRecord(source="player_evidence", status="invalid", checked_at=now, detail=str(exc))
 
     @staticmethod
     def _freshness_record(source: str, path: Path, fetched_at: datetime, now: datetime) -> SourceHealthRecord:

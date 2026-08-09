@@ -48,6 +48,8 @@ class SchedulerTickResult(BaseModel):
     refresh_job_path: str | None = None
     hermes_decision_path: str | None = None
     hermes_error: str | None = None
+    telegram_notified: bool | None = None
+    telegram_error: str | None = None
     error: str | None = None
     output_path: str
 
@@ -98,6 +100,15 @@ class DeadlineScheduler:
         )
 
     def tick(self, checked_at: datetime | None = None, force: bool = False) -> SchedulerTickResult:
+        result = self._tick_inner(checked_at, force)
+        if result.event is not None and result.deadline is not None and result.status not in ("missed", "discovery_failed"):
+            notified, notify_error = self._maybe_notify_telegram(
+                result.event, result.season_id or "", result.deadline, result.checked_at,
+            )
+            result = result.model_copy(update={"telegram_notified": notified, "telegram_error": notify_error})
+        return result
+
+    def _tick_inner(self, checked_at: datetime | None = None, force: bool = False) -> SchedulerTickResult:
         try:
             schedule = self.status(checked_at)
         except Exception as exc:
@@ -176,8 +187,39 @@ class DeadlineScheduler:
                 pass
             time.sleep(self.settings.poll_seconds)
 
-    def _persist_tick(
-        self, path: Path, schedule: DeadlineStatus,
+    def _telegram_notification_path(self, season_id: str, event: int) -> Path:
+        return self.root / "scheduler" / "telegram_notified" / season_id / f"gw{event}.json"
+
+    def _maybe_notify_telegram(
+        self, event: int, season_id: str, deadline: datetime, checked_at: datetime,
+    ) -> tuple[bool, str | None]:
+        try:
+            from aifpl.config import telegram_settings
+
+            settings = telegram_settings()
+        except ValueError:
+            return False, None
+        if not settings.enabled:
+            return False, None
+        if checked_at < deadline - timedelta(minutes=settings.notify_lead_minutes):
+            return False, None
+        if checked_at >= deadline:
+            return False, None
+        marker = self._telegram_notification_path(season_id, event)
+        if marker.exists():
+            return True, None
+        try:
+            from aifpl.notifier import TelegramNotifier, build_recommendation_message
+
+            message = build_recommendation_message(self.root, event, season_id, deadline)
+            TelegramNotifier.from_environment().send_message(message)
+        except Exception as exc:
+            return False, redact_secrets(f"{type(exc).__name__}: {exc}")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        write_immutable(marker, json_bytes({"event": event, "sent_at": checked_at.isoformat()}, pretty=True))
+        return True, None
+
+    def _persist_tick(        self, path: Path, schedule: DeadlineStatus,
         status: Literal["not_due", "already_completed", "in_progress", "succeeded", "failed", "missed"],
         forced: bool, refresh_job_path: str | None = None, error: str | None = None,
         hermes_decision_path: str | None = None,

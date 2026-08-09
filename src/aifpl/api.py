@@ -3,15 +3,18 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from aifpl.config import data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
+from aifpl.dashboard import CurrentDashboard, build_current_dashboard
 from aifpl.fixture_projections import FixtureGameweekProjection, FixtureProjectionCatalog, FixtureProjectionStore, build_fixture_gameweek_projections
 from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCatalog
 from aifpl.fpl import FplClient, FplSourceError
@@ -35,8 +38,15 @@ from aifpl.transfers import CurrentSquadState, TransferPlan, plan_transfers
 from aifpl.xg_projections import XgXaProjection, XgXaProjectionCatalog, XgXaProjectionStore, elapsed_gameweeks
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 from aifpl.security import valid_admin_key
+from aifpl.teams import CurrentTeam, CurrentTeamCatalogStore, team_logo_path
 
 app = FastAPI(title="AIFPL Backend", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["null", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_methods=["GET", "HEAD", "OPTIONS"],
+    allow_headers=["*"]
+)
 
 
 @app.middleware("http")
@@ -394,6 +404,38 @@ def current_players(limit: int = Query(20, ge=1, le=1000)) -> list[CurrentPlayer
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/dashboard/current", response_model=CurrentDashboard)
+def current_dashboard() -> CurrentDashboard:
+    try:
+        return build_current_dashboard(data_dir())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/teams/current", response_model=list[CurrentTeam])
+def current_teams() -> list[CurrentTeam]:
+    try:
+        return CurrentTeamCatalogStore(data_dir()).latest()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/teams/{team_id}/logo.png", response_class=FileResponse)
+def current_team_logo(team_id: int) -> FileResponse:
+    try:
+        team_ids = {team.id for team in CurrentTeamCatalogStore(data_dir()).latest()}
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if team_id not in team_ids:
+        raise HTTPException(status_code=404, detail=f"Unknown current team: {team_id}")
+    path = team_logo_path(team_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No logo asset exists for team: {team_id}")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.post("/catalogs/current/players", response_model=CurrentPlayerCatalog, status_code=201)
 def normalize_current_players() -> CurrentPlayerCatalog:
     try:
@@ -434,9 +476,13 @@ def current_projections(limit: int = Query(20, ge=1, le=1000)) -> list[CurrentPl
 def optimize_current_squad(
     budget: int = Query(1000, ge=0), projection_source: ProjectionSource = Query(ProjectionSource.CURRENT),
     catalog_id: str | None = Query(None),
+    differential_appetite: float = Query(0.0, ge=0, le=1),
 ) -> OptimizedSquad:
     try:
-        return optimize_squad(load_projection_candidates(data_dir(), projection_source, catalog_id), budget)
+        return optimize_squad(
+            load_projection_candidates(data_dir(), projection_source, catalog_id), budget,
+            differential_appetite=differential_appetite,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (SquadOptimizationError, ValueError) as exc:

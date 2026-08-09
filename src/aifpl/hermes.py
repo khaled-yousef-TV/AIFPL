@@ -18,7 +18,6 @@ from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.optimizer import OptimizedSquad, optimize_squad
 from aifpl.player_evidence import PlayerEvidenceStore
-from aifpl.projection_catalogs import ProjectionSource, load_projection_candidates
 from aifpl.projection_catalogs import _aggregate
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import SquadPlayer, SquadRequest, select_best_lineup
@@ -121,18 +120,51 @@ class HermesDecisionBackend:
             evidence_count = len(PlayerEvidenceStore(self.root).latest())
         except FileNotFoundError:
             evidence_count = 0
-        return {"source_health": health, "player_evidence_records": evidence_count}
+        return {
+            "source_health": health,
+            "player_evidence_records": evidence_count,
+            "decision_history": self._decision_history(),
+        }
+
+    def _decision_history(self) -> dict[str, Any]:
+        try:
+            from aifpl.scoring import DecisionScorer
+
+            records = DecisionScorer(self.root).recent(5)
+        except FileNotFoundError:
+            return {"rows": [], "summary": None}
+        rows = [
+            {
+                "gameweek": record.gameweek, "season_id": record.season_id, "action": record.action,
+                "projected": record.total_projected, "actual": record.total_actual,
+                "xi_actual": record.xi_actual, "bench_actual": record.bench_actual,
+                "transfer_delta": round(sum(transfer.delta for transfer in record.transfers), 4),
+                "captain_actual": record.captain.actual if record.captain else None,
+            }
+            for record in records
+        ]
+        current_season = rows[0]["season_id"] if rows else None
+        season_rows = [row for row in rows if row["season_id"] == current_season]
+        summary = None
+        if season_rows:
+            deltas = [row["actual"] - row["projected"] for row in season_rows]
+            summary = {
+                "scored_gameweeks": len(season_rows),
+                "avg_actual_minus_projected": round(sum(deltas) / len(deltas), 4),
+                "total_transfer_delta": round(sum(row["transfer_delta"] for row in season_rows), 4),
+                "avg_captain_actual": round(sum(row["captain_actual"] or 0 for row in season_rows) / len(season_rows), 4),
+            }
+        return {"rows": rows, "summary": summary}
 
     def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int]:
-        catalog_id = self._latest_catalog_id(1, 6)
-        rows = OddsProjectionStore(self.root).latest(catalog_id)
-        gameweek = min(row.gameweek for row in rows)
-        candidates = _aggregate([row for row in rows if row.gameweek == gameweek])
+        rows = self._horizon_rows(1, strategy.planning_horizon)
+        candidates = _aggregate(rows)
         preferred = {row.player_id for row in candidates if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
-        return optimize_squad(
+        squad = optimize_squad(
             candidates, preferred_player_ids=preferred,
             differential_appetite=strategy.differential_appetite,
-        ), gameweek
+        )
+        return squad, min(row.gameweek for row in rows)
 
     def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> HorizonTransferPlan:
         rows = self._horizon_rows(target_gameweek, strategy.planning_horizon)
@@ -238,7 +270,8 @@ class HermesManager:
         system = (
             "You are Hermes, an autonomous FPL manager playing your own experimental team. "
             "The backend is authoritative for all numbers and legality. Set your own stable strategy when none exists, "
-            "inspect backend recommendations, then commit exactly one action. Never invent projections or player IDs."
+            "inspect backend recommendations, then commit exactly one action. Never invent projections or player IDs. "
+            "The context includes decision_history with your prior decisions' outcomes; use it as evidence when changing strategy."
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -267,7 +300,7 @@ class HermesManager:
     def latest_state(self, optional: bool = False) -> HermesState | None:
         directory = self.root / "hermes" / "states"
         files = sorted(directory.glob("*.json")) if directory.exists() else []
-        files = [path for path in files if not json.loads(path.read_text(encoding="utf-8")).get("decision_path") or Path(json.loads(path.read_text(encoding="utf-8"))["decision_path"]).exists()]
+        files = [path for path in files if _sibling_exists(self.root, path, "decisions")]
         if not files:
             if optional:
                 return None
@@ -287,7 +320,7 @@ class HermesManager:
     def latest_decision(self) -> HermesDecision:
         directory = self.root / "hermes" / "decisions"
         files = sorted(directory.glob("*.json")) if directory.exists() else []
-        files = [path for path in files if not json.loads(path.read_text(encoding="utf-8")).get("state_path") or Path(json.loads(path.read_text(encoding="utf-8"))["state_path"]).exists()]
+        files = [path for path in files if _sibling_exists(self.root, path, "states")]
         if not files:
             raise FileNotFoundError("Hermes has no decisions yet")
         return HermesDecision.model_validate_json(files[-1].read_text(encoding="utf-8"))
@@ -420,6 +453,16 @@ class HermesManager:
         write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
         write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
         return HermesRunResult(decision=decision, state_path=str(state_path), tool_steps=0)
+
+
+def _sibling_exists(root: Path, artifact: Path, sibling_directory: str) -> bool:
+    document = json.loads(artifact.read_text(encoding="utf-8"))
+    reference = document.get("state_path" if sibling_directory == "states" else "decision_path")
+    if not reference:
+        return True
+    if Path(reference).exists():
+        return True
+    return (root / "hermes" / sibling_directory / f"{artifact.stem}.json").exists()
 
 
 def _tools() -> list[dict[str, Any]]:

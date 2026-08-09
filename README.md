@@ -27,7 +27,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-The current suite contains **106 passing tests**. Commands below assume the
+The current suite contains **121 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests
@@ -78,6 +78,9 @@ aifpl build-market-signals
 aifpl hermes-run
 aifpl hermes-state
 aifpl hermes-decision
+aifpl score-decisions
+aifpl send-scorecard
+aifpl notify-telegram
 aifpl compare-backtests data/backtests/2025-26/RUN_A/predictions.jsonl \
   data/backtests/2025-26/RUN_B/predictions.jsonl
 aifpl calibrate-backtest data/backtests/2025-26/RUN/predictions.jsonl \
@@ -99,6 +102,8 @@ curl -X POST http://127.0.0.1:8000/scheduler/tick -H "X-AIFPL-Admin-Key: $AIFPL_
 curl http://127.0.0.1:8000/snapshots/fpl/bootstrap/latest
 curl 'http://127.0.0.1:8000/snapshots/fpl/bootstrap/as-of?at=2026-08-07T19:00:00Z'
 curl http://127.0.0.1:8000/historical/seasons/2025-26
+curl http://127.0.0.1:8000/teams/current
+curl http://127.0.0.1:8000/teams/1/logo.png --output arsenal.png
 curl 'http://127.0.0.1:8000/players/current?limit=10'
 curl 'http://127.0.0.1:8000/fixtures/current?limit=10'
 curl 'http://127.0.0.1:8000/projections/current?limit=10'
@@ -219,14 +224,19 @@ horizon, polling, and budget use the `AIFPL_SCHEDULER_*` variables in
     and optional timestamped predicted-lineup feeds with categorical source quality.
 15. Autonomous Hermes manager: model-owned strategy, backend tool calls,
     season-aware squad state, tracked purchase prices, audited decisions, and scheduler execution.
+16. Telegram deadline notifications: squad, transfer changes, captain, and
+    provisional chip advice delivered to a configured chat before each official
+    deadline with deduplicated scheduling.
+17. Decision scoring and Hermes outcome feedback: completed-gameweek actuals are
+    compared against each committed decision's projections (XI, captain, bench,
+    and transfer deltas), persisted as audited scorecards, and the recent
+    history plus season summary is fed back into Hermes' context so strategy
+    changes are evidence-based rather than blind.
 
 ### Next
 
-1. **Autonomous FPL account integration:** retrieve the throwaway account's exact
-   squad, bank, free transfers, and selling prices, then submit Hermes' transfers,
-   lineup, captain, and bench decisions automatically.
-2. **Frontend:** dashboard, evidence view, model comparisons, Hermes strategy,
-   scheduler health, recommendation history, and account-action monitoring.
+1. **Frontend:** dashboard, evidence view, model comparisons, Hermes strategy,
+   scheduler health, recommendation history, and notification log.
 
 ## Historical results source
 
@@ -277,19 +287,26 @@ Hermes state and decisions are append-only, season/gameweek-bound, concurrency
 locked, and include purchase prices for legal future selling values. The deadline
 scheduler can run Hermes automatically with `AIFPL_HERMES_AUTO_RUN=true`; a failed
 model call is retried independently without repeating the successful data refresh.
+Each run's context includes `decision_history`: the most recent scored decisions
+(predicted vs actual points, transfer deltas, captain outcomes) and a current-season
+summary, so strategy adjustments respond to measured performance. Scorecards are
+produced by `score-decisions` after each completed gameweek.
 
 The model client uses the OpenAI-compatible chat-completions and tool-call format.
 The default is `deepseek-v4-flash` at `https://api.deepseek.com`. Set
 `HERMES_BASE_URL`, `HERMES_MODEL`, and `HERMES_API_KEY` to switch providers or
 models without code changes. Hermes currently manages and audits its internal
-team autonomously; direct submission to the throwaway FPL account requires the
-remaining account-credentials adapter.
+team autonomously. Recommendations reach a configured Telegram chat before each
+deadline; direct submission to a real FPL account is out of scope.
 
 The first live `deepseek-v4-flash` run completed for season `2026-27`, created a
 six-gameweek strategy, adopted a legal GW1 squad, selected B. Fernandes as
 captain, and persisted versioned state and decision artifacts under
-`data/hermes/`. Backend-derived formation and projected-points fields remain
-authoritative when model prose is imprecise.
+`data/hermes/`. The initial squad is horizon-aware: it aggregates the strategy's
+planning-horizon projection catalog (GW1-N) and optimizes the legal squad with
+the exact solver, so GW1 ownership is chosen for the coming weeks rather than
+one gameweek of greed. Backend-derived formation and projected-points fields
+remain authoritative when model prose is imprecise.
 
 ## Current-player projection baseline
 

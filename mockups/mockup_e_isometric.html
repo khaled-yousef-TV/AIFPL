@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup E — Isometric Stadium</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", -apple-system, Roboto, sans-serif; background: radial-gradient(1200px 700px at 50% 30%, #16213a 0%, #0a0f1e 60%, #05070f 100%); color: #dbe4f5; overflow-x: hidden; }
+  .stars, .stars::after { content: ""; position: fixed; inset: 0; background-image: radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,.5), transparent), radial-gradient(1px 1px at 140px 90px, rgba(255,255,255,.4), transparent), radial-gradient(1px 1px at 260px 40px, rgba(255,255,255,.35), transparent); background-size: 280px 180px; animation: twinkle 4s ease-in-out infinite alternate; opacity: .5; pointer-events: none; }
+  @keyframes twinkle { from { opacity: .25; } to { opacity: .6; } }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 22px; position: relative; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .brand { font-size: 22px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
+  .brand span { color: #38e8a0; text-shadow: 0 0 18px rgba(56,232,160,.6); }
+  .sample { border: 1px solid #f59e0b; color: #fbbf24; font-size: 10px; padding: 3px 10px; border-radius: 999px; letter-spacing: 1.5px; }
+  .layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+  .stadium { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .crowd { position: absolute; left: -20px; right: -20px; top: -14px; height: 140px; background: radial-gradient(2px 2px at 12px 18px, #33415e, transparent), radial-gradient(2px 2px at 44px 32px, #41507a, transparent), radial-gradient(2px 2px at 78px 12px, #33415e, transparent), radial-gradient(2px 2px at 110px 26px, #41507a, transparent); background-size: 130px 60px; opacity: .7; pointer-events: none; }
+  .scene { perspective: 1300px; margin-top: 70px; }
+  .pitch3d { width: 760px; height: 520px; transform: rotateX(58deg) rotateZ(45deg); transform-style: preserve-3d; position: relative; border-radius: 8px; }
+  .turf { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, #14532d 0 46px, #166534 46px 92px); box-shadow: 0 40px 80px rgba(0,0,0,.6); border: 2px solid #22c55e; }
+  .turf::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid rgba(255,255,255,.4); }
+  .turf::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 2px solid rgba(255,255,255,.4); }
+  .tcircle { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 110px; height: 110px; border: 2px solid rgba(255,255,255,.4); border-radius: 50%; }
+  .tbox { position: absolute; left: 12%; width: 76%; height: 90px; border: 2px solid rgba(255,255,255,.4); }
+  .tbox.t { top: 0; border-top: 0; } .tbox.b { bottom: 0; border-bottom: 0; }
+  .pl3d { position: absolute; transform: translate(-50%,-50%); width: 96px; height: 42px; background: linear-gradient(180deg, rgba(10,15,30,.92), rgba(16,24,48,.92)); border: 1px solid rgba(255,255,255,.28); border-radius: 7px; text-align: center; padding-top: 4px; box-shadow: 0 6px 12px rgba(0,0,0,.45); z-index: 2; }
+  .pl3d::after { content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px; background: inherit; border-radius: 0 0 7px 7px; opacity: .25; filter: blur(2px); }
+  .pl3d.gk { border-color: #facc15; box-shadow: 0 0 14px rgba(250,204,21,.35), 0 6px 12px rgba(0,0,0,.45); }
+  .pl3d.def { border-color: #f87171; box-shadow: 0 0 14px rgba(248,113,113,.35), 0 6px 12px rgba(0,0,0,.45); }
+  .pl3d.mid { border-color: #60a5fa; box-shadow: 0 0 14px rgba(96,165,250,.35), 0 6px 12px rgba(0,0,0,.45); }
+  .pl3d.fwd { border-color: #4ade80; box-shadow: 0 0 14px rgba(74,222,128,.35), 0 6px 12px rgba(0,0,0,.45); }
+  .pl3d .n { font-size: 12px; font-weight: 700; }
+  .pl3d .s { font-size: 9px; color: #8fa3c8; }
+  .pl3d .pts { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 50%; background: #0e172e; border: 1px solid #38e8a0; color: #38e8a0; font-size: 9px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .captain { position: absolute; top: -30px; left: 50%; transform: translateX(-50%); font-size: 9px; letter-spacing: 1px; color: #fbbf24; border: 1px solid #fbbf24; border-radius: 999px; padding: 1px 7px; background: rgba(11,16,32,.8); }
+  .tower { position: absolute; left: 50%; bottom: -46px; transform: translateX(-50%); width: 240px; height: 40px; background: linear-gradient(180deg, #0d1526, #080d1a); border: 1px solid #1d2a4a; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #38e8a0; letter-spacing: 3px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .glass { background: rgba(16,24,44,.55); border: 1px solid rgba(96,165,250,.18); border-radius: 16px; backdrop-filter: blur(10px); padding: 16px; }
+  .glass h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: #38e8a0; margin-bottom: 12px; }
+  .timer-big { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 24px rgba(56,232,160,.5); }
+  .timer-sub { font-size: 11px; color: #7d8fb5; margin-top: 2px; }
+  .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(96,165,250,.12); font-size: 13px; }
+  .kv:last-child { border-bottom: 0; } .kv b { font-weight: 700; }
+  .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .chip { border: 1px solid rgba(56,232,160,.3); border-radius: 10px; padding: 9px; text-align: center; background: rgba(56,232,160,.06); }
+  .chip .a { font-size: 19px; font-weight: 800; color: #38e8a0; }
+  .chip .s { font-size: 10px; color: #9fb4d8; letter-spacing: 1px; }
+  .feed { font-size: 12px; }
+  .feed div { padding: 8px 0; border-bottom: 1px solid rgba(96,165,250,.12); }
+  .feed .t { font-size: 10px; color: #7d8fb5; }
+  .glow { color: #38e8a0; }
+  .benchline { margin-top: 12px; font-size: 11px; color: #8fa3c8; text-align: center; }
+  @media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } .pitch3d { width: 620px; height: 430px; transform: scale(.8) rotateX(58deg) rotateZ(45deg); } }
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<div class="wrap">
+  <header>
+    <div class="brand">AIFPL <span>&#9650; STADIUM</span></div>
+    <div class="sample">SAMPLE</div>
+  </header>
+  <div class="layout">
+    <div class="stadium">
+      <div class="crowd"></div>
+      <div class="scene">
+        <div class="pitch3d">
+          <div class="turf"></div><div class="tcircle"></div><div class="tbox t"></div><div class="tbox b"></div>
+          <div class="pl3d fwd" style="left:50%; top:9%"><div class="n">Thiago</div><div class="s">BRE</div><div class="pts">4.3</div></div>
+          <div class="pl3d mid" style="left:17%; top:36%"><div class="n">Anderson</div><div class="s">MCI</div><div class="pts">4.1</div></div>
+          <div class="pl3d mid" style="left:36%; top:38%"><div class="n">Rice</div><div class="s">ARS</div><div class="pts">4.7</div></div>
+          <div class="pl3d mid" style="left:50%; top:36%; border-color:#fbbf24"><div class="n">B.Fernandes</div><div class="s">MUN</div><div class="pts">6.0</div><div class="captain">CAPTAIN</div></div>
+          <div class="pl3d mid" style="left:64%; top:38%"><div class="n">Gibbs-White</div><div class="s">NFO</div><div class="pts">4.3</div></div>
+          <div class="pl3d mid" style="left:83%; top:36%"><div class="n">Semenyo</div><div class="s">MCI</div><div class="pts">4.8</div></div>
+          <div class="pl3d def" style="left:19%; top:63%"><div class="n">Gabriel</div><div class="s">ARS</div><div class="pts">4.8</div></div>
+          <div class="pl3d def" style="left:38%; top:65%"><div class="n">Tarkowski</div><div class="s">EVE</div><div class="pts">3.6</div></div>
+          <div class="pl3d def" style="left:58%; top:65%"><div class="n">Virgil</div><div class="s">LIV</div><div class="pts">3.8</div></div>
+          <div class="pl3d def" style="left:79%; top:63%"><div class="n">Gu&eacute;hi</div><div class="s">MCI</div><div class="pts">4.1</div></div>
+          <div class="pl3d gk" style="left:50%; top:88%"><div class="n">Raya</div><div class="s">ARS</div><div class="pts">4.1</div></div>
+        </div>
+      </div>
+      <div class="tower">LIVE &middot; GW1 &middot; 2026-27</div>
+      <div class="benchline">Bench: Dubravka (TOT) &middot; Fredricson (MUN) &middot; Scarlett (TOT) &middot; Danns (LIV)</div>
+    </div>
+
+    <div class="side">
+      <div class="glass">
+        <h3>Deadline</h3>
+        <div class="timer-big" id="timer">--:--:--</div>
+        <div class="timer-sub">GW1 closes Fri 21 Aug 17:30 UTC &middot; notify 13:30</div>
+      </div>
+      <div class="glass">
+        <h3>Chips</h3>
+        <div class="chips">
+          <div class="chip"><div class="a">WC</div><div class="s">WILDCARD</div></div>
+          <div class="chip"><div class="a">BB</div><div class="s">BENCH BOOST</div></div>
+          <div class="chip"><div class="a">TC</div><div class="s">TRIPLE CAP</div></div>
+          <div class="chip"><div class="a">FH</div><div class="s">FREE HIT</div></div>
+        </div>
+        <div class="kv" style="margin-top:8px"><span>Chip advice</span><b class="glow">none</b></div>
+      </div>
+      <div class="glass">
+        <h3>Transfers</h3>
+        <div class="feed">
+          <div><span class="t">GW1 &middot; pre-season</span><br><b>15 players in</b> &middot; unlimited <span class="glow">&#8592;</span></div>
+          <div><span class="t">sample</span><br>Jo&atilde;o Pedro <span class="glow">&#8594;</span> Thiago</div>
+          <div><span class="t">sample</span><br>Haaland <span class="glow">&#8594;</span> Semenyo</div>
+        </div>
+      </div>
+      <div class="glass">
+        <h3>Account</h3>
+        <div class="kv"><span>Bank</span><b>&pound;0.0m</b></div>
+        <div class="kv"><span>Free transfers</span><b>1</b></div>
+        <div class="kv"><span>Scorecard GW1</span><b class="glow">34.2 <span style="font-size:11px">(sample)</span></b></div>
+        <div class="kv"><span>Sources</span><b class="glow">3/3 healthy</b></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const t = Date.parse("2026-08-21T17:30:00Z");
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const x = s%60; return `${String(d).padStart(2,"0")}d : ${String(h).padStart(2,"0")}h : ${String(m).padStart(2,"0")}m : ${String(x).padStart(2,"0")}s`; };
+  setInterval(() => document.getElementById("timer").textContent = fmt(t - Date.now()), 1000);
+</script>
+</body>
+</html>

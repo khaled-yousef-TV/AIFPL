@@ -37,3 +37,36 @@ def test_hermes_sets_strategy_and_persists_autonomous_decision(tmp_path) -> None
     assert result.decision.model == "fake-model"
     assert manager.latest_state().version == 1
     assert manager.latest_decision() == result.decision
+
+
+def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypatch) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
+    result = manager.run()
+    monkeypatch.chdir("/tmp")
+
+    assert manager.latest_decision() == result.decision
+    assert manager.latest_state().version == 1
+
+
+def test_context_includes_scored_decision_history(tmp_path) -> None:
+    from aifpl.artifacts import json_bytes, write_immutable
+    from aifpl.hermes import HermesDecisionBackend
+
+    record = {
+        "decision_path": "d.json", "gameweek": 1, "season_id": "2026-27", "action": "hold",
+        "scoring_at": "2026-08-24T10:00:00+00:00", "projection_catalog": "c.json",
+        "event_snapshot": "e.json", "xi_projected": 60, "xi_actual": 70,
+        "bench_projected": 0, "bench_actual": 2, "captain": None,
+        "transfers": [{"out_element": 5, "in_element": 16, "out_name": "A", "in_name": "B",
+                       "out_actual": 4, "in_actual": 9, "delta": 5}],
+        "players": [], "total_projected": 60, "total_actual": 72,
+    }
+    write_immutable(tmp_path / "scoring" / "decisions" / "20260824T100000000001Z.json",
+                    json_bytes(record, pretty=True))
+
+    context = HermesDecisionBackend(tmp_path).context()
+
+    assert context["decision_history"]["summary"]["scored_gameweeks"] == 1
+    assert context["decision_history"]["summary"]["avg_actual_minus_projected"] == 12.0
+    assert context["decision_history"]["summary"]["total_transfer_delta"] == 5.0
+    assert context["decision_history"]["rows"][0]["gameweek"] == 1

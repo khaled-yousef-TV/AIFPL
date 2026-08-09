@@ -484,10 +484,15 @@ def optimize_current_squad(
     budget: int = typer.Option(1000, min=0),
     projection_source: ProjectionSource = typer.Option(ProjectionSource.CURRENT),
     catalog_id: str | None = typer.Option(None, help="Exact fixture/odds projection JSONL filename"),
+    differential_appetite: float = typer.Option(0.0, min=0, max=1,
+                                                help="Prefer low-owned players when projections are near-tied (0..1)"),
 ) -> None:
     """Choose the exact highest-projected legal squad from all current FPL players."""
     try:
-        squad = optimize_squad(load_projection_candidates(data_dir(), projection_source, catalog_id), budget)
+        squad = optimize_squad(
+            load_projection_candidates(data_dir(), projection_source, catalog_id), budget,
+            differential_appetite=differential_appetite,
+        )
     except (FileNotFoundError, SquadOptimizationError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(squad))
@@ -563,3 +568,44 @@ def odds_projections(limit: int = typer.Option(20, min=1, max=1000)) -> None:
     except FileNotFoundError as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(rows[:limit]))
+
+
+@app.command()
+def notify_telegram() -> None:
+    """Send the next-deadline recommendation digest to the configured Telegram chat."""
+    from aifpl.notifier import TelegramNotifier, TelegramNotifierError, build_recommendation_message
+
+    try:
+        schedule = DeadlineScheduler(data_dir()).status()
+        message = build_recommendation_message(data_dir(), schedule.event, schedule.season_id, schedule.deadline)
+        TelegramNotifier.from_environment().send_message(message)
+    except (ValueError, FileNotFoundError, TelegramNotifierError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"event": schedule.event, "sent": True, "message": message}))
+
+
+@app.command()
+def score_decisions(event: int | None = typer.Option(None, min=1, max=38)) -> None:
+    """Score the latest Hermes decision against the completed gameweek's actuals."""
+    from aifpl.hermes import HermesManager
+    from aifpl.scoring import DecisionScorer
+
+    try:
+        decision_path = HermesManager(data_dir()).latest_decision().decision_path
+        record = DecisionScorer(data_dir()).score(decision_path, event=event)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(record))
+
+
+@app.command()
+def send_scorecard() -> None:
+    """Send the latest scored decision to the configured Telegram chat."""
+    from aifpl.notifier import TelegramNotifier, TelegramNotifierError, build_scorecard_message
+
+    try:
+        message = build_scorecard_message(data_dir())
+        TelegramNotifier.from_environment().send_message(message)
+    except (ValueError, FileNotFoundError, TelegramNotifierError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"sent": True, "message": message}))

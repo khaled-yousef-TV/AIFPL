@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field
 
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
-from aifpl.optimizer import SquadOptimizationError
-from aifpl.rules import SquadPlayer, SquadRequest, club_key, select_best_lineup, validate_squad
+from aifpl.optimizer import SquadOptimizationError, optimize_squad
+from aifpl.projection_catalogs import _aggregate
+from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, select_best_lineup, validate_squad
 
 
 class HorizonSquadState(BaseModel):
-    player_ids: list[int] = Field(min_length=15, max_length=15)
+    player_ids: list[int] = Field(min_length=0, max_length=15)
     bank: int = Field(ge=0, le=5000)
     free_transfers: int = Field(ge=0, le=5)
     purchase_prices: dict[int, int] | None = None
@@ -78,8 +79,8 @@ def plan_horizon_transfers(
         ):
             raise ValueError(f"Inconsistent projection metadata for player {player_id}")
     current_ids = set(state.player_ids)
-    if len(current_ids) != 15:
-        raise ValueError("Current squad player IDs must be unique")
+    if len(current_ids) not in (0, 15):
+        raise ValueError("Current squad player IDs must contain either 15 players or none for an initial adoption")
     missing = current_ids - set(player_ids)
     if missing:
         raise ValueError(f"Current squad contains players absent from the projection catalog: {sorted(missing)}")
@@ -94,12 +95,13 @@ def plan_horizon_transfers(
         )
         for player in initial
     }
-    validation = validate_squad(SquadRequest(
-        players=[_squad_player(player) for player in initial],
-        budget=sum(player.cost for player in initial) + state.bank,
-    ))
-    if not validation.legal:
-        raise ValueError("Current squad is invalid: " + "; ".join(validation.errors))
+    if current_ids:
+        validation = validate_squad(SquadRequest(
+            players=[_squad_player(player) for player in initial],
+            budget=sum(player.cost for player in initial) + state.bank,
+        ))
+        if not validation.legal:
+            raise ValueError("Current squad is invalid: " + "; ".join(validation.errors))
 
     model = cp_model.CpModel()
     selected: dict[tuple[int, int], cp_model.IntVar] = {}
@@ -162,7 +164,8 @@ def plan_horizon_transfers(
 
         transfers = model.new_int_var(0, 15, f"transfers_{gameweek}")
         model.add(transfers == sum(incoming[player_id, week_index] for player_id in player_ids))
-        model.add(transfers == sum(outgoing[player_id, week_index] for player_id in player_ids))
+        if current_ids or week_index > 0:
+            model.add(transfers == sum(outgoing[player_id, week_index] for player_id in player_ids))
         transfer_counts.append(transfers)
         free = model.new_int_var(0, 5, f"free_transfers_{gameweek}")
         free_transfers.append(free)
@@ -183,13 +186,14 @@ def plan_horizon_transfers(
 
         bank = model.new_int_var(0, 5000, f"bank_{gameweek}")
         previous_bank = state.bank if week_index == 0 else banks[week_index - 1]
+        initial_funds = DEFAULT_BUDGET_TENTHS if (week_index == 0 and not current_ids) else 0
         sale_value = sum(
             original_outgoing[player_id, week_index] * sale_values.get(player_id, metadata[player_id].cost)
             + (outgoing[player_id, week_index] - original_outgoing[player_id, week_index]) * metadata[player_id].cost
             for player_id in player_ids
         )
         purchase_cost = sum(incoming[player_id, week_index] * metadata[player_id].cost for player_id in player_ids)
-        model.add(bank == previous_bank + sale_value - purchase_cost)
+        model.add(bank == previous_bank + initial_funds + sale_value - purchase_cost)
         banks.append(bank)
 
     # Rebuild free-transfer rollover constraints without duplicate week variables.
@@ -202,7 +206,27 @@ def plan_horizon_transfers(
 
     # Seed a legal hold strategy so a time-limited solve never returns a plan worse than doing nothing.
     held_free_transfers = state.free_transfers
+    initial_hints: dict[int, tuple[set[int], set[int], int]] = {}
+    if not current_ids:
+        week_one = [row for row in rows if row.gameweek == gameweeks[0]]
+        opening = optimize_squad(
+            _aggregate(week_one), preferred_player_ids=preferred_player_ids,
+            differential_appetite=differential_appetite,
+        )
+        initial_hints[0] = (
+            {player.player_id for player in opening.players},
+            {player.player_id for player in opening.starting_xi},
+            opening.captain.player_id,
+        )
     for week_index, gameweek in enumerate(gameweeks):
+        if not current_ids:
+            if week_index in initial_hints:
+                hinted, hinted_starters, hinted_captain = initial_hints[week_index]
+                for player_id in player_ids:
+                    model.add_hint(selected[player_id, week_index], 1 if player_id in hinted else 0)
+                    model.add_hint(starter[player_id, week_index], 1 if player_id in hinted_starters else 0)
+                    model.add_hint(captain[player_id, week_index], 1 if player_id == hinted_captain else 0)
+            continue
         held_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in current_ids]
         held_lineup = select_best_lineup(SquadRequest(
             players=[_squad_player(player) for player in held_players],
@@ -269,7 +293,7 @@ def plan_horizon_transfers(
             net_projected_points=round(projected - hit, 4),
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
-    hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids)
+    hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids) if current_ids else []
     if sum(plan.net_projected_points for plan in plans) < sum(plan.net_projected_points for plan in hold_plans):
         plans = hold_plans
         solver_status = "HOLD_FALLBACK"

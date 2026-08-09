@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup B — Data Command Center</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #f4f6fa; color: #1a2333; }
+  .topbar { background: #fff; border-bottom: 1px solid #dfe4ec; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 5; }
+  .brand { font-weight: 800; font-size: 16px; }
+  .brand em { font-style: normal; color: #2f81f7; }
+  .timer-pills { display: flex; gap: 8px; }
+  .pill { background: #eef3fb; border: 1px solid #d7e2f2; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .pill b { color: #2f81f7; }
+  .sample { background: #fdf3d7; color: #8a6100; border: 1px solid #ecd9a0; font-size: 10px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: #fff; border: 1px solid #dfe4ec; border-radius: 10px; padding: 14px 16px; }
+  .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 10px; }
+  .full { grid-column: 1 / -1; }
+  .pitch-strip { display: flex; gap: 8px; align-items: stretch; }
+  .third { flex: 1; border-radius: 8px; padding: 12px 8px; min-height: 120px; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+  .third.gk { background: #eef7ee; border: 1px solid #cfe8cf; }
+  .third.def { background: #fdeeee; border: 1px solid #f5caca; }
+  .third.mid { background: #edf3fe; border: 1px solid #c9dcf8; }
+  .third.fwd { background: #e8f8ec; border: 1px solid #bfe9c9; }
+  .pl { display: flex; justify-content: space-between; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  .pl b { font-weight: 600; }
+  .pl .pts { color: #64748b; font-variant-numeric: tabular-nums; }
+  .cap { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 3px; padding: 0 4px; font-size: 9px; font-weight: 800; margin-left: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #edf0f5; }
+  th { color: #64748b; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pos { color: #64748b; font-size: 10px; font-weight: 700; }
+  .up { color: #16a34a; font-weight: 700; } .down { color: #dc2626; font-weight: 700; }
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .chip { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; text-align: center; background: #fbfdff; }
+  .chip .abbr { font-size: 20px; font-weight: 800; color: #1e3a5f; }
+  .chip .st { font-size: 11px; color: #16a34a; font-weight: 600; }
+  .chip.used { background: #f1f5f9; } .chip.used .st { color: #94a3b8; }
+  .feed { font-size: 12px; }
+  .feed div { padding: 7px 0; border-bottom: 1px solid #edf0f5; }
+  .feed .t { color: #94a3b8; font-size: 11px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; }
+  .kv dt { color: #64748b; } .kv dd { font-weight: 600; }
+  .health { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .ok { background: #22c55e; } .nop { background: #94a3b8; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">AIFPL <em>Command Center</em> <span class="sample">sample</span></div>
+  <div class="timer-pills">
+    <span class="pill">GW1 deadline <b id="d1">--:--</b></span>
+    <span class="pill">Telegram notify <b id="d2">--:--</b></span>
+    <span class="pill">Scheduler refresh <b>16:00 UTC</b></span>
+  </div>
+</div>
+<div class="wrap">
+  <div class="card full">
+    <h3>Pitch &middot; 1-4-5-1 &middot; captain B.Fernandes (MUN)</h3>
+    <div class="pitch-strip">
+      <div class="third fwd">
+        <div class="pl"><span><b>Thiago</b> <span class="pos">FWD</span></span><span class="pts">4.3</span></div>
+      </div>
+      <div class="third mid">
+        <div class="pl"><span><b>Anderson</b> <span class="pos">MID</span></span><span class="pts">4.1</span></div>
+        <div class="pl"><span><b>Rice</b> <span class="pos">MID</span></span><span class="pts">4.7</span></div>
+        <div class="pl"><span><b>B.Fernandes</b><span class="cap">C</span> <span class="pos">MID</span></span><span class="pts">6.0</span></div>
+        <div class="pl"><span><b>Gibbs-White</b> <span class="pos">MID</span></span><span class="pts">4.3</span></div>
+        <div class="pl"><span><b>Semenyo</b> <span class="pos">MID</span></span><span class="pts">4.8</span></div>
+      </div>
+      <div class="third def">
+        <div class="pl"><span><b>Gabriel</b> <span class="pos">DEF</span></span><span class="pts">4.8</span></div>
+        <div class="pl"><span><b>Tarkowski</b> <span class="pos">DEF</span></span><span class="pts">3.6</span></div>
+        <div class="pl"><span><b>Virgil</b> <span class="pos">DEF</span></span><span class="pts">3.8</span></div>
+        <div class="pl"><span><b>Gu&eacute;hi</b> <span class="pos">DEF</span></span><span class="pts">4.1</span></div>
+      </div>
+      <div class="third gk">
+        <div class="pl"><span><b>Raya</b> <span class="pos">GK</span></span><span class="pts">4.1</span></div>
+        <div class="pl" style="opacity:.5"><span><b>Bench &times;4</b></span><span class="pts">0.0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Squad &middot; projections (GW1)</h3>
+    <table>
+      <tr><th>Player</th><th>Pos</th><th>Club</th><th>Cost</th><th>Proj</th></tr>
+      <tr><td><b>Raya</b></td><td class="pos">GK</td><td>ARS</td><td>6.0</td><td>4.1</td></tr>
+      <tr><td><b>Gabriel</b></td><td class="pos">DEF</td><td>ARS</td><td>8.0</td><td>4.8</td></tr>
+      <tr><td><b>Tarkowski</b></td><td class="pos">DEF</td><td>EVE</td><td>6.0</td><td>3.6</td></tr>
+      <tr><td><b>Virgil</b></td><td class="pos">DEF</td><td>LIV</td><td>6.5</td><td>3.8</td></tr>
+      <tr><td><b>Gu&eacute;hi</b></td><td class="pos">DEF</td><td>MCI</td><td>6.0</td><td>4.1</td></tr>
+      <tr><td><b>B.Fernandes</b> <span class="cap">C</span></td><td class="pos">MID</td><td>MUN</td><td>12.0</td><td>6.0</td></tr>
+      <tr><td><b>Semenyo</b></td><td class="pos">MID</td><td>MCI</td><td>8.5</td><td>4.8</td></tr>
+      <tr><td><b>Rice</b></td><td class="pos">MID</td><td>ARS</td><td>7.5</td><td>4.7</td></tr>
+      <tr><td><b>Gibbs-White</b></td><td class="pos">MID</td><td>NFO</td><td>8.0</td><td>4.3</td></tr>
+      <tr><td><b>Anderson</b></td><td class="pos">MID</td><td>MCI</td><td>6.5</td><td>4.1</td></tr>
+      <tr><td><b>Thiago</b></td><td class="pos">FWD</td><td>BRE</td><td>8.0</td><td>4.3</td></tr>
+    </table>
+    <div style="margin-top:8px; font-size:11px; color:#64748b">Bench: Dubravka, Fredricson, Scarlett, Danns &middot; bank &pound;0.0m &middot; 1 FT</div>
+  </div>
+
+  <div class="card">
+    <h3>Transfers in / out</h3>
+    <div class="feed">
+      <div><span class="t">GW1 pre-season</span><br>&#8592; <b>15 players in</b> &middot; unlimited transfers</div>
+      <div><span class="t">sample</span><br>&#8594; Jo&atilde;o Pedro &#8592; Thiago <span class="up">+2.1</span></div>
+      <div><span class="t">sample</span><br>&#8594; Haaland &#8592; Semenyo <span class="up">+1.4</span></div>
+      <div><span class="t">sample</span><br>&#8594; Mbeumo &#8592; Anderson <span class="down">-0.8</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Chips</h3>
+    <div class="chips">
+      <div class="chip"><div class="abbr">WC</div><div class="st">Available</div></div>
+      <div class="chip"><div class="abbr">BB</div><div class="st">Available</div></div>
+      <div class="chip"><div class="abbr">TC</div><div class="st">Available</div></div>
+      <div class="chip"><div class="abbr">FH</div><div class="st">Available</div></div>
+    </div>
+    <div style="margin-top:12px">
+      <h3 style="margin-bottom:6px">Chip advice &middot; provisional v1</h3>
+      <div class="kv">
+        <dt>This GW</dt><dd>None recommended</dd>
+        <dt>Rule hit</dt><dd>Bench projects to 0.0 pts (&lt; 12 threshold)</dd>
+      </div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h3>System health &middot; scheduler &middot; scorecards</h3>
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+      <div>
+        <div class="health"><span><span class="dot ok"></span>bootstrap healthy</span><span><span class="dot ok"></span>fixtures healthy</span><span><span class="dot ok"></span>odds healthy</span><span><span class="dot nop"></span>event markets n/a</span></div>
+      </div>
+      <div class="kv">
+        <dt>Next tick</dt><dd>Fri 21 Aug 13:30 UTC</dd>
+        <dt>Refresh</dt><dd>16:00 UTC</dd>
+        <dt>Mode</dt><dd>loop running</dd>
+      </div>
+      <div class="kv">
+        <dt>GW1 predicted</dt><dd>27.9 <span class="sample">sample</span></dd>
+        <dt>GW1 actual</dt><dd>34.2 <span class="up">+6.3</span></dd>
+        <dt>Transfer delta</dt><dd class="up">+5.0</dd>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const t = { d1: Date.parse("2026-08-21T17:30:00Z"), d2: Date.parse("2026-08-21T13:30:00Z") };
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const h = Math.floor(s/3600); const m = Math.floor(s%3600/60); const x = s%60; return `${h}h ${m}m ${x}s`; };
+  setInterval(() => { const n = Date.now(); document.getElementById("d1").textContent = fmt(t.d1 - n); document.getElementById("d2").textContent = fmt(t.d2 - n); }, 1000);
+</script>
+</body>
+</html>

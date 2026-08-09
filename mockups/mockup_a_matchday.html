@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup A — Matchday Board</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "SF Pro Display", Segoe UI, Roboto, sans-serif; background: #0b1220; color: #e8edf5; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .brand { font-weight: 800; letter-spacing: 0.5px; font-size: 18px; }
+  .brand span { color: #34d399; }
+  .gw-badge { background: #1c2740; border: 1px solid #2c3a5e; padding: 6px 14px; border-radius: 999px; font-size: 13px; }
+  .sample { background: #3b2f0a; color: #fbbf24; border: 1px solid #7c5a10; font-size: 10px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 1px; }
+  .grid { display: grid; grid-template-columns: 250px 1fr 280px; gap: 16px; }
+  .panel { background: #131c2f; border: 1px solid #22304d; border-radius: 14px; padding: 16px; }
+  .panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #7d8db0; margin-bottom: 12px; }
+  .big-timer { font-size: 42px; font-weight: 800; font-variant-numeric: tabular-nums; color: #34d399; }
+  .timer-label { font-size: 12px; color: #7d8db0; margin-top: 2px; }
+  .kpi { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #1d2940; }
+  .kpi:last-child { border-bottom: 0; }
+  .kpi .k { font-size: 12px; color: #7d8db0; }
+  .kpi .v { font-weight: 700; font-size: 14px; }
+  .chip-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .chip { background: #0f1a30; border: 1px solid #26365c; border-radius: 10px; padding: 8px; text-align: center; }
+  .chip .abbr { font-weight: 800; font-size: 15px; }
+  .chip .st { font-size: 10px; color: #34d399; }
+  .chip.used { opacity: 0.45; } .chip.used .st { color: #f87171; }
+  .pitch { aspect-ratio: 0.72; border-radius: 14px; background: repeating-linear-gradient(90deg, #14532d 0 30px, #166534 30px 60px); position: relative; border: 2px solid #22c55e; }
+  .pitch .midline { position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid rgba(255,255,255,0.35); }
+  .pitch .circle { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 18%; aspect-ratio: 1; border: 2px solid rgba(255,255,255,0.35); border-radius: 50%; }
+  .pitch .box { position: absolute; left: 12%; width: 76%; height: 16%; border: 2px solid rgba(255,255,255,0.35); }
+  .pitch .box.top { top: 0; border-top: 0; }
+  .pitch .box.bottom { bottom: 0; border-bottom: 0; }
+  .player { position: absolute; transform: translate(-50%, -50%); width: 84px; background: rgba(11,18,32,0.88); border: 1px solid rgba(255,255,255,0.25); border-radius: 8px; padding: 5px 6px; text-align: center; cursor: default; }
+  .player .p-name { font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .player .p-sub { font-size: 9px; color: #9fb0cc; }
+  .player.gk { border-color: #facc15; } .player.def { border-color: #f87171; } .player.mid { border-color: #60a5fa; } .player.fwd { border-color: #4ade80; }
+  .player .pts { position: absolute; top: -7px; right: -7px; background: #1c2740; border: 1px solid #3b4d78; border-radius: 999px; font-size: 9px; padding: 1px 5px; font-weight: 700; }
+  .captain-badge { background: #f59e0b; color: #111; border-radius: 3px; font-size: 8px; font-weight: 800; padding: 1px 4px; margin-left: 3px; }
+  .feed { list-style: none; }
+  .feed li { padding: 8px 0; border-bottom: 1px solid #1d2940; font-size: 12px; }
+  .feed li:last-child { border-bottom: 0; }
+  .feed .t { font-size: 10px; color: #7d8db0; }
+  .arrow { color: #34d399; font-weight: 700; }
+  .scorecard { margin-top: 16px; display: flex; gap: 12px; }
+  .scorecard .box { flex: 1; background: #131c2f; border: 1px solid #22304d; border-radius: 12px; padding: 12px; }
+  .scorecard .big { font-size: 22px; font-weight: 800; }
+  .foot { margin-top: 14px; font-size: 11px; color: #5b6a8a; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">AIFPL <span>Management Hub</span></div>
+    <div><span class="gw-badge">Gameweek 1 &middot; 2026-27</span> <span class="sample">sample data</span></div>
+  </header>
+  <div class="grid">
+    <div class="panel">
+      <h3>Next deadline</h3>
+      <div class="big-timer" id="deadline">--:--:--</div>
+      <div class="timer-label">GW1 closes Fri 21 Aug 17:30 UTC</div>
+      <div style="height:14px"></div>
+      <h3>Account</h3>
+      <div class="kpi"><span class="k">Bank</span><span class="v">&pound;0.0m</span></div>
+      <div class="kpi"><span class="k">Free transfers</span><span class="v">1</span></div>
+      <div class="kpi"><span class="k">Notify in</span><span class="v" id="notify">--:--</span></div>
+      <div class="kpi"><span class="k">Refresh at</span><span class="v">16:00 UTC</span></div>
+      <div style="height:14px"></div>
+      <h3>Chips</h3>
+      <div class="chip-row">
+        <div class="chip"><div class="abbr">WC</div><div class="st">Available</div></div>
+        <div class="chip"><div class="abbr">BB</div><div class="st">Available</div></div>
+        <div class="chip"><div class="abbr">TC</div><div class="st">Available</div></div>
+        <div class="chip"><div class="abbr">FH</div><div class="st">Available</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Starting XI &middot; 1-4-5-1</h3>
+      <div class="pitch">
+        <div class="midline"></div><div class="circle"></div>
+        <div class="box top"></div><div class="box bottom"></div>
+        <div class="player fwd" style="left:50%; top:12%"><div class="p-name">Thiago<span class="pts">4.3</span></div><div class="p-sub">BRE</div></div>
+        <div class="player mid" style="left:16%; top:38%"><div class="p-name">Anderson<span class="pts">4.1</span></div><div class="p-sub">MCI</div></div>
+        <div class="player mid" style="left:34%; top:40%"><div class="p-name">Rice<span class="pts">4.7</span></div><div class="p-sub">ARS</div></div>
+        <div class="player mid" style="left:52%; top:38%"><div class="p-name">B.Fernandes<span class="pts">6.0</span><span class="captain-badge">C</span></div><div class="p-sub">MUN</div></div>
+        <div class="player mid" style="left:70%; top:40%"><div class="p-name">Gibbs-White<span class="pts">4.3</span></div><div class="p-sub">NFO</div></div>
+        <div class="player mid" style="left:86%; top:38%"><div class="p-name">Semenyo<span class="pts">4.8</span></div><div class="p-sub">MCI</div></div>
+        <div class="player def" style="left:18%; top:63%"><div class="p-name">Gabriel<span class="pts">4.8</span></div><div class="p-sub">ARS</div></div>
+        <div class="player def" style="left:38%; top:66%"><div class="p-name">Tarkowski<span class="pts">3.6</span></div><div class="p-sub">EVE</div></div>
+        <div class="player def" style="left:58%; top:66%"><div class="p-name">Virgil<span class="pts">3.8</span></div><div class="p-sub">LIV</div></div>
+        <div class="player def" style="left:79%; top:63%"><div class="p-name">Gu&eacute;hi<span class="pts">4.1</span></div><div class="p-sub">MCI</div></div>
+        <div class="player gk" style="left:50%; top:88%"><div class="p-name">Raya<span class="pts">4.1</span></div><div class="p-sub">ARS</div></div>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:#9fb0cc">Bench: Dubravka (TOT) &middot; Fredricson (MUN) &middot; Scarlett (TOT) &middot; Danns (LIV) &nbsp; <span class="sample">sample</span></div>
+    </div>
+
+    <div class="panel">
+      <h3>Latest transfers</h3>
+      <ul class="feed">
+        <li><span class="t">GW1 &middot; pre-season</span><br>Squad adopted &mdash; 15 players in <span class="arrow">&#8592;</span> unlimited</li>
+        <li><span class="t">GW1 &middot; sample</span><br>Jo&atilde;o Pedro <span class="arrow">&#8594;</span> Thiago <span class="arrow">&#8592;</span></li>
+        <li><span class="t">GW1 &middot; sample</span><br>Haaland <span class="arrow">&#8594;</span> Semenyo <span class="arrow">&#8592;</span></li>
+      </ul>
+      <div style="height:10px"></div>
+      <h3>Captain</h3>
+      <div class="kpi"><span class="k">Armband</span><span class="v">B.Fernandes (MUN)</span></div>
+      <div class="kpi"><span class="k">GW1 projection</span><span class="v">6.03 &times;2</span></div>
+      <div style="height:10px"></div>
+      <h3>Last scorecard</h3>
+      <div class="kpi"><span class="k">GW1 predicted</span><span class="v">27.9</span></div>
+      <div class="kpi"><span class="k">GW1 actual</span><span class="v">34.2 <span style="color:#34d399">+6.3</span></span></div>
+      <div class="kpi"><span class="k">Transfer delta</span><span class="v" style="color:#34d399">+5.0</span></div>
+    </div>
+  </div>
+  <div class="scorecard">
+    <div class="box">Sources <b style="color:#34d399">healthy</b> &middot; bootstrap &middot; fixtures &middot; odds</div>
+    <div class="box">Scheduler: next tick <b>13:30 UTC</b> &middot; loop running</div>
+    <div class="box">Chip advice: <b>none recommended</b> (provisional rules v1)</div>
+  </div>
+  <div class="foot">AIFPL mockup A &mdash; Matchday Board &middot; sample values, real GW1 squad &middot; for design review only</div>
+</div>
+<script>
+  const targets = { deadline: Date.parse("2026-08-21T17:30:00Z"), notify: Date.parse("2026-08-21T13:30:00Z") };
+  setInterval(() => {
+    const now = Date.now();
+    const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)); const d = Math.floor(s/86400); const h = Math.floor(s%86400/3600); const m = Math.floor(s%3600/60); const sec = s%60; return d > 0 ? `${d}d ${h}h ${m}m ${sec}s` : `${h}h ${m}m ${sec}s`; };
+    document.getElementById("deadline").textContent = fmt(targets.deadline - now);
+    document.getElementById("notify").textContent = fmt(targets.notify - now);
+  }, 1000);
+</script>
+</body>
+</html>
