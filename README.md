@@ -28,6 +28,8 @@ The repository includes `render.yaml` with two services:
 - `aifpl-api`: FastAPI backend with a persistent `/var/data` disk.
 - `aifpl-dashboard`: static dashboard that receives the API URL at build time.
 
+The backend build command is `pip install .`. A one-line `requirements.txt` compatibility shim is also included for Render services created with the default `pip install -r requirements.txt` command.
+
 Set these variables in Render:
 
 Backend required:
@@ -35,7 +37,7 @@ Backend required:
 - `AIFPL_ADMIN_API_KEY`: generate a value in Render; required for mutating routes.
 - `ODDS_API_KEY`: The Odds API key used by refresh and odds projections.
 - `HERMES_API_KEY`: DeepSeek/OpenAI-compatible model key.
-- `AIFPL_CORS_ORIGINS`: the exact dashboard URL, for example `https://aifpl-dashboard.onrender.com`.
+- `AIFPL_CORS_ORIGINS`: the exact dashboard URL, for example `https://aifpl-dashboard.onrender.com` (pre-filled by the Blueprint).
 
 Backend optional:
 
@@ -45,7 +47,7 @@ Backend optional:
 
 Frontend required:
 
-- `AIFPL_API_URL`: the public API URL, for example `https://aifpl-api.onrender.com`.
+- `AIFPL_API_URL`: the public API URL, for example `https://aifpl-api.onrender.com` (pre-filled by the Blueprint).
 
 `AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
 

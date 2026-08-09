@@ -1,6 +1,7 @@
 services:
   - type: web
     name: aifpl-api
+    rootDir: .
     runtime: python
     plan: starter
     region: oregon
@@ -17,7 +18,7 @@ services:
       - key: AIFPL_DATA_DIR
         value: /var/data
       - key: AIFPL_CORS_ORIGINS
-        sync: false
+        value: https://aifpl-dashboard.onrender.com
       - key: AIFPL_ADMIN_API_KEY
         generateValue: true
       - key: ODDS_API_KEY
@@ -39,8 +40,9 @@ services:
 
   - type: static
     name: aifpl-dashboard
+    rootDir: .
     buildCommand: sh scripts/render-build-frontend.sh
     staticPublishPath: mockups
     envVars:
       - key: AIFPL_API_URL
-        sync: false
+        value: https://aifpl-api.onrender.com
