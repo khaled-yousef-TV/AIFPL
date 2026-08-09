@@ -6,6 +6,7 @@ services:
     plan: starter
     region: oregon
     buildCommand: pip install '.[dev]'
+    preDeployCommand: sh scripts/render-bootstrap.sh
     startCommand: uvicorn aifpl.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     disk:
@@ -31,6 +32,14 @@ services:
         value: deepseek-v4-flash
       - key: AIFPL_HERMES_AUTO_RUN
         value: "false"
+      - key: AIFPL_RENDER_BOOTSTRAP
+        value: "true"
+      - key: AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK
+        value: "1"
+      - key: AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK
+        value: "6"
+      - key: AIFPL_RENDER_BOOTSTRAP_BUDGET
+        value: "1000"
       - key: AIFPL_TELEGRAM_ENABLED
         value: "false"
       - key: AIFPL_TELEGRAM_BOT_TOKEN

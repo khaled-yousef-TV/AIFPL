@@ -51,7 +51,9 @@ Frontend required:
 
 `AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
 
-After the first deploy, use the API service's Render Shell once to seed current data and create the first decision:
+The Blueprint runs `scripts/render-bootstrap.sh` before the API starts. On a new persistent disk it downloads current data, builds projections, and creates the first Hermes decision automatically. It skips the work on later deploys once a decision exists. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually.
+
+If your existing Render service has not synced `preDeployCommand`, use its Render Shell once:
 
 ```bash
 aifpl refresh-current-data --start-gameweek 1 --end-gameweek 6
