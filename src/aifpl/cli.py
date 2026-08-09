@@ -511,9 +511,9 @@ def plan_transfers(
 @app.command()
 def plan_horizon(
     squad_file: Path = typer.Argument(..., exists=True, readable=True),
-    catalog_id: str | None = typer.Option(None, help="Exact 3-6 GW odds projection JSONL filename"),
+    catalog_id: str | None = typer.Option(None, help="Exact 1-6 GW odds projection JSONL filename"),
 ) -> None:
-    """Optimize transfers, hits, free-transfer rollover, and bank across 3-6 gameweeks."""
+    """Optimize transfers, hits, free-transfer rollover, and bank across 1-6 gameweeks."""
     try:
         state = HorizonSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
         plan = plan_horizon_transfers(OddsProjectionStore(data_dir()).latest(catalog_id), state)
