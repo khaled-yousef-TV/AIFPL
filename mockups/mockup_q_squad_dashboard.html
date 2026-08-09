@@ -396,19 +396,40 @@
   }
 
   async function loadDashboard() {
-    try {
-      const [dashboardResponse, teamsResponse] = await Promise.all([
-        fetch(`${apiBase}/dashboard/current`),
-        fetch(`${apiBase}/teams/current`),
-      ]);
-      if (!dashboardResponse.ok) throw new Error(`dashboard request failed: ${dashboardResponse.status}`);
-      if (!teamsResponse.ok) throw new Error(`team catalog request failed: ${teamsResponse.status}`);
-      const dashboard = await dashboardResponse.json();
-      const teams = new Map((await teamsResponse.json()).map(team => [String(team.id), team]));
-      renderDashboard(dashboard, teams);
-    } catch (error) {
-      document.getElementById("decision-summary").textContent = "Backend unavailable. Start the AIFPL API to load live squad data.";
-      console.info("AIFPL backend unavailable.", error);
+    const summary = document.getElementById("decision-summary");
+    let attempts = 0;
+    while (attempts < 120) {
+      try {
+        const [dashboardResponse, teamsResponse] = await Promise.all([
+          fetch(`${apiBase}/dashboard/current`),
+          fetch(`${apiBase}/teams/current`),
+        ]);
+        if (!dashboardResponse.ok) {
+          if (dashboardResponse.status === 404 && attempts < 120) {
+            attempts += 1;
+            summary.textContent = attempts < 60
+              ? "Initializing backend data on first deploy — this can take a few minutes. Retrying..."
+              : `Backend is still initializing (attempt ${attempts}). Retrying...`;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue;
+          }
+          throw new Error(`dashboard request failed: ${dashboardResponse.status}`);
+        }
+        if (!teamsResponse.ok) throw new Error(`team catalog request failed: ${teamsResponse.status}`);
+        const dashboard = await dashboardResponse.json();
+        const teams = new Map((await teamsResponse.json()).map(team => [String(team.id), team]));
+        renderDashboard(dashboard, teams);
+        return;
+      } catch (error) {
+        attempts += 1;
+        if (attempts >= 120) {
+          summary.textContent = "Backend unavailable. Start the AIFPL API to load live squad data.";
+          console.info("AIFPL backend unavailable.", error);
+          return;
+        }
+        summary.textContent = "Waiting for the AIFPL backend to come online... Retrying.";
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
     }
   }
 
