@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: aifpl-api
+    name: aifpl-backend
     rootDir: .
     runtime: python
     plan: starter
@@ -18,7 +18,7 @@ services:
       - key: AIFPL_DATA_DIR
         value: /var/data
       - key: AIFPL_CORS_ORIGINS
-        value: https://aifpl-dashboard.onrender.com
+        value: https://fplai.nl,https://www.fplai.nl
       - key: AIFPL_ADMIN_API_KEY
         generateValue: true
       - key: ODDS_API_KEY
@@ -45,4 +45,4 @@ services:
     staticPublishPath: mockups
     envVars:
       - key: AIFPL_API_URL
-        value: https://aifpl-api.onrender.com
+        value: https://api.fplai.nl

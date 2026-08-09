@@ -202,7 +202,7 @@
 </main>
 <script src="config.js"></script>
 <script>
-  const apiBase = window.AIFPL_API_BASE || (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin);
+  const apiBase = window.AIFPL_API_BASE || (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "https://api.fplai.nl");
   let deadline = null;
   const positionSlots = {
     GK: [[50, 88]],
