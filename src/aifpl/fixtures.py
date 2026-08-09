@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, write_immutable, write_manifest
+
 
 @dataclass(frozen=True)
 class CurrentFixture:
@@ -25,6 +27,7 @@ class FixtureCatalog:
     fetched_at: datetime
     fixtures: int
     output_path: str
+    manifest_path: str | None = None
 
 
 class CurrentFixtureCatalogStore:
@@ -32,20 +35,42 @@ class CurrentFixtureCatalogStore:
         self.root = root
 
     def normalize_latest(self) -> FixtureCatalog:
-        source_path = self._latest_raw_path()
+        return self.normalize(self._latest_raw_path())
+
+    def normalize(self, source_path: Path) -> FixtureCatalog:
         document = json.loads(source_path.read_text(encoding="utf-8"))
         fetched_at = datetime.fromisoformat(document["metadata"]["fetched_at"])
         fixtures = normalize_fixtures(document["payload"])
         output_path = self._output_path(source_path.stem)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("".join(json.dumps(asdict(fixture), sort_keys=True) + "\n" for fixture in fixtures), encoding="utf-8")
-        return FixtureCatalog(str(source_path), fetched_at, len(fixtures), str(output_path))
+        if output_path.exists():
+            if self.load(output_path) != fixtures:
+                raise ValueError(f"Existing fixture catalog disagrees with source snapshot: {output_path}")
+        else:
+            write_immutable(output_path, jsonl_bytes(fixtures))
+        manifest_path = output_path.with_suffix(".manifest.json")
+        if not manifest_path.exists():
+            manifest_path = write_manifest(
+                self.root, output_path, artifact_type="current_fixtures", created_at=fetched_at.isoformat(),
+                record_count=len(fixtures), sources={"fixture_snapshot": source_path},
+            )
+        return FixtureCatalog(str(source_path), fetched_at, len(fixtures), str(output_path), str(manifest_path))
 
     def latest(self) -> list[CurrentFixture]:
-        files = sorted(self._catalog_dir().glob("*.jsonl")) if self._catalog_dir().exists() else []
+        return self.load(self.latest_path())
+
+    def latest_path(self) -> Path:
+        files = complete_artifact_paths(sorted(self._catalog_dir().glob("*.jsonl"))) if self._catalog_dir().exists() else []
         if not files:
             raise FileNotFoundError("No normalized current fixture catalog exists; run normalize-current-fixtures first")
-        return [CurrentFixture(**json.loads(line)) for line in files[-1].read_text(encoding="utf-8").splitlines()]
+        return files[-1]
+
+    def load(self, path: Path) -> list[CurrentFixture]:
+        verify_artifact(self.root, path)
+        return [CurrentFixture(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    def latest_with_path(self) -> tuple[Path, list[CurrentFixture]]:
+        path = self.latest_path()
+        return path, self.load(path)
 
     def _latest_raw_path(self) -> Path:
         directory = self.root / "raw" / "fpl" / "fixtures"

@@ -1,6 +1,10 @@
 from aifpl.fixtures import CurrentFixture
 from aifpl.odds import NormalizedMatchOdds
-from aifpl.odds_matching import canonical_club_name, match_fixture_odds
+import json
+
+import pytest
+
+from aifpl.odds_matching import canonical_club_name, load_team_aliases, match_fixture_odds
 
 
 def test_club_aliases_handle_fpl_and_bookmaker_names() -> None:
@@ -28,3 +32,26 @@ def test_fixture_matching_does_not_guess_when_kickoff_time_is_not_close() -> Non
     odds = [NormalizedMatchOdds("event", "2026-08-15T14:10:01Z", "Arsenal", "Chelsea", "A", None, 0.6, 0.2, 0.2)]
 
     assert match_fixture_odds([fixture], {1: "Arsenal", 2: "Chelsea"}, odds) == []
+
+
+def test_custom_team_alias_enables_auditable_fixture_match(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "aliases.json"
+    path.write_text(json.dumps({"The Gunners": "Arsenal"}), encoding="utf-8")
+    monkeypatch.setenv("AIFPL_TEAM_ALIASES_FILE", str(path))
+    aliases, loaded_path = load_team_aliases(tmp_path)
+    fixture = CurrentFixture(1, 1, "2026-08-15T14:00:00Z", 1, 2, 3, 3, False)
+    odds = [NormalizedMatchOdds("event", "2026-08-15T14:00:00Z", "The Gunners", "Chelsea", "A", None, 0.6, 0.2, 0.2)]
+
+    matches = match_fixture_odds([fixture], {1: "Arsenal", 2: "Chelsea"}, odds, aliases=aliases)
+
+    assert loaded_path == path
+    assert len(matches) == 1
+
+
+def test_team_alias_configuration_rejects_non_string_values(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "aliases.json"
+    path.write_text('{"Arsenal": 1}', encoding="utf-8")
+    monkeypatch.setenv("AIFPL_TEAM_ALIASES_FILE", str(path))
+
+    with pytest.raises(ValueError, match="must be a string"):
+        load_team_aliases(tmp_path)

@@ -13,6 +13,7 @@ from aifpl.fpl import (
     summarize_event_live,
     summarize_fixtures,
 )
+from aifpl.artifacts import json_bytes, write_immutable
 
 
 class SnapshotNotFoundError(FileNotFoundError):
@@ -57,16 +58,29 @@ class SnapshotStore:
 
     def save_fixtures(self, payload: list[dict[str, Any]], fetched_at: datetime | None = None) -> tuple[Path, FixtureSummary]:
         retrieved = fetched_at or datetime.now(timezone.utc)
+        if retrieved.tzinfo is None:
+            raise ValueError("fetched_at must be timezone-aware")
         summary = summarize_fixtures(payload, retrieved)
         return self._save("fixtures", self.fixtures_dir, payload, retrieved), summary
+
+    def latest_fixtures(self) -> tuple[Path, FixtureSummary]:
+        latest, document = self._latest_document(self.fixtures_dir, "No FPL fixture snapshots have been saved yet")
+        return latest, summarize_fixtures(document["payload"], self._fetched_at(document))
 
     def save_event_live(
         self, event: int, payload: dict[str, Any], fetched_at: datetime | None = None
     ) -> tuple[Path, EventLiveSummary]:
         retrieved = fetched_at or datetime.now(timezone.utc)
+        if retrieved.tzinfo is None:
+            raise ValueError("fetched_at must be timezone-aware")
         summary = summarize_event_live(event, payload, retrieved)
         directory = self.events_dir / str(event)
         return self._save(f"event-{event}-live", directory, payload, retrieved), summary
+
+    def latest_event_live(self, event: int) -> tuple[Path, EventLiveSummary]:
+        directory = self.events_dir / str(event)
+        latest, document = self._latest_document(directory, f"No FPL event {event} snapshots have been saved yet")
+        return latest, summarize_event_live(event, document["payload"], self._fetched_at(document))
 
     @staticmethod
     def _fetched_at(document: dict[str, Any]) -> datetime:
@@ -77,17 +91,16 @@ class SnapshotStore:
             raise ValueError("fetched_at must be timezone-aware")
         stamped = retrieved.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ%f")
         destination = directory / f"{stamped}.json"
-        directory.mkdir(parents=True, exist_ok=True)
         document = {"metadata": {"source": f"official-fpl-api:{source}", "fetched_at": retrieved.isoformat()}, "payload": payload}
-        destination.write_text(json.dumps(document, separators=(",", ":")), encoding="utf-8")
+        write_immutable(destination, json_bytes(document))
         return destination
 
     def _latest_document(self, directory: Path, error: str) -> tuple[Path, dict[str, Any]]:
-        files = sorted(directory.glob("*.json")) if directory.exists() else []
+        files = list(directory.glob("*.json")) if directory.exists() else []
         if not files:
             raise SnapshotNotFoundError(error)
-        path = files[-1]
-        return path, json.loads(path.read_text(encoding="utf-8"))
+        documents = [(path, json.loads(path.read_text(encoding="utf-8"))) for path in files]
+        return max(documents, key=lambda item: self._fetched_at(item[1]))
 
     def _document_before(self, directory: Path, cutoff: datetime, error: str) -> tuple[Path, dict[str, Any]]:
         candidates: list[tuple[datetime, Path, dict[str, Any]]] = []

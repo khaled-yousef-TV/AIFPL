@@ -10,6 +10,10 @@ from pathlib import Path
 
 import httpx
 
+from aifpl.artifacts import json_bytes, jsonl_bytes, write_immutable
+from aifpl.config import http_retry_settings
+from aifpl.retry import retry_sync
+
 
 HISTORICAL_SOURCE = "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data"
 
@@ -49,6 +53,7 @@ class SeasonImportSummary:
     raw_files: int
     normalized_path: str
     imported_at: datetime
+    manifest_path: str | None = None
 
 
 class HistoricalSeasonImporter:
@@ -70,14 +75,14 @@ class HistoricalSeasonImporter:
             content = self._download(url)
             records.extend(parse_gameweek_csv(season, gameweek, content))
             raw_path = self._raw_dir(season, import_id) / f"gw{gameweek}.csv"
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            raw_path.write_text(content, encoding="utf-8")
-            raw_files.append({"gameweek": gameweek, "url": url, "sha256": _sha256(content)})
+            write_immutable(raw_path, content.encode("utf-8"))
+            raw_files.append({"gameweek": gameweek, "url": url, "path": str(raw_path), "sha256": _sha256(content)})
 
         normalized_path = self._normalized_path(season, import_id)
-        normalized_path.parent.mkdir(parents=True, exist_ok=True)
-        normalized_path.write_text("".join(json.dumps(asdict(record), sort_keys=True) + "\n" for record in records), encoding="utf-8")
+        write_immutable(normalized_path, jsonl_bytes(records))
+        manifest_path = self._manifest_path(season, import_id)
         manifest = {
+            "schema_version": 1,
             "source": "community:vaastav/Fantasy-Premier-League",
             "source_base_url": self.source_base_url,
             "season": season,
@@ -85,10 +90,11 @@ class HistoricalSeasonImporter:
             "gameweeks": list(range(start_gameweek, end_gameweek + 1)),
             "raw_files": raw_files,
             "normalized_path": str(normalized_path),
+            "manifest_path": str(manifest_path),
             "record_count": len(records),
             "warning": "Outcome data only; this is not a historical pre-deadline snapshot.",
         }
-        self._manifest_path(season, import_id).write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        write_immutable(manifest_path, json_bytes(manifest, pretty=True))
         return SeasonImportSummary(
             season=season,
             import_id=import_id,
@@ -97,6 +103,7 @@ class HistoricalSeasonImporter:
             raw_files=len(raw_files),
             normalized_path=str(normalized_path),
             imported_at=imported_at,
+            manifest_path=str(manifest_path),
         )
 
     def summary(self, season: str) -> SeasonImportSummary:
@@ -114,15 +121,20 @@ class HistoricalSeasonImporter:
             raw_files=len(manifest["raw_files"]),
             normalized_path=manifest["normalized_path"],
             imported_at=datetime.fromisoformat(manifest["imported_at"]),
+            manifest_path=str(path),
         )
 
     def latest_import_id(self, season: str) -> str:
         return self.summary(season).import_id
 
     def _download(self, url: str) -> str:
-        try:
+        def request() -> httpx.Response:
             response = httpx.get(url, timeout=self.timeout_seconds, headers={"User-Agent": "aifpl-backtester/0.1"})
             response.raise_for_status()
+            return response
+
+        try:
+            response = retry_sync(request, http_retry_settings())
         except httpx.HTTPError as exc:
             raise HistoricalSourceError(f"Could not download historical source {url}: {exc}") from exc
         return response.text

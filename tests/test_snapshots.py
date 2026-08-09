@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 
+import pytest
+
+from aifpl.artifacts import ImmutableArtifactError
 from aifpl.snapshots import SnapshotStore
 
 
@@ -40,3 +43,27 @@ def test_snapshot_store_separates_fixture_and_event_sources(tmp_path) -> None:
     assert event_path.parent == store.events_dir / "1"
     assert fixtures.fixtures == 1
     assert event.total_points == 5
+
+
+def test_snapshot_store_never_overwrites_a_timestamp_collision(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    fetched_at = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    payload = {"elements": [], "teams": [], "events": []}
+    path, _ = store.save_bootstrap(payload, fetched_at)
+    original = path.read_bytes()
+
+    store.save_bootstrap(payload, fetched_at)
+    with pytest.raises(ImmutableArtifactError):
+        store.save_bootstrap({"elements": [], "teams": [], "events": [{"id": 1}]}, fetched_at)
+
+    assert path.read_bytes() == original
+
+
+def test_all_snapshot_sources_require_aware_timestamps(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    naive = datetime(2026, 8, 7, 12, 0)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        store.save_fixtures([], naive)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        store.save_event_live(1, {"elements": []}, naive)

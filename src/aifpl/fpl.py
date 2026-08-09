@@ -6,7 +6,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-from aifpl.config import FPL_BASE_URL
+from aifpl.config import FPL_BASE_URL, http_retry_settings
+from aifpl.retry import retry_async
 
 
 class FplSourceError(RuntimeError):
@@ -60,10 +61,15 @@ class FplClient:
 
     async def _fetch_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"
-        try:
+
+        async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.get(url, headers={"User-Agent": "aifpl-backtester/0.1"})
                 response.raise_for_status()
+                return response
+
+        try:
+            response = await retry_async(request, http_retry_settings())
         except httpx.HTTPError as exc:
             raise FplSourceError(f"Could not fetch FPL data at {path}: {exc}") from exc
 

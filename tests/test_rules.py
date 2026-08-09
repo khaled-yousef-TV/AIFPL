@@ -35,6 +35,17 @@ def test_validator_rejects_duplicate_player_and_club_limit() -> None:
     assert any("maximum" in error for error in validation.errors)
 
 
+def test_club_cap_normalizes_case_and_whitespace() -> None:
+    squad = valid_squad()
+    for index, club in zip((0, 1, 2, 3), ("Arsenal", " arsenal", "ARSENAL ", "Arsenal")):
+        squad.players[index].club = club
+
+    validation = validate_squad(squad)
+
+    assert validation.legal is False
+    assert any("maximum" in error for error in validation.errors)
+
+
 def test_lineup_chooses_best_legal_formation_captain_and_bench() -> None:
     lineup = select_best_lineup(valid_squad())
 
@@ -43,6 +54,7 @@ def test_lineup_chooses_best_legal_formation_captain_and_bench() -> None:
     assert lineup.captain.id == 13
     assert lineup.vice_captain.id == 8
     assert lineup.bench[-1].position == "GK"
+    assert lineup.projected_points == sum(player.projected_points for player in lineup.starters) + lineup.captain.projected_points
 
 
 def test_lineup_refuses_illegal_squad() -> None:

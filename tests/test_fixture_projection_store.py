@@ -27,3 +27,7 @@ def test_fixture_projection_builds_are_immutable(tmp_path) -> None:
     second = FixtureProjectionStore(tmp_path).build(1, 1)
 
     assert first.output_path != second.output_path
+    assert first.manifest_path is not None
+    assert first.source_player_catalog is not None
+    assert first.source_fixture_catalog is not None
+    assert FixtureProjectionStore(tmp_path).latest()

@@ -15,11 +15,17 @@ def player() -> CurrentPlayer:
 def test_xg_xa_blend_derives_per_90_and_expected_minutes() -> None:
     projection = xg_xa_blend(player())
 
-    assert projection.expected_minutes == 23.6842
+    assert projection.expected_minutes == 90
     assert projection.xg_per_90 == 0.4
     assert projection.xa_per_90 == 0.3
     assert projection.xgi_per_90 == 0.7
     assert projection.projected_points > 3
+
+
+def test_xg_xa_blend_scales_starts_against_elapsed_opportunities() -> None:
+    projection = xg_xa_blend(player(), gameweeks_elapsed=20)
+
+    assert projection.expected_minutes == 45
 
 
 def test_xg_xa_blend_applies_availability() -> None:
@@ -29,3 +35,29 @@ def test_xg_xa_blend_applies_availability() -> None:
 
     assert projection.expected_minutes == 0
     assert projection.attacking_points_estimate == 0
+
+
+def test_xg_xa_blend_limits_next_round_availability_to_first_horizon_week() -> None:
+    unavailable = replace(player(), chance_of_playing_next_round=0)
+
+    projection = xg_xa_blend(unavailable, apply_next_round_availability=False)
+
+    assert projection.expected_minutes == 90
+
+
+def test_xg_xa_blend_does_not_treat_one_backup_start_as_full_time() -> None:
+    backup = replace(
+        player(), position="GK", minutes=90, starts=1, points_per_game=7,
+        expected_goals=0, expected_assists=0, expected_goal_involvements=0,
+    )
+
+    projection = xg_xa_blend(backup, gameweeks_elapsed=38)
+
+    assert projection.expected_minutes == 2.3684
+    assert projection.projected_points < 0.2
+
+
+def test_explicit_predicted_start_probability_overrides_historical_rate() -> None:
+    projection = xg_xa_blend(player(), gameweeks_elapsed=20, start_probability_override=0.9)
+
+    assert projection.expected_minutes == 81

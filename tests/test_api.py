@@ -24,7 +24,7 @@ def test_as_of_endpoint_rejects_a_naive_timestamp(monkeypatch, tmp_path) -> None
 
     response = TestClient(api.app).get("/snapshots/as-of?at=2026-08-07T12:00:00")
 
-    assert response.status_code == 404
+    assert response.status_code == 422
 
 
 def test_historical_summary_is_not_found_before_import(monkeypatch, tmp_path) -> None:

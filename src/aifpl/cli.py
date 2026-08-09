@@ -2,21 +2,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 
 import typer
 
 from aifpl.config import data_dir
+from aifpl.calibration import compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentProjectionStore
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient, FplSourceError
 from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError
+from aifpl.health import SourceHealthChecker
+from aifpl.hermes import HermesManager
+from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
 from aifpl.projections import BaselineBacktester
+from aifpl.projection_catalogs import ProjectionSource, load_projection_candidates
+from aifpl.player_evidence import PlayerEvidenceStore
+from aifpl.market_odds import EventMarketStore
+from aifpl.market_signals import MarketSignalStore
+from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
+from aifpl.scheduler import DeadlineScheduler, SchedulerTickError
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
 from aifpl.odds import OddsSnapshotStore, OddsSourceError, TheOddsApiClient
-from aifpl.odds_matching import FixtureOddsConsensusStore
+from aifpl.odds_matching import FixtureOddsConsensusStore, load_team_aliases
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.rules import SquadRequest, select_best_lineup, validate_squad as validate_fpl_squad
 from aifpl.transfers import CurrentSquadState, plan_transfers as build_transfer_plan
@@ -24,6 +35,205 @@ from aifpl.xg_projections import XgXaProjectionStore
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 
 app = typer.Typer(help="Tools for the AIFPL backend")
+
+
+@app.command()
+def calibrate_backtest(
+    predictions_file: Path = typer.Argument(..., exists=True, readable=True),
+    train_end_gameweek: int = typer.Option(..., min=1, max=38),
+    evaluation_start_gameweek: int = typer.Option(..., min=1, max=38),
+) -> None:
+    """Fit on earlier archived predictions and evaluate calibration on later gameweeks."""
+    try:
+        if not predictions_file.resolve().is_relative_to(data_dir().resolve()):
+            raise ValueError("predictions_file must be below AIFPL_DATA_DIR")
+        report = fit_walk_forward_calibration(
+            data_dir(), predictions_file, train_end_gameweek, evaluation_start_gameweek,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(report))
+
+
+@app.command()
+def compare_backtests(prediction_files: list[Path] = typer.Argument(..., exists=True, readable=True)) -> None:
+    """Compare archived prediction runs on their common player-gameweek population."""
+    try:
+        comparison = compare_prediction_runs(data_dir(), prediction_files)
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(comparison))
+
+
+@app.command()
+def build_player_evidence() -> None:
+    """Build official and configured external player news/lineup evidence."""
+    try:
+        catalog = PlayerEvidenceStore(data_dir()).build()
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(catalog))
+
+
+@app.command()
+def hermes_run() -> None:
+    """Let Hermes set strategy and commit one autonomous backend-validated decision."""
+    try:
+        result = HermesManager(data_dir()).run_current()
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
+def hermes_state() -> None:
+    """Show Hermes' latest autonomous strategy and squad state."""
+    try:
+        state = HermesManager(data_dir()).latest_state()
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(state))
+
+
+@app.command()
+def hermes_decision() -> None:
+    """Show Hermes' latest audited decision."""
+    try:
+        decision = HermesManager(data_dir()).latest_decision()
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(decision))
+
+
+@app.command()
+def hermes_migrate_state(
+    purchase_prices_file: Path = typer.Argument(..., exists=True, readable=True),
+    gameweek: int = typer.Option(..., min=1, max=38), season_id: str = typer.Option(...),
+) -> None:
+    """Explicitly migrate a legacy Hermes state with exact purchase prices."""
+    try:
+        prices = {int(key): int(value) for key, value in json.loads(purchase_prices_file.read_text(encoding="utf-8")).items()}
+        result = HermesManager(data_dir()).migrate_legacy_state(prices, gameweek, season_id)
+    except (OSError, RuntimeError, ValueError, FileNotFoundError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
+def player_evidence(limit: int = typer.Option(100, min=1, max=5000)) -> None:
+    """List the latest normalized player evidence records."""
+    try:
+        rows = PlayerEvidenceStore(data_dir()).latest()
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(rows[:limit]))
+
+
+@app.command()
+def fetch_event_markets() -> None:
+    """Fetch configured EPL team-total and player-prop markets for matched fixtures."""
+    try:
+        event_ids = [row.odds_event_id for row in FixtureOddsConsensusStore(data_dir()).latest()]
+        catalog = EventMarketStore(data_dir()).fetch(event_ids)
+    except (FileNotFoundError, OddsSourceError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(catalog))
+
+
+@app.command()
+def build_market_signals() -> None:
+    """Build strict clean-sheet and complete player-prop probability signals."""
+    try:
+        catalog = MarketSignalStore(data_dir()).build()
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(catalog))
+
+
+@app.command()
+def check_source_health() -> None:
+    """Validate source schemas and persist a freshness report."""
+    try:
+        report = SourceHealthChecker(data_dir()).run()
+    except ValueError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(report))
+
+
+@app.command()
+def latest_source_health() -> None:
+    """Show the latest persisted source health report."""
+    try:
+        report = SourceHealthChecker(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(report))
+
+
+@app.command()
+def team_aliases() -> None:
+    """Validate and show the effective fixture-to-odds team aliases."""
+    try:
+        aliases, path = load_team_aliases(data_dir())
+    except ValueError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"aliases": aliases, "configuration_path": str(path) if path else None}))
+
+
+@app.command()
+def refresh_current_data(
+    start_gameweek: int = typer.Option(..., min=1, max=38),
+    end_gameweek: int = typer.Option(..., min=1, max=38),
+    budget: int = typer.Option(1000, min=0),
+) -> None:
+    """Run and audit the complete current-data-to-recommendation cycle."""
+    try:
+        result = CurrentDataRefreshJob(data_dir()).run(start_gameweek, end_gameweek, budget)
+    except RefreshJobError as exc:
+        typer.echo(json_dumps(exc.result))
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
+def latest_refresh_job() -> None:
+    """Show the latest audited current-data refresh job."""
+    try:
+        result = CurrentDataRefreshJob(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
+def scheduler_status() -> None:
+    """Show the next FPL deadline and scheduled refresh time."""
+    try:
+        status = DeadlineScheduler(data_dir()).status()
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(status))
+
+
+@app.command()
+def run_scheduler_tick(force: bool = typer.Option(False, help="Run before the configured refresh time")) -> None:
+    """Run one duplicate-safe deadline scheduler tick."""
+    try:
+        result = DeadlineScheduler(data_dir()).tick(force=force)
+    except SchedulerTickError as exc:
+        typer.echo(json_dumps(exc.result))
+        raise typer.Exit(code=1) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
+def run_deadline_scheduler() -> None:
+    """Run the deadline scheduler continuously using the configured poll interval."""
+    DeadlineScheduler(data_dir()).run_forever()
 
 
 @app.command()
@@ -64,7 +274,7 @@ def fetch_event(event: int = typer.Argument(..., min=1)) -> None:
 
 @app.command()
 def latest_snapshot() -> None:
-    """Show the most recently saved raw FPL snapshot."""
+    """Show the most recently saved bootstrap-static snapshot."""
     try:
         path, summary = SnapshotStore(data_dir()).latest_bootstrap()
     except SnapshotNotFoundError as exc:
@@ -121,11 +331,13 @@ def backtest_baseline(
     end_gameweek: int = typer.Option(..., min=1, max=38),
     window: int = typer.Option(5, min=1, max=38),
     import_id: str | None = typer.Option(None, help="Historical import ID; defaults to the latest import"),
+    data_cutoff: str = typer.Option(..., help="Timezone-aware ISO-8601 maximum fixture kickoff time"),
 ) -> None:
     """Evaluate a leakage-safe player rolling-average points baseline."""
     try:
         selected_import = import_id or HistoricalSeasonImporter(data_dir()).latest_import_id(season)
-        summary = BaselineBacktester(data_dir()).run(season, selected_import, start_gameweek, end_gameweek, window)
+        cutoff = datetime.fromisoformat(data_cutoff.replace("Z", "+00:00"))
+        summary = BaselineBacktester(data_dir()).run(season, selected_import, start_gameweek, end_gameweek, cutoff, window)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(summary))
@@ -268,21 +480,43 @@ def current_projections(limit: int = typer.Option(20, min=1, max=1000)) -> None:
 
 
 @app.command()
-def optimize_current_squad(budget: int = typer.Option(1000, min=0)) -> None:
+def optimize_current_squad(
+    budget: int = typer.Option(1000, min=0),
+    projection_source: ProjectionSource = typer.Option(ProjectionSource.CURRENT),
+    catalog_id: str | None = typer.Option(None, help="Exact fixture/odds projection JSONL filename"),
+) -> None:
     """Choose the exact highest-projected legal squad from all current FPL players."""
     try:
-        squad = optimize_squad(CurrentProjectionStore(data_dir()).latest(), budget)
+        squad = optimize_squad(load_projection_candidates(data_dir(), projection_source, catalog_id), budget)
     except (FileNotFoundError, SquadOptimizationError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(squad))
 
 
 @app.command()
-def plan_transfers(squad_file: Path = typer.Argument(..., exists=True, readable=True)) -> None:
+def plan_transfers(
+    squad_file: Path = typer.Argument(..., exists=True, readable=True),
+    projection_source: ProjectionSource = typer.Option(ProjectionSource.CURRENT),
+    catalog_id: str | None = typer.Option(None, help="Exact fixture/odds projection JSONL filename"),
+) -> None:
     """Compare hold and legal transfer plans for a current squad JSON state."""
     try:
         state = CurrentSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
-        plan = build_transfer_plan(CurrentProjectionStore(data_dir()).latest(), state)
+        plan = build_transfer_plan(load_projection_candidates(data_dir(), projection_source, catalog_id), state)
+    except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(plan))
+
+
+@app.command()
+def plan_horizon(
+    squad_file: Path = typer.Argument(..., exists=True, readable=True),
+    catalog_id: str | None = typer.Option(None, help="Exact 3-6 GW odds projection JSONL filename"),
+) -> None:
+    """Optimize transfers, hits, free-transfer rollover, and bank across 3-6 gameweeks."""
+    try:
+        state = HorizonSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
+        plan = plan_horizon_transfers(OddsProjectionStore(data_dir()).latest(catalog_id), state)
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(plan))
@@ -309,3 +543,23 @@ def build_fixture_projections(
     except (FileNotFoundError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(catalog))
+
+
+@app.command()
+def fixture_projections(limit: int = typer.Option(20, min=1, max=1000)) -> None:
+    """List rows from the latest persisted fixture projection catalog."""
+    try:
+        rows = FixtureProjectionStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(rows[:limit]))
+
+
+@app.command()
+def odds_projections(limit: int = typer.Option(20, min=1, max=1000)) -> None:
+    """List rows from the latest persisted odds projection catalog."""
+    try:
+        rows = OddsProjectionStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(rows[:limit]))

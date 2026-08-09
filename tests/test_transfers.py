@@ -37,10 +37,15 @@ def test_transfer_planner_can_make_a_non_price_adjacent_upgrade_when_affordable(
 
     plan = plan_transfers(pool, state(bank=50))
 
-    assert [player.player_id for player in plan.outgoing] == [12]
+    assert [player.player_id for player in plan.outgoing] == [11]
     assert [player.player_id for player in plan.incoming] == [16]
     assert plan.hit_cost == 0
     assert plan.bank_after == 0
+    assert len(plan.starting_xi) == 11
+    assert plan.captain in plan.starting_xi
+    assert plan.objective_projected_points == sum(player.projected_points for player in plan.starting_xi) + plan.captain.projected_points
+    assert plan.projected_points == plan.objective_projected_points
+    assert plan.net_projected_points == plan.net_objective_points
 
 
 def test_transfer_planner_charges_a_hit_when_second_move_still_improves_net_points() -> None:

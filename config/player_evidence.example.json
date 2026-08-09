@@ -1,0 +1,16 @@
+[
+  {
+    "provider": "example_lineup_provider",
+    "source_record_id": "fixture-123-player-1",
+    "player_id": 1,
+    "evidence_type": "predicted_start",
+    "categorical_value": "predicted starter",
+    "provider_probability": 0.9,
+    "season_id": "2026-27",
+    "gameweek": 1,
+    "fixture_id": 1,
+    "published_at": "2026-08-21T12:00:00Z",
+    "source_url": "https://example.test/predictions/fixture-123",
+    "source_class": "named_reporter"
+  }
+]

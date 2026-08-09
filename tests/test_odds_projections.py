@@ -1,7 +1,10 @@
+from dataclasses import replace
+
 from aifpl.current import CurrentPlayer
 from aifpl.fixtures import CurrentFixture
 from aifpl.odds_matching import FixtureOddsConsensus
 from aifpl.odds_projections import build_odds_adjusted_projections
+from aifpl.market_signals import TeamCleanSheetSignal
 
 
 def player() -> CurrentPlayer:
@@ -27,3 +30,22 @@ def test_odds_projection_keeps_unmatched_fixture_without_odds_adjustment() -> No
     projection = build_odds_adjusted_projections([player()], [fixture], [], 1, 1)[0]
 
     assert projection.odds_backed_fixture_count == 0
+
+
+def test_odds_projection_excludes_finished_fixture() -> None:
+    fixture = CurrentFixture(2, 1, "2026-08-15T14:00:00Z", 1, 2, 3, 3, True)
+
+    projection = build_odds_adjusted_projections([player()], [fixture], [], 1, 1)[0]
+
+    assert projection.fixture_count == 0
+    assert projection.projected_points == 0
+
+
+def test_clean_sheet_signal_is_scaled_by_expected_participation() -> None:
+    unavailable = replace(player(), position="DEF", chance_of_playing_next_round=0)
+    fixture = CurrentFixture(2, 1, "2026-08-15T14:00:00Z", 1, 2, 3, 3, False)
+    signal = TeamCleanSheetSignal(2, "Arsenal", 0.8, 2)
+
+    projection = build_odds_adjusted_projections([unavailable], [fixture], [], 1, 1, clean_sheet_signals=[signal])[0]
+
+    assert projection.projected_points == 0

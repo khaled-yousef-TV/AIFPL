@@ -33,3 +33,12 @@ def test_fixture_projections_reject_invalid_range() -> None:
         assert "range" in str(exc)
     else:
         raise AssertionError("Expected invalid range error")
+
+
+def test_fixture_projections_exclude_finished_matches() -> None:
+    finished = CurrentFixture(1, 1, None, 1, 2, 1, 5, True)
+
+    projection = build_fixture_gameweek_projections([player()], [finished], 1, 1)[0]
+
+    assert projection.fixture_count == 0
+    assert projection.projected_points == 0

@@ -28,6 +28,9 @@ def test_optimizer_selects_a_complete_legal_squad() -> None:
     assert result.total_cost == 680
     assert result.bank == 0
     assert result.solver_status == "OPTIMAL"
+    assert len(result.starting_xi) == 11
+    assert result.captain in result.starting_xi
+    assert result.projected_points == sum(player.projected_points for player in result.starting_xi) + result.captain.projected_points
 
 
 def test_optimizer_uses_higher_projected_affordable_candidate_not_price_proximity() -> None:
@@ -37,7 +40,7 @@ def test_optimizer_uses_higher_projected_affordable_candidate_not_price_proximit
     result = optimize_squad(candidates, budget=750)
 
     assert 16 in {player.player_id for player in result.players}
-    assert 12 not in {player.player_id for player in result.players}
+    assert 16 in {player.player_id for player in result.starting_xi}
 
 
 def test_optimizer_rejects_pool_that_cannot_form_a_squad() -> None:
@@ -48,3 +51,11 @@ def test_optimizer_rejects_pool_that_cannot_form_a_squad() -> None:
 def test_optimizer_rejects_duplicate_candidate_ids() -> None:
     with pytest.raises(ValueError, match="unique"):
         optimize_squad(full_pool() + [full_pool()[0]])
+
+
+def test_optimizer_enforces_club_cap_with_normalized_names() -> None:
+    candidates = full_pool() + [candidate(16, "FWD", " a ", 50, 100)]
+
+    result = optimize_squad(candidates, budget=1000)
+
+    assert 16 not in {player.player_id for player in result.players}

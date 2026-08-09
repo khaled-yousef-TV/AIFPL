@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.optimizer import SquadOptimizationError
-from aifpl.rules import SquadPlayer, SquadRequest, validate_squad
+from aifpl.rules import SquadPlayer, SquadRequest, club_key, validate_squad
 
 
 class CurrentSquadState(BaseModel):
@@ -29,6 +29,10 @@ class TransferPlan:
     net_projected_points: float
     solver_status: str
     methodology: str
+    starting_xi: list[CurrentPlayerProjection]
+    captain: CurrentPlayerProjection
+    objective_projected_points: float
+    net_objective_points: float
 
 
 def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSquadState) -> TransferPlan:
@@ -45,10 +49,25 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     _validate_current_squad([candidate_by_id[player_id] for player_id in current_ids], state.bank)
     model = cp_model.CpModel()
     selected = [model.new_bool_var(f"player_{candidate.player_id}") for candidate in candidates]
+    starters = [model.new_bool_var(f"starter_{candidate.player_id}") for candidate in candidates]
+    captains = [model.new_bool_var(f"captain_{candidate.player_id}") for candidate in candidates]
     for position, required in {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}.items():
         model.add(sum(selected[index] for index, candidate in enumerate(candidates) if candidate.position == position) == required)
-    for club in {candidate.club for candidate in candidates}:
-        model.add(sum(selected[index] for index, candidate in enumerate(candidates) if candidate.club == club) <= 3)
+    club_keys = [club_key(candidate.club) for candidate in candidates]
+    for club in set(club_keys):
+        model.add(sum(selected[index] for index, key in enumerate(club_keys) if key == club) <= 3)
+    for index in range(len(candidates)):
+        model.add(starters[index] <= selected[index])
+        model.add(captains[index] <= starters[index])
+    model.add(sum(starters) == 11)
+    model.add(sum(captains) == 1)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "GK") == 1)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "DEF") >= 3)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "DEF") <= 5)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "MID") >= 2)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "MID") <= 5)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") >= 1)
+    model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") <= 3)
     incoming_indexes = [index for index, candidate in enumerate(candidates) if candidate.player_id not in current_ids]
     transfers_made = sum(selected[index] for index in incoming_indexes)
     model.add(transfers_made <= state.max_transfers)
@@ -64,7 +83,8 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     model.add(excess_transfers >= transfers_made - state.free_transfers)
     hit_cost_scaled = excess_transfers * 4 * projection_scale
     model.maximize(
-        sum(selected[index] * round(candidate.projected_points * projection_scale) for index, candidate in enumerate(candidates))
+        sum(starters[index] * round(candidate.projected_points * projection_scale) for index, candidate in enumerate(candidates))
+        + sum(captains[index] * round(candidate.projected_points * projection_scale) for index, candidate in enumerate(candidates))
         - hit_cost_scaled
         - transfers_made
     )
@@ -74,6 +94,8 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise SquadOptimizationError("No legal transfer plan is reachable from this squad and bank")
     resulting = [candidate for index, candidate in enumerate(candidates) if solver.value(selected[index])]
+    starting_xi = [candidate for index, candidate in enumerate(candidates) if solver.value(starters[index])]
+    captain = next(candidate for index, candidate in enumerate(candidates) if solver.value(captains[index]))
     resulting_ids = {candidate.player_id for candidate in resulting}
     outgoing = sorted((candidate_by_id[player_id] for player_id in current_ids - resulting_ids), key=lambda item: item.player_id)
     incoming = sorted((candidate_by_id[player_id] for player_id in resulting_ids - current_ids), key=lambda item: item.player_id)
@@ -88,10 +110,14 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
         transfers_made=transfers,
         hit_cost=hit_cost,
         bank_after=bank_after,
-        projected_points=round(sum(player.projected_points for player in resulting), 4),
-        net_projected_points=round(sum(player.projected_points for player in resulting) - hit_cost, 4),
+        projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points, 4),
+        net_projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points - hit_cost, 4),
         solver_status=solver.status_name(status),
         methodology=resulting[0].methodology,
+        starting_xi=sorted(starting_xi, key=lambda item: (("GK", "DEF", "MID", "FWD").index(item.position), item.player_id)),
+        captain=captain,
+        objective_projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points, 4),
+        net_objective_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points - hit_cost, 4),
     )
 
 

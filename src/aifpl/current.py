@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, write_immutable, write_manifest
+
 
 Position = Literal["GK", "DEF", "MID", "FWD"]
 POSITION_MAP: dict[int, Position] = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
@@ -30,6 +32,12 @@ class CurrentPlayer:
     expected_assists: float
     expected_goal_involvements: float
     expected_goals_conceded: float
+    first_name: str = ""
+    second_name: str = ""
+    news: str = ""
+    news_added: str | None = None
+    selected_by_percent: float = 0.0
+    ep_next: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +46,7 @@ class CurrentPlayerCatalog:
     fetched_at: datetime
     players: int
     output_path: str
+    manifest_path: str | None = None
 
 
 class CurrentPlayerCatalogStore:
@@ -45,27 +54,42 @@ class CurrentPlayerCatalogStore:
         self.root = root
 
     def normalize_latest(self) -> CurrentPlayerCatalog:
-        source_path = self._latest_bootstrap_path()
+        return self.normalize(self._latest_bootstrap_path())
+
+    def normalize(self, source_path: Path) -> CurrentPlayerCatalog:
         document = json.loads(source_path.read_text(encoding="utf-8"))
         fetched_at = datetime.fromisoformat(document["metadata"]["fetched_at"])
         players = normalize_bootstrap_players(document["payload"])
         output_path = self._output_path(source_path.stem)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("".join(json.dumps(asdict(player), sort_keys=True) + "\n" for player in players), encoding="utf-8")
+        if output_path.exists():
+            if self.load(output_path) != players:
+                raise ValueError(f"Existing current-player catalog disagrees with source snapshot: {output_path}")
+        else:
+            write_immutable(output_path, jsonl_bytes(players))
         manifest_path = self._manifest_path(source_path.stem)
-        manifest_path.write_text(json.dumps({
-            "source_snapshot": str(source_path),
-            "fetched_at": fetched_at.isoformat(),
-            "players": len(players),
-            "output_path": str(output_path),
-        }, indent=2, sort_keys=True), encoding="utf-8")
-        return CurrentPlayerCatalog(str(source_path), fetched_at, len(players), str(output_path))
+        if not manifest_path.exists():
+            manifest_path = write_manifest(
+                self.root, output_path, artifact_type="current_players", created_at=fetched_at.isoformat(),
+                record_count=len(players), sources={"bootstrap_snapshot": source_path},
+            )
+        return CurrentPlayerCatalog(str(source_path), fetched_at, len(players), str(output_path), str(manifest_path))
 
     def latest_players(self) -> list[CurrentPlayer]:
-        files = sorted(self._catalog_dir().glob("*.jsonl")) if self._catalog_dir().exists() else []
+        return self.load(self.latest_path())
+
+    def latest_path(self) -> Path:
+        files = complete_artifact_paths(sorted(self._catalog_dir().glob("*.jsonl"))) if self._catalog_dir().exists() else []
         if not files:
             raise FileNotFoundError("No normalized current-player catalog exists; run normalize-current-players first")
-        return [CurrentPlayer(**json.loads(line)) for line in files[-1].read_text(encoding="utf-8").splitlines()]
+        return files[-1]
+
+    def load(self, path: Path) -> list[CurrentPlayer]:
+        verify_artifact(self.root, path)
+        return [CurrentPlayer(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    def latest_with_path(self) -> tuple[Path, list[CurrentPlayer]]:
+        path = self.latest_path()
+        return path, self.load(path)
 
     def _latest_bootstrap_path(self) -> Path:
         directory = self.root / "raw" / "fpl" / "bootstrap"
@@ -119,6 +143,12 @@ def normalize_bootstrap_players(payload: dict[str, Any]) -> list[CurrentPlayer]:
                 expected_assists=float(element["expected_assists"]),
                 expected_goal_involvements=float(element["expected_goal_involvements"]),
                 expected_goals_conceded=float(element["expected_goals_conceded"]),
+                first_name=str(element.get("first_name", "")),
+                second_name=str(element.get("second_name", "")),
+                news=str(element.get("news", "")),
+                news_added=str(element["news_added"]) if element.get("news_added") else None,
+                selected_by_percent=float(element.get("selected_by_percent", 0)),
+                ep_next=float(element.get("ep_next") or 0),
             ))
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Player at index {index} is missing or has invalid required FPL fields") from exc

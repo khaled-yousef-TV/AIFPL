@@ -25,61 +25,184 @@ pip install -e '.[dev]'
 
 ```bash
 pytest
+aifpl check-source-health
+aifpl latest-source-health
+aifpl team-aliases
+aifpl refresh-current-data --start-gameweek 1 --end-gameweek 1
+aifpl latest-refresh-job
+aifpl scheduler-status
+aifpl run-scheduler-tick
+# Long-running process for a service manager:
+aifpl run-deadline-scheduler
 aifpl fetch-bootstrap
 aifpl fetch-fixtures
 aifpl fetch-event 1
 aifpl latest-snapshot
- aifpl snapshot-before 2026-08-07T19:00:00Z
- aifpl import-season 2025-26 --end-gameweek 2
- aifpl backtest-baseline 2025-26 --start-gameweek 2 --end-gameweek 2
- aifpl validate-squad examples/valid_squad.json
- aifpl pick-lineup examples/valid_squad.json
- aifpl normalize-current-players
- aifpl current-players --limit 10
- aifpl build-current-projections
- aifpl current-projections --limit 10
- aifpl build-xg-xa-projections
- aifpl xg-xa-projections --limit 10
- export ODDS_API_KEY='your-key'
- aifpl fetch-epl-odds
- aifpl build-fixture-odds-consensus
- aifpl fixture-odds-consensus --limit 10
- aifpl build-odds-projections --start-gameweek 1 --end-gameweek 6
- aifpl optimize-current-squad
- aifpl plan-transfers examples/current_squad.json
- aifpl normalize-current-fixtures
- aifpl build-fixture-projections --start-gameweek 1 --end-gameweek 6
+aifpl snapshot-before 2026-08-07T19:00:00Z
+aifpl import-season 2025-26 --end-gameweek 2
+aifpl backtest-baseline 2025-26 --start-gameweek 2 --end-gameweek 2 \
+  --data-cutoff 2025-08-31T23:59:59Z
+aifpl validate-squad examples/valid_squad.json
+aifpl pick-lineup examples/valid_squad.json
+aifpl normalize-current-players
+aifpl normalize-current-fixtures
+aifpl current-players --limit 10
+aifpl build-current-projections
+aifpl current-projections --limit 10
+aifpl build-xg-xa-projections
+aifpl xg-xa-projections --limit 10
+aifpl build-fixture-projections --start-gameweek 1 --end-gameweek 6
+aifpl fixture-projections --limit 10
+export ODDS_API_KEY='your-key'
+export AIFPL_ADMIN_API_KEY='your-admin-key'
+aifpl fetch-epl-odds
+aifpl latest-epl-odds --limit 10
+aifpl build-fixture-odds-consensus
+aifpl fixture-odds-consensus --limit 10
+aifpl build-odds-projections --start-gameweek 1 --end-gameweek 6
+aifpl odds-projections --limit 10
+aifpl plan-horizon examples/current_squad.json
+aifpl build-player-evidence
+aifpl player-evidence --limit 20
+aifpl fetch-event-markets
+aifpl build-market-signals
+aifpl hermes-run
+aifpl hermes-state
+aifpl hermes-decision
+aifpl calibrate-backtest data/backtests/2025-26/RUN/predictions.jsonl \
+  --train-end-gameweek 19 --evaluation-start-gameweek 20
+aifpl optimize-current-squad --projection-source odds
+aifpl plan-transfers examples/current_squad.json --projection-source odds
 uvicorn aifpl.api:app --reload
 curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/snapshots/latest
-curl 'http://127.0.0.1:8000/snapshots/as-of?at=2026-08-07T19:00:00Z'
+curl -X POST http://127.0.0.1:8000/health/sources/check -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl http://127.0.0.1:8000/health/sources
+curl http://127.0.0.1:8000/config/team-aliases
+curl -X POST http://127.0.0.1:8000/jobs/refresh/current \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"start_gameweek":1,"end_gameweek":1,"budget":1000}'
+curl http://127.0.0.1:8000/jobs/refresh/current/latest
+curl http://127.0.0.1:8000/scheduler/status
+curl -X POST http://127.0.0.1:8000/scheduler/tick -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl http://127.0.0.1:8000/snapshots/fpl/bootstrap/latest
+curl 'http://127.0.0.1:8000/snapshots/fpl/bootstrap/as-of?at=2026-08-07T19:00:00Z'
 curl http://127.0.0.1:8000/historical/seasons/2025-26
 curl 'http://127.0.0.1:8000/players/current?limit=10'
+curl 'http://127.0.0.1:8000/fixtures/current?limit=10'
 curl 'http://127.0.0.1:8000/projections/current?limit=10'
 curl 'http://127.0.0.1:8000/projections/xg-xa?limit=10'
 curl http://127.0.0.1:8000/odds/epl/latest
 curl http://127.0.0.1:8000/odds/epl/fixture-consensus
 curl 'http://127.0.0.1:8000/projections/odds?start_gameweek=1&end_gameweek=6'
-curl 'http://127.0.0.1:8000/squad/optimize/current?budget=1000'
+curl 'http://127.0.0.1:8000/squad/optimize/current?budget=1000&projection_source=odds'
 curl 'http://127.0.0.1:8000/projections/fixtures?start_gameweek=1&end_gameweek=6'
+curl -X POST http://127.0.0.1:8000/catalogs/current/players -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl -X POST http://127.0.0.1:8000/catalogs/current/fixtures -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl -X POST http://127.0.0.1:8000/projection-catalogs/odds \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"start_gameweek":1,"end_gameweek":6}'
+curl -X POST http://127.0.0.1:8000/squad/validate \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' --data @examples/valid_squad.json
+curl -X POST http://127.0.0.1:8000/squad/lineup \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' --data @examples/valid_squad.json
+curl -X POST 'http://127.0.0.1:8000/transfers/plan?projection_source=odds' \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' --data @examples/current_squad.json
+curl -X POST http://127.0.0.1:8000/transfers/plan/horizon \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' --data @examples/current_squad.json
 ```
 
-Snapshot files default to `data/raw/fpl/bootstrap/`. Override that location with
-`AIFPL_DATA_DIR=/path/to/data` when needed.
+The data root defaults to `data/`, relative to the process working directory.
+Bootstrap, fixture, and event snapshots are stored under
+`data/raw/fpl/bootstrap/`, `data/raw/fpl/fixtures/`, and
+`data/raw/fpl/events/{event}/`. Override the root with
+`AIFPL_DATA_DIR=/absolute/path/to/data` when needed.
+
+Derived catalogs are also immutable. Each new JSONL artifact has a neighboring
+`.manifest.json` containing its methodology, parameters, exact source paths,
+record count, and SHA-256 hashes. Legacy artifacts remain readable but are not
+silently assigned provenance that was never recorded.
+
+Every mutating FastAPI route requires `X-AIFPL-Admin-Key`, matched against
+`AIFPL_ADMIN_API_KEY`. Provider errors and persisted failure records redact
+credentials. Catalog readers verify recorded artifact and source hashes before
+use; odds builds additionally enforce fixture/consensus lineage. Fixture and
+odds optimization can pin an exact catalog with `--catalog-id` or `catalog_id`.
+
+`check-source-health` validates the latest bootstrap, fixture, current-event,
+and odds artifacts and persists explicit `healthy`, `stale`, `missing`,
+`invalid`, or `not_applicable` results under `data/health/sources/`. Freshness
+limits are configured with the `AIFPL_*_MAX_AGE_HOURS` variables shown in
+`.env.example`; health failures are reported rather than silently ignored.
+
+Official FPL, odds, and historical-source requests retry transient network
+errors, HTTP 429 responses, and HTTP 5xx responses with bounded exponential
+backoff. Permanent HTTP errors and invalid response schemas fail immediately.
+`AIFPL_HTTP_RETRY_ATTEMPTS` and `AIFPL_HTTP_RETRY_BASE_SECONDS` configure the
+policy.
+
+`refresh-current-data` runs the complete source-to-recommendation cycle for a
+requested gameweek range. It refreshes official and odds data, fetches current
+event results when applicable, normalizes catalogs, builds every projection
+layer, requires healthy sources, and produces an odds-based squad. Every run,
+including a failed run, is persisted under `data/jobs/refresh/` with completed
+steps, artifact paths, health state, recommendation, and error details.
+
+The deadline scheduler reads the next official FPL `deadline_time` and runs the
+same audited refresh job at the configured lead time. `run-scheduler-tick` is a
+safe one-shot operation; `run-deadline-scheduler` polls continuously for use
+under a service manager. A successful event is marked complete so later polls
+cannot spend odds quota or create duplicate recommendations. Scheduler timing,
+horizon, polling, and budget use the `AIFPL_SCHEDULER_*` variables in
+`.env.example`.
 
 ## Delivery plan
 
-1. **Current:** source adapter, immutable raw snapshots, CLI/API, tests.
-2. **Current:** fixture and completed-gameweek-result ingestion, deadline-aware
-   snapshot selection.
-3. **Current:** reproducible completed-season gameweek import and normalized
-   player-gameweek records. This source is community-maintained and is never
-   presented as an official pre-deadline snapshot.
-4. **Current:** transparent rolling-average expected-points baseline and a
-   leakage-safe outcome backtest.
-5. FPL-rule validator and transfer/squad optimizer.
-6. Decision-faithful backtest with pre-deadline features.
-7. News and odds adapters, Hermes orchestration, then the frontend.
+### Completed
+
+1. Official FPL ingestion: timestamped, overwrite-protected bootstrap, fixture, and
+   gameweek-result snapshots.
+2. Historical completed-season outcome import, normalized player-gameweek data,
+   and a leakage-safe baseline backtest.
+3. Real current-player catalog: FPL IDs, prices, availability, minutes, starts,
+   xG, xA, xGI, and xG conceded.
+4. Projection catalogs: source baseline, xG/xA blend, fixture-aware projections,
+   and a versioned xG/xA + fixture + match-odds model.
+5. FPL rules referee, exact full-market squad optimizer, and single-gameweek
+   hold-versus-transfer planner.
+6. The Odds API ingestion, margin-adjusted bookmaker probabilities, and
+   auditable FPL-fixture-to-odds-event matching.
+7. FastAPI and CLI operations for every component above, with domain,
+   persistence, API-surface, and CLI-surface automated tests.
+8. Operational data cycle: health and freshness records, configurable aliases,
+   bounded retries, and audited manually runnable refresh jobs.
+9. Deadline-aware scheduler: official deadline detection, configurable lead
+   time and horizon, duplicate-safe execution, audited ticks, and a continuous loop.
+10. Backend hardening: secret-safe errors, authenticated mutation routes,
+    season/concurrency-safe jobs, verified artifact lineage and hashes, odds
+    coverage gates, finished-fixture filtering, and leakage-safe kickoff ordering.
+11. Horizon transfer optimizer: legal squads and lineups, captaincy, transfers,
+    hits, five-transfer rollover, and bank use across contiguous 3-6 GW catalogs.
+12. Calibration infrastructure: common-population model comparison and
+    chronological train/evaluation calibration over immutable archived forecasts.
+13. Strict event-market signals: opponent team-total clean-sheet probabilities,
+    player-prop capture, de-vigging only for complete outcome sets, and coverage records.
+14. Player evidence: official FPL news, availability, historical start rates,
+    and optional timestamped predicted-lineup feeds with categorical source quality.
+15. Autonomous Hermes manager: model-owned strategy, backend tool calls,
+    season-aware squad state, tracked purchase prices, audited decisions, and scheduler execution.
+
+### Next
+
+1. **Frontend:** dashboard, squad input, what-if comparison, evidence view,
+   recommendation history, and manual approval.
+2. **Optional FPL account integration:** retrieve a manager's exact squad and
+   selling prices, then consider action submission only after explicit approval.
 
 ## Historical results source
 
@@ -119,11 +242,23 @@ a projection: the first projection model is the next component.
 ## Hermes architecture
 
 Hermes is the tool-calling strategist, not the source of FPL calculations. It
-will call narrow backend tools for data retrieval, projections, rule validation,
-plan comparison, and decision recording. The backend remains authoritative for
-all numbers, FPL legality, and backtest evaluation. Hermes memory stores user
-preferences and prior decision context; model/projection updates remain explicit,
-versioned, and backtested.
+calls narrow backend tools for projections, validated squad adoption, horizon
+planning, holding, and decision recording. Hermes creates its own risk tolerance,
+hit aversion, differential appetite, planning horizon, and soft player preferences.
+Those settings alter backend objective penalties and tie-breakers, but cannot
+bypass FPL constraints or invent projections.
+
+Hermes state and decisions are append-only, season/gameweek-bound, concurrency
+locked, and include purchase prices for legal future selling values. The deadline
+scheduler can run Hermes automatically with `AIFPL_HERMES_AUTO_RUN=true`; a failed
+model call is retried independently without repeating the successful data refresh.
+
+The model client uses the OpenAI-compatible chat-completions and tool-call format.
+The default is `deepseek-v4-flash` at `https://api.deepseek.com`. Set
+`HERMES_BASE_URL`, `HERMES_MODEL`, and `HERMES_API_KEY` to switch providers or
+models without code changes. Hermes currently manages and audits its internal
+team autonomously; direct submission to the throwaway FPL account requires the
+remaining account-credentials adapter.
 
 ## Current-player projection baseline
 
@@ -136,8 +271,10 @@ interface; it is not the final forecasting model.
 ## FPL xG/xA projection baseline
 
 `build-xg-xa-projections` retains official FPL xG, xA, xGI, xG conceded,
-minutes, and starts. It creates a second comparison model,
-`fpl_xg_xa_blend_v1`: 60% source baseline plus 40% an expected-minutes-adjusted
+minutes, and starts. Expected starts are scaled against elapsed opportunities,
+not the full 38-gameweek season, and source points-per-game is also scaled by
+expected participation. It creates a second comparison model,
+`fpl_xg_xa_blend_v2`: 60% source baseline plus 40% an expected-minutes-adjusted
 attacking-points estimate from xG/xA. It does not discard the original model,
 and it does not yet estimate team clean-sheet probability.
 
@@ -158,30 +295,75 @@ the already margin-adjusted bookmaker probabilities for each event, retaining
 the bookmaker count and matching time delta. Unmatched fixtures are omitted;
 they never receive invented odds.
 
+Built-in aliases cover common EPL naming differences. Optional overrides are
+loaded from `data/config/team_aliases.json`, or from the path set in
+`AIFPL_TEAM_ALIASES_FILE`. The file must be a JSON object mapping source names
+to canonical names; `config/team_aliases.example.json` shows the format.
+`team-aliases` validates and displays the effective mapping. Every consensus
+manifest records that mapping and hashes the override file when one is used.
+
 ## Odds-adjusted xG/xA projections
 
 `build-odds-projections` combines the xG/xA baseline with the official fixture
 difficulty multiplier and matched odds consensus. For each matched fixture, a
 team's win probability adjusts the projection by `1 + 0.4 × (win_probability −
 0.5)`. The adjustment is explicitly provisional and versioned; unmatched
-fixtures receive no odds adjustment. This is not yet a clean-sheet or player-
-prop model.
+fixtures receive no odds adjustment. When strict event-market signals exist,
+the model adds clean-sheet expectation and records complete assist probabilities.
+
+## Calibration and evidence
+
+Calibration uses immutable forecast rows only. Training gameweeks must precede
+evaluation gameweeks, and model comparisons use the common player-gameweek
+population. Existing outcome-only history can calibrate the rolling baseline;
+advanced xG, odds, clean-sheet, and lineup models can only be evaluated after
+their own pre-deadline forecasts have accumulated. The backend never recreates
+historical forecasts from today's API.
+
+`build-player-evidence` preserves official FPL news/status and historical start
+rates. Optional structured feeds come from `AIFPL_PLAYER_EVIDENCE_FILE` or
+`AIFPL_PLAYER_EVIDENCE_URLS`; records require exact FPL IDs, publication times,
+source classes, and explicit provider probabilities. `config/player_evidence.example.json`
+documents the schema. Unscored text and ambiguous names never become projection
+probabilities.
+
+`fetch-event-markets` requests EPL `team_totals`, anytime-scorer, and assist
+markets one event at a time. Complete over/under pairs are de-vigged; one-sided
+scorer prices remain evidence only. Opponent under-0.5 team totals contribute a
+versioned clean-sheet component. Player-prop projection weight defaults to zero
+until walk-forward calibration supports a non-zero `AIFPL_PLAYER_PROP_WEIGHT`.
+Automatic event-market fetching is quota-sensitive and remains disabled unless
+`AIFPL_FETCH_EVENT_MARKETS=true`.
 
 ## Full-market squad optimization
 
 `optimize-current-squad` uses an exact constraint solver over every player in
-the current projection catalog. It maximizes total projected points subject to
-the £100m budget, exact FPL position quotas, and the three-player club cap.
+the selected projection catalog. Use `--projection-source current`, `xg-xa`,
+`fixture`, or `odds`; fixture and odds rows are summed across their stored
+gameweek horizon. It maximizes total projected points subject to
+the £100m budget, exact FPL position quotas, and the three-player club cap. The
+objective is a legal XI plus the captain's second score; bench players satisfy
+squad legality but do not incorrectly count as guaranteed gameweek points.
 It considers all affordable candidates; it has no similarly-priced-player rule.
 
 ## Transfer planning
 
 `plan-transfers` compares holding with every legal plan containing up to a
-configured number of transfers. It maximizes projected squad points minus FPL
-hit costs, while enforcing the money released by outgoing players plus the
-bank. The current manual input uses current player prices as selling values; a
+configured number of transfers. For each plan it jointly selects a legal XI and
+captain, then maximizes XI points plus the captain's second score minus FPL hit
+costs. It accepts the same `--projection-source` values as squad optimization
+and enforces the money released by outgoing players plus the bank. The current
+manual input uses current player prices as selling values; a
 future authenticated FPL integration will replace those with each manager's
 exact selling prices.
+
+`plan-horizon` extends that calculation across a contiguous 3-6 gameweek odds
+catalog. It jointly chooses each week's legal squad, XI, captain, transfers,
+hits, free-transfer rollover up to five, and bank balance. The solver is seeded
+with a legal hold strategy and uses `AIFPL_HORIZON_SOLVER_MAX_SECONDS`; the
+result reports `OPTIMAL` when proven or `FEASIBLE` when it is the best plan
+found before the configured limit. As with the single-week planner, unauthenticated
+inputs use current prices as selling values until account integration is added.
 
 ## Fixture-aware projections
 
@@ -193,5 +375,8 @@ summed for double gameweeks and no fixture yields zero. This is the first
 forward-looking layer; it will be superseded by calibrated fixture, minutes,
 news, and odds models.
 
-The backtest will never call today's API to answer a past-gameweek question;
-each run will state its data cutoff and source coverage.
+The backtest never calls today's API to answer a past-gameweek question. Each
+run requires `--data-cutoff`, excludes fixtures with later kickoff times, and
+persists the cutoff, exact source files, hashes, model parameters, coverage,
+and metrics in a run manifest. This is an event-time cutoff, not proof of when
+the retrospective community source first published each row.

@@ -50,6 +50,10 @@ class TransferCostRequest(BaseModel):
     unlimited_transfers: bool = False
 
 
+def club_key(club: str) -> str:
+    return " ".join(club.split()).casefold()
+
+
 def validate_squad(squad: SquadRequest) -> SquadValidation:
     players = squad.players
     errors: list[str] = []
@@ -62,10 +66,15 @@ def validate_squad(squad: SquadRequest) -> SquadValidation:
     for position, required in SQUAD_REQUIREMENTS.items():
         if position_counts[position] != required:
             errors.append(f"Squad requires exactly {required} {position}; received {position_counts[position]}")
-    club_counts = Counter(player.club for player in players)
+    club_names: dict[str, str] = {}
+    club_counts = Counter()
+    for player in players:
+        key = club_key(player.club)
+        club_names.setdefault(key, " ".join(player.club.split()))
+        club_counts[key] += 1
     for club, count in sorted(club_counts.items()):
         if count > MAX_PLAYERS_PER_CLUB:
-            errors.append(f"Squad has {count} players from {club}; maximum is {MAX_PLAYERS_PER_CLUB}")
+            errors.append(f"Squad has {count} players from {club_names[club]}; maximum is {MAX_PLAYERS_PER_CLUB}")
     total_cost = sum(player.cost for player in players)
     if total_cost > squad.budget:
         errors.append(f"Squad costs {total_cost}, exceeding budget {squad.budget}")
@@ -73,7 +82,7 @@ def validate_squad(squad: SquadRequest) -> SquadValidation:
         legal=not errors,
         total_cost=total_cost,
         position_counts=dict(position_counts),
-        club_counts=dict(club_counts),
+        club_counts={club_names[key]: count for key, count in club_counts.items()},
         errors=errors,
     )
 
@@ -110,7 +119,7 @@ def select_best_lineup(squad: SquadRequest) -> LineupRecommendation:
         bench=bench,
         captain=captain,
         vice_captain=vice_captain,
-        projected_points=round(projected_points, 4),
+        projected_points=round(projected_points + captain.projected_points, 4),
         formation=f"{formation[0]}-{formation[1]}-{formation[2]}",
     )
 
