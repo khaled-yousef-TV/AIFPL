@@ -414,6 +414,23 @@ def current_dashboard() -> CurrentDashboard:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/debug/bootstrap-log")
+def bootstrap_log() -> dict[str, object]:
+    log_path = Path("/tmp/aifpl-bootstrap.log")
+    if not log_path.is_file():
+        return {"exists": False, "log": ""}
+    return {"exists": True, "log": log_path.read_text(encoding="utf-8", errors="replace")[-8000:]}
+
+
+@app.get("/debug/env")
+def debug_env() -> dict[str, object]:
+    keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
+    return {
+        "present": {key: bool(os.environ.get(key)) for key in keys},
+        "data_dir": str(data_dir()),
+    }
+
+
 @app.get("/teams/current", response_model=list[CurrentTeam])
 def current_teams() -> list[CurrentTeam]:
     try:
