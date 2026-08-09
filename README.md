@@ -28,7 +28,7 @@ The repository includes `render.yaml` with two services:
 - `aifpl-api`: FastAPI backend with a persistent `/var/data` disk.
 - `aifpl-dashboard`: static dashboard that receives the API URL at build time.
 
-The backend build command is `pip install .`. A one-line `requirements.txt` compatibility shim is also included for Render services created with the default `pip install -r requirements.txt` command.
+The backend build command is `pip install '.[dev]'` so the API server includes Uvicorn. A one-line `requirements.txt` compatibility shim is also included for Render services created with the default `pip install -r requirements.txt` command.
 
 Set these variables in Render:
 

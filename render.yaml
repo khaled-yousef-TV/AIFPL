@@ -5,7 +5,7 @@ services:
     runtime: python
     plan: starter
     region: oregon
-    buildCommand: pip install .
+    buildCommand: pip install '.[dev]'
     startCommand: uvicorn aifpl.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     disk:
