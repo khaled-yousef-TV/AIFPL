@@ -80,7 +80,8 @@ def bootstrap_with_player() -> dict:
     }]}
 
 
-def test_source_health_checks_event_markets_and_player_evidence(tmp_path) -> None:
+def test_source_health_checks_event_markets_and_player_evidence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_FETCH_EVENT_MARKETS", "true")
     EventMarketStore(tmp_path).fetch(["event-1"], FakeOddsClient())
     SnapshotStore(tmp_path).save_bootstrap(bootstrap_with_player())
     players = CurrentPlayerCatalogStore(tmp_path).normalize_latest()
@@ -93,7 +94,8 @@ def test_source_health_checks_event_markets_and_player_evidence(tmp_path) -> Non
     assert statuses["player_evidence"] == "healthy"
 
 
-def test_source_health_marks_stale_event_markets_and_player_evidence(tmp_path) -> None:
+def test_source_health_marks_stale_event_markets_and_player_evidence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_FETCH_EVENT_MARKETS", "true")
     EventMarketStore(tmp_path).fetch(["event-1"], FakeOddsClient())
     SnapshotStore(tmp_path).save_bootstrap(bootstrap_with_player())
     players = CurrentPlayerCatalogStore(tmp_path).normalize_latest()
@@ -104,3 +106,11 @@ def test_source_health_marks_stale_event_markets_and_player_evidence(tmp_path) -
 
     assert statuses["event_markets"] == "stale"
     assert statuses["player_evidence"] == "stale"
+
+
+def test_source_health_skips_event_markets_when_disabled(tmp_path) -> None:
+    report = SourceHealthChecker(tmp_path).run(datetime.now(timezone.utc))
+
+    statuses = {record.source: record.status for record in report.records}
+
+    assert statuses["event_markets"] == "not_applicable"

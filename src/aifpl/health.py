@@ -109,6 +109,11 @@ class SourceHealthChecker:
             return SourceHealthRecord(source="odds", status="invalid", checked_at=now, detail=str(exc))
 
     def _check_event_markets(self, now: datetime) -> SourceHealthRecord:
+        if not os.environ.get("AIFPL_FETCH_EVENT_MARKETS", "false").lower() in ("1", "true", "yes"):
+            return SourceHealthRecord(
+                source="event_markets", status="not_applicable", checked_at=now,
+                detail="Event-market fetching is disabled by AIFPL_FETCH_EVENT_MARKETS",
+            )
         try:
             store = EventMarketStore(self.root)
             path = store.latest_path()
