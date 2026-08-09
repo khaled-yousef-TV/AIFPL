@@ -115,7 +115,7 @@
   .confidence { margin-top: 16px; }
   .confidence-row { display: flex; justify-content: space-between; color: #f0f5e9; font-size: 10px; font-weight: 700; }
   .confidence-bar { height: 7px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: #9aac9a; }
-  .confidence-bar i { display: block; width: 78%; height: 100%; border-radius: inherit; background: #f4e6a1; }
+  .confidence-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: #f4e6a1; transition: width .35s ease; }
   .decision-body { padding: 18px 19px; }
   .mini-head { margin-bottom: 10px; color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
   .move { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
@@ -165,10 +165,6 @@
 </head>
 <body>
 <main class="app">
-  <nav class="topbar">
-    <div class="brand"><div><div class="brand-name">AIFPL</div><div class="brand-sub">Autonomous fantasy management</div></div></div>
-    <div class="top-actions"><div class="sync"><i></i> Sources synced 4 min ago</div><div class="avatar">KY</div></div>
-  </nav>
   <section class="content">
     <div class="headline">
       <div><div class="eyebrow" id="gameweek-label">Loading current gameweek...</div><h1>Your squad, with a point of view.</h1><p class="headline-copy" id="decision-summary">Reading the latest Hermes decision from the backend.</p></div>
@@ -202,36 +198,223 @@
       <section class="card bottom-card"><h2>Squad state</h2><div class="score"><strong id="bank-value">--</strong><span id="free-transfer-value">--</span></div><p class="score-note" id="squad-state-note">Loading bank and free transfers from Hermes state.</p></section>
       <section class="card bottom-card"><h2>Notification status</h2><div class="telegram"><div class="telegram-mark">&gt;</div><div><strong>Telegram is configured</strong><span>Deadline reminders are managed by the scheduler</span></div></div></section>
     </div>
-    <footer class="footer"><span><strong id="footer-model">backend</strong> &middot; <span id="footer-methodology">loading methodology</span></span><span class="sample">AIFPL product mockup &middot; live backend data</span></footer>
   </section>
 </main>
+<script src="config.js"></script>
 <script>
   const apiBase = window.AIFPL_API_BASE || (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin);
-  async function loadClubLogos() {
-    try {
-      const response = await fetch(`${apiBase}/teams/current`);
-      if (!response.ok) throw new Error(`team catalog request failed: ${response.status}`);
-      const teams = await response.json();
-      const byId = new Map(teams.map(team => [String(team.id), team]));
-      document.querySelectorAll(".club-badge[data-team-id]").forEach(badge => {
-        const team = byId.get(badge.dataset.teamId);
-        if (!team) return;
-        const image = new Image();
-        image.alt = `${team.name} crest`;
-        image.decoding = "async";
-        image.onload = () => badge.replaceChildren(image);
-        image.src = new URL(team.logo_url, apiBase).href;
+  let deadline = null;
+  const positionSlots = {
+    GK: [[50, 88]],
+    DEF: [[14, 65], [37, 67], [63, 67], [86, 65], [50, 65]],
+    MID: [[14, 35], [32, 38], [50, 35], [68, 38], [86, 35]],
+    FWD: [[50, 11], [35, 13], [65, 13]],
+  };
+
+  function slotsFor(position, count) {
+    if (position === "FWD" && count === 2) return [[35, 13], [65, 13]];
+    if (position === "FWD" && count === 3) return [[25, 13], [50, 11], [75, 13]];
+    return positionSlots[position];
+  }
+
+  function clubCode(club) {
+    return club.split(/\s+/).map(part => part[0]).join("").slice(0, 3).toUpperCase();
+  }
+
+  function createClubBadge(player, teams) {
+    const team = teams.get(String(player.club_id));
+    const badge = document.createElement("span");
+    badge.className = "club-badge";
+    badge.setAttribute("aria-label", team ? team.name : player.club);
+    const fallback = document.createElement("span");
+    fallback.className = "club-code";
+    fallback.textContent = team ? team.short_name : clubCode(player.club);
+    badge.append(fallback);
+    if (team) {
+      const image = new Image();
+      image.alt = `${team.name} crest`;
+      image.decoding = "async";
+      image.onload = () => badge.replaceChildren(image);
+      image.src = new URL(team.logo_url, apiBase).href;
+    }
+    return badge;
+  }
+
+  function createPlayerPill(player, teams, left, top) {
+    const pill = document.createElement("div");
+    pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
+    pill.style.left = `${left}%`;
+    pill.style.top = `${top}%`;
+    pill.style.transform = "translate(-50%, -50%)";
+    if (player.is_captain) {
+      const captain = document.createElement("span");
+      captain.className = "badge";
+      captain.textContent = "C";
+      pill.append(captain);
+    }
+    pill.append(createClubBadge(player, teams));
+    const name = document.createElement("span");
+    name.className = "player-name";
+    name.textContent = player.name;
+    pill.append(name);
+    const points = document.createElement("span");
+    points.className = "points";
+    points.textContent = `${player.projected_points.toFixed(1)} pts`;
+    pill.append(points);
+    return pill;
+  }
+
+  function renderLineup(dashboard, teams) {
+    const container = document.getElementById("lineup-players");
+    container.replaceChildren();
+    const starters = dashboard.players.filter(player => player.is_starter);
+    ["GK", "DEF", "MID", "FWD"].forEach(position => {
+      const players = starters.filter(player => player.position === position);
+      const slots = slotsFor(position, players.length);
+      players.forEach((player, index) => {
+        const slot = slots[index] || slots.at(-1);
+        container.append(createPlayerPill(player, teams, slot[0], slot[1]));
       });
+    });
+  }
+
+  function renderBench(dashboard, teams) {
+    const container = document.getElementById("bench-players");
+    container.replaceChildren();
+    dashboard.players.filter(player => !player.is_starter).forEach(player => {
+      const row = document.createElement("div");
+      row.className = "bench-player";
+      const top = document.createElement("div");
+      top.className = "bench-top";
+      top.append(createClubBadge(player, teams));
+      const name = document.createElement("strong");
+      name.textContent = player.name;
+      top.append(name);
+      const detail = document.createElement("small");
+      const team = teams.get(String(player.club_id));
+      detail.textContent = `${player.position} \u00b7 ${team ? team.short_name : player.club}`;
+      row.append(top, detail);
+      container.append(row);
+    });
+  }
+
+  function renderTransfers(dashboard) {
+    const container = document.getElementById("transfer-list");
+    container.replaceChildren();
+    if (!dashboard.transfers.length) {
+      const row = document.createElement("div");
+      row.className = "move";
+      row.innerHTML = '<span class="in">No transfers (hold)</span>';
+      container.append(row);
+      return;
+    }
+    if (dashboard.transfers.every(transfer => transfer.out_id === null)) {
+      const row = document.createElement("div");
+      row.className = "move";
+      row.innerHTML = `<span class="in">Initial squad adopted</span><span class="gain">${dashboard.transfers.length} players</span>`;
+      container.append(row);
+      return;
+    }
+    dashboard.transfers.forEach(transfer => {
+      const row = document.createElement("div");
+      row.className = "move";
+      row.innerHTML = `<span class="out">${transfer.out_name}</span><span class="arrow">&rarr;</span><span class="in">${transfer.in_name}</span>`;
+      container.append(row);
+    });
+  }
+
+  function renderHorizon(dashboard) {
+    const container = document.getElementById("horizon-rows");
+    container.replaceChildren();
+    const max = Math.max(...dashboard.horizon.map(point => point.projected_points), 0);
+    dashboard.horizon.forEach(point => {
+      const row = document.createElement("div");
+      row.className = "horizon-row";
+      const label = document.createElement("label");
+      label.textContent = `GW${point.gameweek}`;
+      const track = document.createElement("div");
+      track.className = "track";
+      const fill = document.createElement("i");
+      fill.style.width = `${max ? (point.projected_points / max) * 100 : 0}%`;
+      track.append(fill);
+      const value = document.createElement("b");
+      value.textContent = point.projected_points.toFixed(1);
+      row.append(label, track, value);
+      container.append(row);
+    });
+    document.getElementById("horizon-total").textContent = dashboard.horizon.length ? dashboard.projected_points.toFixed(1) : "--";
+  }
+
+  function renderInputs(dashboard) {
+    const container = document.getElementById("input-list");
+    container.replaceChildren();
+    dashboard.inputs.forEach(input => {
+      const row = document.createElement("div");
+      row.className = "health-item";
+      row.innerHTML = `<i></i>${input.name}<strong>${input.status}</strong>`;
+      row.title = input.detail;
+      container.append(row);
+    });
+    document.getElementById("input-status").textContent = dashboard.inputs.every(input => input.status === "ready") ? "ALL READY" : "CHECK";
+  }
+
+  function renderScorecard(dashboard) {
+    const container = document.getElementById("scorecard-content");
+    if (!dashboard.scorecard) return;
+    const score = document.createElement("div");
+    score.className = "score";
+    score.innerHTML = `<strong>${dashboard.scorecard.actual.toFixed(1)}</strong><span>${dashboard.scorecard.delta >= 0 ? "+" : ""}${dashboard.scorecard.delta.toFixed(1)} vs model</span>`;
+    const note = document.createElement("p");
+    note.className = "score-note";
+    note.textContent = `GW${dashboard.scorecard.gameweek} scored decision \u00b7 projected ${dashboard.scorecard.projected.toFixed(1)} \u00b7 actual ${dashboard.scorecard.actual.toFixed(1)}`;
+    container.replaceChildren(score, note);
+  }
+
+  function renderDashboard(dashboard, teams) {
+    deadline = Date.parse(dashboard.deadline);
+    document.getElementById("gameweek-label").textContent = `Gameweek ${dashboard.gameweek} / ${dashboard.season_id} / decision cockpit`;
+    document.getElementById("deadline-gameweek").textContent = `GW ${dashboard.gameweek}`;
+    document.getElementById("decision-summary").textContent = "Review the latest committed lineup, projection horizon, and decision inputs.";
+    document.getElementById("lineup-meta").textContent = `${dashboard.formation} \u00b7 ${dashboard.projected_points.toFixed(1)} projected`;
+    document.getElementById("decision-action").textContent = dashboard.action.replaceAll("_", " ");
+    document.getElementById("decision-model").textContent = dashboard.model;
+    document.getElementById("decision-copy").textContent = dashboard.explanation;
+    document.getElementById("projection-status").textContent = dashboard.projection_available ? "catalog loaded" : "unavailable";
+    document.getElementById("projection-fill").style.width = dashboard.projection_available ? "100%" : "0%";
+    const captain = dashboard.players.find(player => player.is_captain);
+    document.getElementById("captain-name").textContent = `Captain: ${captain ? captain.name : "not set"}`;
+    document.getElementById("captain-detail").textContent = captain ? `${captain.projected_points.toFixed(1)} projected points \u00b7 ${captain.club}` : "No captain returned by backend";
+    document.getElementById("bank-value").textContent = `\u00a3${(dashboard.bank / 10).toFixed(1)}m`;
+    document.getElementById("free-transfer-value").textContent = `${dashboard.free_transfers} free transfer${dashboard.free_transfers === 1 ? "" : "s"}`;
+    document.getElementById("squad-state-note").textContent = `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 backend state`;
+    renderLineup(dashboard, teams);
+    renderBench(dashboard, teams);
+    renderTransfers(dashboard);
+    renderHorizon(dashboard);
+    renderInputs(dashboard);
+    renderScorecard(dashboard);
+  }
+
+  async function loadDashboard() {
+    try {
+      const [dashboardResponse, teamsResponse] = await Promise.all([
+        fetch(`${apiBase}/dashboard/current`),
+        fetch(`${apiBase}/teams/current`),
+      ]);
+      if (!dashboardResponse.ok) throw new Error(`dashboard request failed: ${dashboardResponse.status}`);
+      if (!teamsResponse.ok) throw new Error(`team catalog request failed: ${teamsResponse.status}`);
+      const dashboard = await dashboardResponse.json();
+      const teams = new Map((await teamsResponse.json()).map(team => [String(team.id), team]));
+      renderDashboard(dashboard, teams);
     } catch (error) {
-      console.info("AIFPL backend unavailable; showing club-code fallbacks.", error);
+      document.getElementById("decision-summary").textContent = "Backend unavailable. Start the AIFPL API to load live squad data.";
+      console.info("AIFPL backend unavailable.", error);
     }
   }
-  loadClubLogos();
 
-  const deadline = Date.parse("2026-08-21T17:30:00Z");
   const countdown = document.getElementById("countdown");
   function tick() {
-    const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+    const remaining = deadline ? Math.max(0, Math.floor((deadline - Date.now()) / 1000)) : 0;
     const days = Math.floor(remaining / 86400);
     const hours = Math.floor((remaining % 86400) / 3600).toString().padStart(2, "0");
     const minutes = Math.floor((remaining % 3600) / 60).toString().padStart(2, "0");
@@ -240,6 +423,7 @@
   }
   tick();
   setInterval(tick, 1000);
+  loadDashboard();
 </script>
 </body>
 </html>

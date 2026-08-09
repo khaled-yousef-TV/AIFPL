@@ -21,6 +21,43 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
+### Render deployment
+
+The repository includes `render.yaml` with two services:
+
+- `aifpl-api`: FastAPI backend with a persistent `/var/data` disk.
+- `aifpl-dashboard`: static dashboard that receives the API URL at build time.
+
+Set these variables in Render:
+
+Backend required:
+
+- `AIFPL_ADMIN_API_KEY`: generate a value in Render; required for mutating routes.
+- `ODDS_API_KEY`: The Odds API key used by refresh and odds projections.
+- `HERMES_API_KEY`: DeepSeek/OpenAI-compatible model key.
+- `AIFPL_CORS_ORIGINS`: the exact dashboard URL, for example `https://aifpl-dashboard.onrender.com`.
+
+Backend optional:
+
+- `AIFPL_TELEGRAM_ENABLED`, `AIFPL_TELEGRAM_BOT_TOKEN`, and `AIFPL_TELEGRAM_CHAT_ID`: enable Telegram deadline notifications.
+- `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
+- `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
+
+Frontend required:
+
+- `AIFPL_API_URL`: the public API URL, for example `https://aifpl-api.onrender.com`.
+
+`AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
+
+After the first deploy, use the API service's Render Shell once to seed current data and create the first decision:
+
+```bash
+aifpl refresh-current-data --start-gameweek 1 --end-gameweek 6
+aifpl hermes-run
+```
+
+The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_KEY`. Until these commands complete, `/dashboard/current` correctly reports that no committed dashboard state exists.
+
 ### Tests
 
 ```bash

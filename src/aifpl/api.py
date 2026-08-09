@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from aifpl.config import data_dir
+from aifpl.config import cors_origins, data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
@@ -43,7 +43,7 @@ from aifpl.teams import CurrentTeam, CurrentTeamCatalogStore, team_logo_path
 app = FastAPI(title="AIFPL Backend", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["null", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origins=cors_origins(),
     allow_methods=["GET", "HEAD", "OPTIONS"],
     allow_headers=["*"]
 )

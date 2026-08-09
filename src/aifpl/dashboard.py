@@ -9,6 +9,7 @@ from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.hermes import HermesManager
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.scheduler import DeadlineScheduler
+from aifpl.scoring import DecisionScorer
 
 
 class DashboardPlayer(BaseModel):
@@ -141,6 +142,18 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             for player_id in decision.transfers_in
         ]
 
+    scorecard = None
+    try:
+        latest_scorecard = DecisionScorer(root).latest()
+        scorecard = DashboardScorecard(
+            gameweek=latest_scorecard.gameweek,
+            projected=latest_scorecard.total_projected,
+            actual=latest_scorecard.total_actual,
+            delta=round(latest_scorecard.total_actual - latest_scorecard.total_projected, 4),
+        )
+    except FileNotFoundError:
+        pass
+
     return CurrentDashboard(
         gameweek=decision.gameweek,
         season_id=decision.season_id,
@@ -163,6 +176,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             DashboardInput(name="Odds projections", status="ready", detail=f"{len(projections)} projection records loaded"),
             DashboardInput(name="Hermes decision", status="ready", detail=f"GW {decision.gameweek} committed"),
         ],
+        scorecard=scorecard,
     )
 
 

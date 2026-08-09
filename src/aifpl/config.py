@@ -13,6 +13,17 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 FPL_BASE_URL = "https://fantasy.premierleague.com/api"
 
 
+def cors_origins() -> list[str]:
+    value = os.environ.get(
+        "AIFPL_CORS_ORIGINS",
+        "null,http://localhost:8000,http://127.0.0.1:8000",
+    )
+    origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+    if not origins:
+        raise ValueError("AIFPL_CORS_ORIGINS must contain at least one origin")
+    return origins
+
+
 def data_dir() -> Path:
     """Return the configurable local location for downloaded source data."""
     return Path(os.environ.get("AIFPL_DATA_DIR", "data")).expanduser()

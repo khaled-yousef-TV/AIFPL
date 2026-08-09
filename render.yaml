@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: aifpl-api
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install .
+    startCommand: uvicorn aifpl.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: aifpl-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.1
+      - key: AIFPL_DATA_DIR
+        value: /var/data
+      - key: AIFPL_CORS_ORIGINS
+        sync: false
+      - key: AIFPL_ADMIN_API_KEY
+        generateValue: true
+      - key: ODDS_API_KEY
+        sync: false
+      - key: HERMES_API_KEY
+        sync: false
+      - key: HERMES_BASE_URL
+        value: https://api.deepseek.com
+      - key: HERMES_MODEL
+        value: deepseek-v4-flash
+      - key: AIFPL_HERMES_AUTO_RUN
+        value: "false"
+      - key: AIFPL_TELEGRAM_ENABLED
+        value: "false"
+      - key: AIFPL_TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: AIFPL_TELEGRAM_CHAT_ID
+        sync: false
+
+  - type: static
+    name: aifpl-dashboard
+    buildCommand: sh scripts/render-build-frontend.sh
+    staticPublishPath: mockups
+    envVars:
+      - key: AIFPL_API_URL
+        sync: false

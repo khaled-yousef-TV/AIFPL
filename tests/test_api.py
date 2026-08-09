@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from aifpl import api
+from aifpl.dashboard import CurrentDashboard
 
 
 def test_health_endpoint() -> None:
@@ -54,3 +57,30 @@ def test_current_team_logo_is_served_from_the_bundled_assets(monkeypatch, tmp_pa
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG")
+
+
+def test_current_dashboard_returns_the_backend_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    expected = CurrentDashboard(
+        gameweek=1,
+        season_id="2026-27",
+        deadline=datetime(2026, 8, 21, 17, 30, tzinfo=timezone.utc),
+        action="hold",
+        explanation="Use the committed lineup",
+        model="test-model",
+        methodology="test-methodology",
+        bank=10,
+        free_transfers=2,
+        captain_id=1,
+        formation="4-4-2",
+        projected_points=55.5,
+        projection_available=True,
+        players=[],
+    )
+    monkeypatch.setattr(api, "build_current_dashboard", lambda root: expected)
+
+    response = TestClient(api.app).get("/dashboard/current")
+
+    assert response.status_code == 200
+    assert response.json()["projected_points"] == 55.5
+    assert response.json()["free_transfers"] == 2
