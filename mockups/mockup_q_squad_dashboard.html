@@ -145,13 +145,13 @@
     }
     .player .badge { animation: none; }
   }
+    .player .badge { animation: none; }
+  }
   .p1 { left: 50%; top: 12%; transform: translate(-50%, -50%); } .p2 { left: 18%; top: 35%; transform: translate(-50%, -50%); } .p3 { left: 41%; top: 37%; transform: translate(-50%, -50%); } .p4 { left: 65%; top: 37%; transform: translate(-50%, -50%); } .p5 { left: 87%; top: 35%; transform: translate(-50%, -50%); }
   .p6 { left: 14%; top: 65%; transform: translate(-50%, -50%); } .p7 { left: 37%; top: 66%; transform: translate(-50%, -50%); } .p8 { left: 61%; top: 66%; transform: translate(-50%, -50%); } .p9 { left: 84%; top: 65%; transform: translate(-50%, -50%); } .p10 { left: 50%; top: 88%; transform: translate(-50%, -50%); }
   .bench { align-self: flex-start; width: 150px; min-height: 0; flex: 0 0 150px; padding: 13px 12px; border: 1px dashed #a8bd9f; border-radius: 11px; background: rgba(255,255,255,.55); }
   .bench-title { margin-bottom: 8px; color: var(--green); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-align: center; }
-  .bench-player { position: relative; padding: 8px 5px; border-top: 1px solid #d6e4d0; text-align: center; }
-  .bench-player .player-tip { width: 140px; bottom: calc(100% + 8px); left: 50%; }
-  .bench-player .player-tip.below { bottom: auto; top: calc(100% + 8px); }
+  .bench-player { padding: 8px 5px; border-top: 1px solid #d6e4d0; text-align: center; }
   .bench-player:first-of-type { border-top: 0; } .bench-top { display: flex; align-items: center; gap: 6px; text-align: left; } .bench-top .club-badge { flex: 0 0 28px; width: 28px; height: 28px; margin: 0; } .bench-top .club-badge img { width: 24px; height: 24px; } .bench-player strong { display: block; font-size: 12px; } .bench-player small { color: var(--muted); font-size: 10.5px; }
   .decision-card { overflow: hidden; }
   .decision-hero { padding: 19px; background: #718b7c; }
@@ -308,27 +308,7 @@
     return tip;
   }
 
-  const TIP_WIDTH = 158;
-
-  function placeTip(pill, tip, pitch) {
-    const pillRect = pill.getBoundingClientRect();
-    const pitchRect = pitch.getBoundingClientRect();
-    const tipHeight = tip.offsetHeight || 118;
-    if (pillRect.top - pitchRect.top < tipHeight + 20) {
-      tip.style.bottom = "auto";
-      tip.style.top = "calc(100% + 10px)";
-    } else {
-      tip.style.top = "auto";
-      tip.style.bottom = "calc(100% + 10px)";
-    }
-    const center = (pillRect.width - TIP_WIDTH) / 2;
-    const minLeft = pitchRect.left - pillRect.left + 2;
-    const maxLeft = pitchRect.right - pillRect.left - TIP_WIDTH - 2;
-    tip.style.left = `${Math.max(minLeft, Math.min(center, maxLeft))}px`;
-    tip.style.transform = "none";
-  }
-
-  function createPlayerPill(player, teams, left, top, delays, pitch) {
+  function createPlayerPill(player, teams, left, top, delays) {
     const pill = document.createElement("div");
     pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
     pill.dataset.pid = player.id;
@@ -355,10 +335,7 @@
     const team = teams.get(String(player.club_id));
     const tip = createPlayerTip(player, team);
     pill.append(tip);
-    pill.addEventListener("mouseenter", () => {
-      tip.removeAttribute("hidden");
-      placeTip(pill, tip, pitch);
-    });
+    pill.addEventListener("mouseenter", () => tip.removeAttribute("hidden"));
     pill.addEventListener("mouseleave", () => tip.setAttribute("hidden", ""));
     return pill;
   }
@@ -366,7 +343,6 @@
   function renderLineup(dashboard, teams) {
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
-    const pitch = container.closest(".pitch");
     const starters = dashboard.players.filter(player => player.is_starter);
     const subsEnd = 0.4 + 4 * 0.8;
     let lineDelay = subsEnd + 0.6;
@@ -378,7 +354,7 @@
         container.append(createPlayerPill(player, teams, slot[0], slot[1], {
           badge: lineDelay,
           name: lineDelay,
-        }, pitch));
+        }));
       });
       lineDelay += 1.2;
     });
@@ -402,12 +378,6 @@
       const team = teams.get(String(player.club_id));
       detail.textContent = `${player.position} \u00b7 ${team ? team.short_name : player.club}`;
       row.append(top, detail);
-      const tip = createPlayerTip(player, team);
-      tip.setAttribute("hidden", "");
-      if (index === 0) tip.classList.add("below");
-      row.append(tip);
-      row.addEventListener("mouseenter", () => tip.removeAttribute("hidden"));
-      row.addEventListener("mouseleave", () => tip.setAttribute("hidden", ""));
       container.append(row);
     });
   }
