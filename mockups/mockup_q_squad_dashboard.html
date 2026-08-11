@@ -90,8 +90,12 @@
   .circle { position: absolute; left: 50%; top: 50%; width: 19%; aspect-ratio: 1; border: 2px solid rgba(75, 126, 91, .58); border-radius: 50%; transform: translate(-50%, -50%); }
   .box { position: absolute; left: 31%; width: 38%; height: 16%; border: 2px solid rgba(75, 126, 91, .58); }
   .box.top { top: 0; border-top: 0; } .box.bottom { bottom: 0; border-bottom: 0; }
-  .player { position: absolute; z-index: 2; width: 104px; padding: 7px 6px 6px; border: 2px solid #fffdf9; border-radius: 11px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; }
+  .player { position: absolute; z-index: 2; width: 104px; padding: 7px 6px 6px; border: 2px solid #fffdf9; border-radius: 11px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; opacity: 0; animation: pill-appear .7s ease forwards; animation-delay: var(--delay, 0s); }
   .player:hover { z-index: 5; box-shadow: 0 9px 17px rgba(78, 105, 84, .28); transform: translate(-50%, -50%) scale(1.08) rotate(-2deg); }
+  @keyframes pill-appear {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .club-badge { display: grid; width: 30px; height: 30px; margin: 0 auto 3px; place-items: center; overflow: hidden; border: 1px solid #d9e2d5; border-radius: 50%; background: #fffdf9; }
   .club-badge img { display: block; width: 26px; height: 26px; object-fit: contain; }
   .club-code { color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: -.03em; }
@@ -118,11 +122,14 @@
     to { transform: scale(1) rotate(0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .player .club-badge, .player .player-name, .player .points,
+    .player { opacity: 1; animation: none; }
+    .player .club-badge, .player .player-name,
     .bench-top .club-badge, .bench-top strong, .bench-player small {
       opacity: 1;
       animation: none;
     }
+    .player .badge { animation: none; }
+  }
     .player .badge { animation: none; }
   }
   .p1 { left: 50%; top: 12%; transform: translate(-50%, -50%); } .p2 { left: 18%; top: 35%; transform: translate(-50%, -50%); } .p3 { left: 41%; top: 37%; transform: translate(-50%, -50%); } .p4 { left: 65%; top: 37%; transform: translate(-50%, -50%); } .p5 { left: 87%; top: 35%; transform: translate(-50%, -50%); }
@@ -271,6 +278,7 @@
     pill.style.left = `${left}%`;
     pill.style.top = `${top}%`;
     pill.style.transform = "translate(-50%, -50%)";
+    pill.style.setProperty("--delay", `${delays.badge}s`);
     pill.style.setProperty("--delay-badge", `${delays.badge}s`);
     pill.style.setProperty("--delay-name", `${delays.name}s`);
     const inner = document.createElement("div");
