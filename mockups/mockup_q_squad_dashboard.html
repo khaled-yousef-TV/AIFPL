@@ -106,13 +106,15 @@
     opacity: 0;
     animation: pill-reveal 1s cubic-bezier(.25, 1.4, .45, 1) forwards;
   }
-  .player .points, .player .club-badge, .player .player-name { animation-delay: var(--delay, 0s); }
+  .player .points { animation-delay: var(--delay-pts, 0s); }
+  .player .club-badge { animation-delay: var(--delay-badge, 0s); }
+  .player .player-name { animation-delay: var(--delay-name, 0s); }
   .bench-player small, .bench-top .club-badge, .bench-top strong { animation-delay: var(--delay, 0s); }
   @keyframes pill-reveal {
     from { opacity: 0; transform: translateY(20px) scale(.8); }
     to { opacity: 1; transform: none; }
   }
-  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay, 0s) + .2s) backwards; }
+  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay-name, 0s) + .3s) backwards; }
   @keyframes badge-pop {
     from { transform: scale(0) rotate(-180deg); }
     to { transform: scale(1) rotate(0); }
@@ -230,15 +232,15 @@
   const apiBase = window.AIFPL_API_BASE || (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "https://api.fplai.nl");
   let deadline = null;
   const positionSlots = {
-    GK: [[50, 88]],
-    DEF: [[14, 65], [37, 67], [63, 67], [86, 65], [50, 65]],
-    MID: [[14, 35], [32, 38], [50, 35], [68, 38], [86, 35]],
-    FWD: [[50, 11], [35, 13], [65, 13]],
+    GK: [[50, 90]],
+    DEF: [[11, 72], [37, 74], [63, 74], [89, 72], [50, 74]],
+    MID: [[11, 40], [31, 43], [50, 40], [69, 43], [89, 40]],
+    FWD: [[50, 12], [33, 14], [67, 14]],
   };
 
   function slotsFor(position, count) {
-    if (position === "FWD" && count === 2) return [[35, 13], [65, 13]];
-    if (position === "FWD" && count === 3) return [[25, 13], [50, 11], [75, 13]];
+    if (position === "FWD" && count === 2) return [[33, 14], [67, 14]];
+    if (position === "FWD" && count === 3) return [[23, 14], [50, 12], [77, 14]];
     return positionSlots[position];
   }
 
@@ -265,13 +267,15 @@
     return badge;
   }
 
-  function createPlayerPill(player, teams, left, top, delay) {
+  function createPlayerPill(player, teams, left, top, delays) {
     const pill = document.createElement("div");
     pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
     pill.style.left = `${left}%`;
     pill.style.top = `${top}%`;
     pill.style.transform = "translate(-50%, -50%)";
-    pill.style.setProperty("--delay", `${delay}s`);
+    pill.style.setProperty("--delay-pts", `${delays.points}s`);
+    pill.style.setProperty("--delay-badge", `${delays.badge}s`);
+    pill.style.setProperty("--delay-name", `${delays.name}s`);
     const inner = document.createElement("div");
     inner.className = "pill-inner";
     if (player.is_captain) {
@@ -297,15 +301,25 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    let waveBase = 0.5 + 4 * 0.8 + 0.8;
+    const benchEnd = 0.5 + 4 * 0.8;
+    const phaseStep = 0.7;
+    const phaseGap = 1.4;
+    const pointsBase = benchEnd + 0.8;
+    const badgeBase = pointsBase + 11 * phaseStep + phaseGap;
+    const nameBase = badgeBase + 11 * phaseStep + phaseGap;
+    let positionIndex = 0;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
       const players = starters.filter(player => player.position === position);
       const slots = slotsFor(position, players.length);
       players.forEach((player, index) => {
         const slot = slots[index] || slots.at(-1);
-        container.append(createPlayerPill(player, teams, slot[0], slot[1], waveBase + index * 0.8));
+        container.append(createPlayerPill(player, teams, slot[0], slot[1], {
+          points: pointsBase + positionIndex * phaseStep,
+          badge: badgeBase + positionIndex * phaseStep,
+          name: nameBase + positionIndex * phaseStep,
+        }));
+        positionIndex += 1;
       });
-      waveBase += 0.9;
     });
   }
 
