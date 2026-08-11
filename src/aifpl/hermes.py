@@ -13,11 +13,13 @@ from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
+from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.optimizer import OptimizedSquad, optimize_squad
 from aifpl.player_evidence import PlayerEvidenceStore
+from aifpl.priors import PlayerPrior
 from aifpl.projection_catalogs import _aggregate
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import SquadPlayer, SquadRequest, select_best_lineup
@@ -58,6 +60,7 @@ class HermesState(BaseModel):
     gameweek: int = 0
     decision_path: str = ""
     season_id: str = ""
+    player_priors: list[PlayerPrior] = Field(default_factory=list)
 
 
 class HermesDecision(BaseModel):
@@ -76,6 +79,7 @@ class HermesDecision(BaseModel):
     decision_path: str
     state_path: str = ""
     season_id: str = ""
+    player_priors: list[PlayerPrior] = Field(default_factory=list)
 
 
 class HermesRunResult(BaseModel):
@@ -121,6 +125,7 @@ class OpenAICompatibleHermesModel:
 class HermesDecisionBackend:
     def __init__(self, root: Path) -> None:
         self.root = root
+        self.priors: list[PlayerPrior] = []
 
     def context(self) -> dict[str, Any]:
         try:
@@ -136,7 +141,81 @@ class HermesDecisionBackend:
             "player_evidence_records": evidence_count,
             "decision_history": self._decision_history(),
             "odds_projection_coverage": self._odds_coverage(),
+            "priors_enabled": self._priors_enabled(),
         }
+
+    @staticmethod
+    def _priors_enabled() -> bool:
+        return os.environ.get("AIFPL_HERMES_PRIORS_ENABLED", "true").lower() in ("1", "true", "yes")
+
+    def player_news(self, limit: int = 25) -> list[dict[str, Any]]:
+        players = CurrentPlayerCatalogStore(self.root).latest_players()
+        with_news = [player for player in players if player.news]
+        with_news.sort(key=lambda player: (
+            player.chance_of_playing_next_round if player.chance_of_playing_next_round is not None else 100
+        ))
+        return [
+            {
+                "id": player.id, "name": player.name, "position": player.position,
+                "club": player.club, "news": player.news,
+                "chance_of_playing": player.chance_of_playing_next_round,
+            }
+            for player in with_news[: max(1, min(int(limit), 200))]
+        ]
+
+    def team_fixtures(self, team: str) -> list[dict[str, Any]]:
+        from aifpl.fixtures import CurrentFixtureCatalogStore
+        from aifpl.teams import CurrentTeamCatalogStore
+
+        fixtures = CurrentFixtureCatalogStore(self.root).latest()
+        teams = {team.id: team for team in CurrentTeamCatalogStore(self.root).latest()}
+        query = team.casefold().strip()
+        matches = [team_obj for team_obj in teams.values() if query in team_obj.name.casefold() or query in team_obj.short_name.casefold()]
+        if not matches:
+            raise ValueError(f"Unknown team: {team}")
+        team_obj = matches[0]
+        upcoming: list[dict[str, Any]] = []
+        for fixture in sorted(fixtures, key=lambda f: f.gameweek or 0):
+            if fixture.finished or fixture.gameweek is None:
+                continue
+            if fixture.home_team_id == team_obj.id:
+                opponent = teams.get(fixture.away_team_id)
+                difficulty = fixture.home_difficulty
+                venue = "home"
+            elif fixture.away_team_id == team_obj.id:
+                opponent = teams.get(fixture.home_team_id)
+                difficulty = fixture.away_difficulty
+                venue = "away"
+            else:
+                continue
+            upcoming.append({
+                "gameweek": fixture.gameweek, "opponent": opponent.short_name if opponent else "?",
+                "venue": venue, "difficulty": difficulty, "kickoff": fixture.kickoff_time,
+            })
+            if len(upcoming) >= 3:
+                break
+        return upcoming
+
+    def validate_prior(self, arguments: dict[str, Any]) -> PlayerPrior:
+        from aifpl.priors import PlayerPrior, validate_prior_adjustment
+
+        try:
+            player_id = int(arguments["player_id"])
+            adjustment = validate_prior_adjustment(arguments["adjustment"])
+            reason = str(arguments.get("reason", "")).strip()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid prior arguments: {exc}") from exc
+        if len(reason) < 10:
+            raise ValueError("reason must be at least 10 characters")
+        names = {player.id: player.name for player in CurrentPlayerCatalogStore(self.root).latest_players()}
+        if player_id not in names:
+            raise ValueError(f"Unknown player id: {player_id}")
+        return PlayerPrior(player_id=player_id, player_name=names[player_id], adjustment=adjustment, reason=reason)
+
+    def set_prior(self, prior: PlayerPrior) -> list[dict[str, Any]]:
+        self.priors = [existing for existing in self.priors if existing.player_id != prior.player_id]
+        self.priors.append(prior)
+        return [item.model_dump() for item in self.priors]
 
     def _odds_coverage(self) -> dict[str, Any]:
         try:
@@ -184,7 +263,9 @@ class HermesDecisionBackend:
         return {"rows": rows, "summary": summary}
 
     def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int]:
-        rows = self._horizon_rows(1, strategy.planning_horizon)
+        from aifpl.priors import apply_priors
+
+        rows = apply_priors(self._horizon_rows(1, strategy.planning_horizon), self.priors)
         candidates = _aggregate(rows)
         preferred = {row.player_id for row in candidates if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         squad = optimize_squad(
@@ -194,7 +275,9 @@ class HermesDecisionBackend:
         return squad, min(row.gameweek for row in rows)
 
     def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> HorizonTransferPlan:
-        rows = self._horizon_rows(target_gameweek, strategy.planning_horizon)
+        from aifpl.priors import apply_priors
+
+        rows = apply_priors(self._horizon_rows(target_gameweek, strategy.planning_horizon), self.priors)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_horizon_transfers(rows, HorizonSquadState(
@@ -304,7 +387,21 @@ class HermesManager:
             "is a member of your squad and the transfers are directly actionable, including during pre-season "
             "(pre_season=true) when all transfers are free. Do not reject a plan because a name looks unfamiliar; "
             "re-read the squad and plan before deciding. "
-            "The context includes decision_history with your prior decisions' outcomes; use it as evidence when changing strategy."
+            "Qualitative priors: the projections are purely quantitative. When the qualitative picture differs from the "
+            "numbers (injury or rotation risk, fixture congestion, manager tendencies, bandwagon narratives), inspect "
+            "get_player_news and get_team_fixtures, then set bounded per-player priors with set_player_prior "
+            "(adjustment between -2 and +2 projected points per gameweek; each prior needs a concrete written reason). "
+            "Priors are validated, audited, and applied by the backend before optimization; set them only when you have "
+            "specific qualitative evidence, not as general sentiment. "
+            "Concrete prior rules: a starter who is injured or doubtful for the next gameweek gets -1.0 to -2.0; a player "
+            "returning from a long injury layoff gets -0.5 to -1.0; a player with a run of difficulty-2 fixtures gets "
+            "+0.5 to +1.0; a player facing three difficulty-4/5 fixtures in a row gets -0.5 to -1.0. Set at most 5 priors. "
+            "If the news tool returns no signal for a player you care about, you may skip a prior for them. "
+            "Adaptive strategy: the context includes decision_history with your prior decisions' outcomes. Use it "
+            "evidence-based: if avg_actual_minus_projected is negative across 2+ scored gameweeks, tighten your "
+            "strategy (raise hit_aversion, lower differential_appetite, reduce risk_tolerance). If transfer_delta totals "
+            "are strongly negative, raise hit_aversion further. If you consistently overperform, you may loosen "
+            "slightly. Always explain the change in rationale."
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -444,6 +541,20 @@ class HermesManager:
         if name == "set_strategy":
             self._strategy = HermesStrategy.model_validate(arguments)
             return {"accepted": True, "strategy": self._strategy.model_dump()}
+        if name == "get_player_news":
+            if not self.backend._priors_enabled():
+                raise ValueError("Qualitative priors are disabled by AIFPL_HERMES_PRIORS_ENABLED=false")
+            return {"players": self.backend.player_news(int(arguments.get("limit", 25)))}
+        if name == "get_team_fixtures":
+            if not self.backend._priors_enabled():
+                raise ValueError("Qualitative priors are disabled by AIFPL_HERMES_PRIORS_ENABLED=false")
+            return {"team": arguments.get("team"), "fixtures": self.backend.team_fixtures(str(arguments.get("team", "")))}
+        if name == "set_player_prior":
+            if not self.backend._priors_enabled():
+                raise ValueError("Qualitative priors are disabled by AIFPL_HERMES_PRIORS_ENABLED=false")
+            prior = self.backend.validate_prior(arguments)
+            priors = self.backend.set_prior(prior)
+            return {"accepted": True, "active_priors": priors}
         if name == "get_initial_squad":
             if self._strategy is None:
                 raise ValueError("Set strategy before requesting a squad")
@@ -518,12 +629,14 @@ class HermesManager:
             created_at=now, backend_methodology=methodology, decision_path=str(decision_path),
             state_path=str(state_path),
             season_id=season_id,
+            player_priors=getattr(self.backend, "priors", []),
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
             model=self.model.model_name, updated_at=now, version=(previous.version + 1 if previous else 1),
             gameweek=gameweek, decision_path=str(decision_path),
             season_id=season_id,
+            player_priors=getattr(self.backend, "priors", []),
         )
         write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
         write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
@@ -543,6 +656,9 @@ def _sibling_exists(root: Path, artifact: Path, sibling_directory: str) -> bool:
 def _tools() -> list[dict[str, Any]]:
     return [
         _tool("set_strategy", "Set your autonomous strategy", {"risk_tolerance": {"type": "number", "minimum": 0, "maximum": 1}, "hit_aversion": {"type": "number", "minimum": 0, "maximum": 1}, "differential_appetite": {"type": "number", "minimum": 0, "maximum": 1}, "planning_horizon": {"type": "integer", "minimum": 3, "maximum": 6}, "preferred_players": {"type": "array", "items": {"type": "string"}}, "rationale": {"type": "string"}}, ["risk_tolerance", "hit_aversion", "differential_appetite", "planning_horizon", "rationale"]),
+        _tool("get_player_news", "Get players with injury/rotation news, lowest playing chance first", {"limit": {"type": "integer", "minimum": 1, "maximum": 200}}, []),
+        _tool("get_team_fixtures", "Get the next 3 fixtures for a team with opponent and difficulty", {"team": {"type": "string"}}, ["team"]),
+        _tool("set_player_prior", "Set a bounded per-player projection adjustment with a reason (audited, applied before optimization)", {"player_id": {"type": "integer"}, "adjustment": {"type": "number", "minimum": -2, "maximum": 2}, "reason": {"type": "string", "minLength": 10}}, ["player_id", "adjustment", "reason"]),
         _tool("get_initial_squad", "Get the backend's best initial squad", {}, []),
         _tool("get_horizon_plan", "Get the backend's transfer plan for the existing squad", {}, []),
         _tool("commit_decision", "Commit one backend-validated action", {"action": {"type": "string", "enum": ["adopt_initial", "execute_horizon", "hold"]}, "explanation": {"type": "string"}}, ["action", "explanation"]),
