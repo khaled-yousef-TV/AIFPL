@@ -42,6 +42,27 @@ def minimum_odds_fixture_coverage() -> float:
     return coverage
 
 
+def minimum_bank_tenths() -> int:
+    value = int(os.environ.get("AIFPL_MIN_BANK_TENTHS", "50"))
+    if value < 0:
+        raise ValueError("AIFPL_MIN_BANK_TENTHS must not be negative")
+    return value
+
+
+def bench_min_projection() -> float:
+    value = float(os.environ.get("AIFPL_BENCH_MIN_PROJECTION", "2.0"))
+    if value < 0:
+        raise ValueError("AIFPL_BENCH_MIN_PROJECTION must not be negative")
+    return value
+
+
+def bench_weight() -> float:
+    value = float(os.environ.get("AIFPL_BENCH_WEIGHT", "0.25"))
+    if not 0 <= value <= 1:
+        raise ValueError("AIFPL_BENCH_WEIGHT must be within 0..1")
+    return value
+
+
 def partial_odds_fixture_coverage() -> float:
     coverage = float(os.environ.get("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE", "0.8"))
     if not 0 <= coverage <= 1:

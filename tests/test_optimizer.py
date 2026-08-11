@@ -4,6 +4,13 @@ from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
 
 
+@pytest.fixture(autouse=True)
+def disable_robustness_constraints(monkeypatch):
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+
+
 def candidate(identifier: int, position: str, club: str, cost: int, points: float) -> CurrentPlayerProjection:
     return CurrentPlayerProjection(
         player_id=identifier, player_name=f"Player {identifier}", position=position, club=club, cost=cost,
@@ -59,3 +66,62 @@ def test_optimizer_enforces_club_cap_with_normalized_names() -> None:
     result = optimize_squad(candidates, budget=1000)
 
     assert 16 not in {player.player_id for player in result.players}
+
+
+def test_bank_buffer_is_respected(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+
+    pool = full_pool()
+    pool.append(candidate(16, "GK", "F", 25, 2))
+    pool.append(candidate(17, "DEF", "F", 25, 2))
+    pool.append(candidate(18, "MID", "F", 25, 2))
+
+    result = optimize_squad(pool, budget=700)
+
+    assert result.bank >= 50
+    assert result.total_cost <= 650
+
+
+def test_playing_bench_floor_limits_dead_slots(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+
+    pool = full_pool()
+    pool.append(candidate(16, "MID", "F", 40, 1.5))
+    pool.append(candidate(17, "MID", "G", 40, 1.2))
+    pool.append(candidate(18, "MID", "H", 40, 1.0))
+
+    result = optimize_squad(pool, budget=680)
+
+    xi_ids = {player.player_id for player in result.starting_xi}
+    bench_ids = [player for player in result.players if player.player_id not in xi_ids]
+    dead = [player for player in bench_ids if player.projected_points < 2.0]
+    assert len(dead) <= 2
+
+
+def test_bench_weight_prefers_productive_bench(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0.25")
+
+    pool = full_pool()
+    pool.append(candidate(16, "MID", "F", 40, 2.5))
+    pool.append(candidate(17, "MID", "G", 40, 1.0))
+
+    weighted = optimize_squad(pool, budget=680)
+    bench_pts = sum(
+        player.projected_points
+        for player in weighted.players
+        if player.player_id not in {start.player_id for start in weighted.starting_xi}
+    )
+
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    unweighted = optimize_squad(pool, budget=680)
+    assert bench_pts > sum(
+        player.projected_points
+        for player in unweighted.players
+        if player.player_id not in {start.player_id for start in unweighted.starting_xi}
+    )

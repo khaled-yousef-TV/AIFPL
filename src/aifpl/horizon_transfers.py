@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from ortools.sat.python import cp_model
 from pydantic import BaseModel, Field
 
+from aifpl.config import bench_min_projection, bench_weight, minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
@@ -112,6 +113,8 @@ def plan_horizon_transfers(
     selected: dict[tuple[int, int], cp_model.IntVar] = {}
     starter: dict[tuple[int, int], cp_model.IntVar] = {}
     captain: dict[tuple[int, int], cp_model.IntVar] = {}
+    bench: dict[tuple[int, int], cp_model.IntVar] = {}
+    dead_bench: dict[tuple[int, int], cp_model.IntVar] = {}
     incoming: dict[tuple[int, int], cp_model.IntVar] = {}
     outgoing: dict[tuple[int, int], cp_model.IntVar] = {}
     original_holding: dict[tuple[int, int], cp_model.IntVar] = {}
@@ -121,18 +124,28 @@ def plan_horizon_transfers(
     excess_transfers: list[cp_model.IntVar] = []
     banks: list[cp_model.IntVar] = []
     scale = 10_000
+    min_bank = minimum_bank_tenths()
+    bench_floor = bench_min_projection()
+    bench_bonus = bench_weight()
 
     for week_index, gameweek in enumerate(gameweeks):
         for player_id in player_ids:
             selected[player_id, week_index] = model.new_bool_var(f"selected_{player_id}_{gameweek}")
             starter[player_id, week_index] = model.new_bool_var(f"starter_{player_id}_{gameweek}")
             captain[player_id, week_index] = model.new_bool_var(f"captain_{player_id}_{gameweek}")
+            bench[player_id, week_index] = model.new_bool_var(f"bench_{player_id}_{gameweek}")
+            dead_bench[player_id, week_index] = model.new_bool_var(f"dead_bench_{player_id}_{gameweek}")
             incoming[player_id, week_index] = model.new_bool_var(f"in_{player_id}_{gameweek}")
             outgoing[player_id, week_index] = model.new_bool_var(f"out_{player_id}_{gameweek}")
             original_holding[player_id, week_index] = model.new_bool_var(f"original_{player_id}_{gameweek}")
             original_outgoing[player_id, week_index] = model.new_bool_var(f"original_out_{player_id}_{gameweek}")
             model.add(starter[player_id, week_index] <= selected[player_id, week_index])
             model.add(captain[player_id, week_index] <= starter[player_id, week_index])
+            model.add(selected[player_id, week_index] == starter[player_id, week_index] + bench[player_id, week_index])
+            model.add(dead_bench[player_id, week_index] <= bench[player_id, week_index])
+            model.add(by_player_gameweek[player_id, gameweek].projected_points >= bench_floor).only_enforce_if(
+                selected[player_id, week_index], dead_bench[player_id, week_index].Not()
+            )
 
             previous = 1 if week_index == 0 and player_id in current_ids else 0 if week_index == 0 else selected[player_id, week_index - 1]
             model.add(incoming[player_id, week_index] >= selected[player_id, week_index] - previous)
@@ -154,6 +167,7 @@ def plan_horizon_transfers(
             model.add(original_outgoing[player_id, week_index] >= outgoing[player_id, week_index] + original_before - 1)
 
         model.add(sum(selected[player_id, week_index] for player_id in player_ids) == 15)
+        model.add(sum(dead_bench[player_id, week_index] for player_id in player_ids) <= 2)
         for position, required in {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}.items():
             model.add(sum(selected[player_id, week_index] for player_id in player_ids if metadata[player_id].position == position) == required)
         keys = {club_key(metadata[player_id].club) for player_id in player_ids}
@@ -199,6 +213,7 @@ def plan_horizon_transfers(
         )
         purchase_cost = sum(incoming[player_id, week_index] * metadata[player_id].cost for player_id in player_ids)
         model.add(bank == previous_bank + initial_funds + sale_value - purchase_cost)
+        model.add(bank >= min_bank)
         banks.append(bank)
 
     # Rebuild free-transfer rollover constraints without duplicate week variables.
@@ -260,6 +275,10 @@ def plan_horizon_transfers(
         )
         objective.extend(
             captain[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * scale)
+            for player_id in player_ids
+        )
+        objective.extend(
+            bench[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * bench_bonus * scale)
             for player_id in player_ids
         )
         objective.append(-excess_transfers[week_index] * round(effective_hit_penalty * scale))
