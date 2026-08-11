@@ -104,19 +104,15 @@
   .player .club-badge, .player .player-name, .player .points,
   .bench-top .club-badge, .bench-top strong, .bench-player small {
     opacity: 0;
-    animation: pill-reveal .8s cubic-bezier(.25, 1.4, .45, 1) forwards;
+    animation: pill-reveal 1s cubic-bezier(.25, 1.4, .45, 1) forwards;
   }
-  .player .points { animation-delay: var(--delay, 0s); }
-  .player .club-badge { animation-delay: calc(var(--delay, 0s) + .5s); }
-  .player .player-name { animation-delay: calc(var(--delay, 0s) + 1s); }
-  .bench-player small { animation-delay: calc(var(--delay, 0s) + .4s); }
-  .bench-top .club-badge { animation-delay: calc(var(--delay, 0s) + .9s); }
-  .bench-top strong { animation-delay: calc(var(--delay, 0s) + 1.4s); }
+  .player .points, .player .club-badge, .player .player-name { animation-delay: var(--delay, 0s); }
+  .bench-player small, .bench-top .club-badge, .bench-top strong { animation-delay: var(--delay, 0s); }
   @keyframes pill-reveal {
-    from { opacity: 0; transform: translateY(18px) scale(.85); filter: blur(5px); }
-    to { opacity: 1; transform: none; filter: none; }
+    from { opacity: 0; transform: translateY(20px) scale(.8); }
+    to { opacity: 1; transform: none; }
   }
-  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay, 0s) + 1.1s) backwards; }
+  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay, 0s) + .2s) backwards; }
   @keyframes badge-pop {
     from { transform: scale(0) rotate(-180deg); }
     to { transform: scale(1) rotate(0); }
@@ -302,26 +298,26 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    let waveBase = 0.4;
+    let waveBase = 0.5;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
       const players = starters.filter(player => player.position === position);
       const slots = slotsFor(position, players.length);
       players.forEach((player, index) => {
         const slot = slots[index] || slots.at(-1);
-        container.append(createPlayerPill(player, teams, slot[0], slot[1], waveBase + index * 0.3));
+        container.append(createPlayerPill(player, teams, slot[0], slot[1], waveBase + index * 0.8));
       });
-      waveBase += 0.6;
+      waveBase += 0.9;
     });
   }
 
   function renderBench(dashboard, teams) {
     const container = document.getElementById("bench-players");
     container.replaceChildren();
-    const benchDelay = 0.4 + 4 * 0.6 + 0.5;
+    const benchDelay = 0.5 + 4 * 0.8 + 3 * 0.9 + 0.8;
     dashboard.players.filter(player => !player.is_starter).forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "bench-player";
-      row.style.setProperty("--delay", `${benchDelay + index * 0.3}s`);
+      row.style.setProperty("--delay", `${benchDelay + index * 0.8}s`);
       const top = document.createElement("div");
       top.className = "bench-top";
       top.append(createClubBadge(player, teams));
