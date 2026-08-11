@@ -1,5 +1,7 @@
+import aifpl.hermes as hermes_module
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.hermes import HermesDecisionBackend, HermesManager
+from aifpl.hermes import HermesDecisionBackend, HermesManager, HermesStrategy
+from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import OptimizedSquad
 
 
@@ -27,6 +29,23 @@ class FakeBackend:
         return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1
 
 
+class FakeHorizonBackend(HermesDecisionBackend):
+    def _horizon_rows(self, target_gameweek: int, horizon: int):
+        players = [
+            (1, "GK", "A", 4), (2, "GK", "B", 3),
+            (3, "DEF", "A", 5), (4, "DEF", "B", 4), (5, "DEF", "C", 3),
+            (6, "DEF", "D", 2), (7, "DEF", "E", 1),
+            (8, "MID", "A", 8), (9, "MID", "B", 7), (10, "MID", "C", 6),
+            (11, "MID", "D", 5), (12, "MID", "E", 4),
+            (13, "FWD", "F", 9), (14, "FWD", "G", 8), (15, "FWD", "H", 7),
+        ]
+        return [
+            OddsAdjustedGameweekProjection(identifier, f"Player {identifier}", position, club, 50, gameweek, 1, 1, points)
+            for gameweek in range(target_gameweek, target_gameweek + horizon)
+            for identifier, position, club, points in players
+        ]
+
+
 def test_hermes_sets_strategy_and_persists_autonomous_decision(tmp_path) -> None:
     manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
 
@@ -46,6 +65,55 @@ def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypa
 
     assert manager.latest_decision() == result.decision
     assert manager.latest_state().version == 1
+
+
+def test_initial_squad_uses_empty_squad_horizon_plan(tmp_path, monkeypatch) -> None:
+    backend = FakeHorizonBackend(tmp_path)
+    strategy = HermesStrategy(
+        risk_tolerance=0.6, hit_aversion=0.5, differential_appetite=0.4,
+        planning_horizon=3, rationale="Test strategy.",
+    )
+    captured = {}
+    original = hermes_module.plan_horizon_transfers
+
+    def capture_plan(rows, state, **kwargs):
+        plan = original(rows, state, **kwargs)
+        captured["state"] = state
+        captured["pre_season"] = kwargs["pre_season"]
+        captured["plan"] = plan
+        return plan
+
+    monkeypatch.setattr(hermes_module, "plan_horizon_transfers", capture_plan)
+
+    squad, gameweek = backend.initial_squad(strategy)
+
+    opening = captured["plan"].gameweeks[0]
+    assert captured["state"].player_ids == []
+    assert captured["state"].bank == 0
+    assert captured["pre_season"] is True
+    assert gameweek == opening.gameweek
+    assert squad.players == opening.resulting_squad
+    assert squad.bank == opening.bank_after
+
+
+def test_hermes_reinitializes_a_legacy_opening_state_once(tmp_path, monkeypatch) -> None:
+    model = FakeModel()
+    manager = HermesManager(tmp_path, model=model, backend=FakeBackend())
+    initial = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    legacy = manager.latest_state().model_copy(update={"initialization_method": ""})
+    monkeypatch.setattr(manager, "latest_state", lambda optional=False: legacy)
+
+    reinitialized = manager.reinitialize_opening_squad(1, "2026-27")
+
+    assert reinitialized is not None
+    assert reinitialized.decision.action == "adopt_initial"
+    assert model.step == 3  # Reinitialization does not call the LLM.
+    reloaded = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
+    assert reloaded.latest_state().version == 2
+    assert reloaded.latest_state().initialization_method == "horizon_v1"
+    assert len(reloaded.decisions()) == 2
+    assert reloaded.reinitialize_opening_squad(1, "2026-27") is None
+    assert (tmp_path / initial.decision.decision_path).exists()
 
 
 def test_context_includes_scored_decision_history(tmp_path) -> None:

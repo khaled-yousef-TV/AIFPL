@@ -52,7 +52,20 @@ aifpl refresh-current-data \
   --start-gameweek "${AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK:-1}" \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
-aifpl hermes-run
+if [ "$has_decision" = "true" ]; then
+  if aifpl hermes-reinitialize-opening-squad; then
+    echo "Reinitialized the legacy pre-season opening squad with the horizon optimizer."
+  else
+    reinitialize_status=$?
+    if [ "$reinitialize_status" -eq 2 ]; then
+      aifpl hermes-run
+    else
+      exit "$reinitialize_status"
+    fi
+  fi
+else
+  aifpl hermes-run
+fi
 if [ -n "$current_commit" ]; then
   mkdir -p "$data_dir"
   printf '%s\n' "$current_commit" > "$marker"

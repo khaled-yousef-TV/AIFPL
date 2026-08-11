@@ -4,9 +4,20 @@ from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 
 
-def row(identifier: int, position: str, club: str, gameweek: int, points: float) -> OddsAdjustedGameweekProjection:
+@pytest.fixture(autouse=True)
+def disable_robustness_constraints(monkeypatch):
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "0")
+
+
+def row(
+    identifier: int, position: str, club: str, gameweek: int, points: float, cost: int = 50,
+) -> OddsAdjustedGameweekProjection:
     return OddsAdjustedGameweekProjection(
-        identifier, f"Player {identifier}", position, club, 50, gameweek, 1, 1, points,
+        identifier, f"Player {identifier}", position, club, cost, gameweek, 1, 1, points,
     )
 
 
@@ -80,3 +91,96 @@ def test_pre_season_allows_penalty_below_four() -> None:
 
     assert plan.total_hit_cost == 0
     assert plan.solver_status != "HOLD_FALLBACK"
+
+
+def robust_pool() -> list[OddsAdjustedGameweekProjection]:
+    cheap = [
+        (16, "GK", "I", 30, 2.0), (17, "DEF", "J", 30, 2.0), (18, "DEF", "K", 30, 2.0),
+        (19, "MID", "L", 30, 2.0), (20, "MID", "M", 30, 2.0), (21, "FWD", "N", 30, 2.0),
+    ]
+    return pool() + [
+        row(identifier, position, club, gameweek, points, cost)
+        for gameweek in (1, 2, 3)
+        for identifier, position, club, cost, points in cheap
+    ]
+
+
+def test_bank_and_bench_soft_constraints_never_fail(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0.5")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "2.0")
+
+    plan = plan_horizon_transfers(
+        robust_pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=0, free_transfers=1),
+        pre_season=False,
+    )
+
+    assert plan.solver_status in ("OPTIMAL", "FEASIBLE", "HOLD_FALLBACK")
+
+
+def test_bank_shortfall_penalty_prefers_bank_reserve(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0.5")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "0")
+
+    plan = plan_horizon_transfers(
+        robust_pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=0, free_transfers=5),
+        pre_season=True,
+    )
+
+    assert plan.gameweeks[0].bank_after >= 50
+
+
+def test_dead_bench_penalty_prefers_playing_bench(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "2.0")
+
+    plan = plan_horizon_transfers(
+        robust_pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=5),
+        pre_season=True,
+    )
+
+    first = plan.gameweeks[0]
+    xi_ids = {player.player_id for player in first.starting_xi}
+    bench_players = [player for player in first.resulting_squad if player.player_id not in xi_ids]
+    dead = sum(1 for player in bench_players if player.projected_points < 2.0)
+    assert dead <= 2
+
+
+def test_pre_season_hold_fallback_suppressed_when_squad_violates_robustness(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0.5")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "2.0")
+
+    plan = plan_horizon_transfers(
+        robust_pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=0, free_transfers=1),
+        pre_season=True,
+    )
+
+    assert plan.solver_status != "HOLD_FALLBACK"
+    assert plan.gameweeks[0].bank_after >= 50
+
+
+def test_mid_season_hold_fallback_still_applies(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "0.5")
+    monkeypatch.setenv("AIFPL_DEAD_BENCH_PENALTY", "2.0")
+
+    plan = plan_horizon_transfers(
+        robust_pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=0, free_transfers=1),
+        pre_season=False,
+    )
+
+    assert plan.solver_status == "HOLD_FALLBACK"
+    assert all(week.transfers_made == 0 for week in plan.gameweeks)

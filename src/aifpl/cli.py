@@ -86,6 +86,19 @@ def hermes_run() -> None:
 
 
 @app.command()
+def hermes_reinitialize_opening_squad() -> None:
+    """Replace a legacy pre-season opening state with the horizon-derived squad once."""
+    try:
+        result = HermesManager(data_dir()).reinitialize_current()
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    if result is None:
+        typer.echo(json_dumps({"status": "skipped"}))
+        raise typer.Exit(code=2)
+    typer.echo(json_dumps(result))
+
+
+@app.command()
 def hermes_state() -> None:
     """Show Hermes' latest autonomous strategy and squad state."""
     try:

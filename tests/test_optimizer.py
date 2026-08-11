@@ -22,11 +22,11 @@ def full_pool() -> list[CurrentPlayerProjection]:
 
 
 def test_optimizer_selects_a_complete_legal_squad() -> None:
-    result = optimize_squad(full_pool(), budget=680)
+    result = optimize_squad(full_pool(), budget=730)
 
     assert len(result.players) == 15
     assert result.total_cost == 680
-    assert result.bank == 0
+    assert result.bank == 50
     assert result.solver_status == "OPTIMAL"
     assert len(result.starting_xi) == 11
     assert result.captain in result.starting_xi
@@ -37,7 +37,7 @@ def test_optimizer_uses_higher_projected_affordable_candidate_not_price_proximit
     candidates = full_pool()
     candidates.append(candidate(16, "MID", "F", 100, 20))
 
-    result = optimize_squad(candidates, budget=750)
+    result = optimize_squad(candidates, budget=800)
 
     assert 16 in {player.player_id for player in result.players}
     assert 16 in {player.player_id for player in result.starting_xi}

@@ -52,7 +52,7 @@ Frontend required:
 
 `AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
 
-The backend start command is `sh scripts/render-start.sh`. It launches `scripts/render-bootstrap.sh` in the background before Uvicorn listens, so the API comes online immediately while first-run data is being fetched. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The dashboard polls for a few minutes while first-run initialization completes.
+The backend start command is `sh scripts/render-start.sh`. It launches `scripts/render-bootstrap.sh` in the background before Uvicorn listens, so the API comes online immediately while first-run data is being fetched. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. During pre-season, a legacy opening state is rebuilt once with the horizon optimizer without deleting its audit history. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The dashboard polls for a few minutes while first-run initialization completes.
 
 If your existing Render service still uses a custom start command, set **Start Command** to `sh scripts/render-start.sh` or use its Render Shell once:
 
@@ -118,6 +118,7 @@ aifpl player-evidence --limit 20
 aifpl fetch-event-markets
 aifpl build-market-signals
 aifpl hermes-run
+aifpl hermes-reinitialize-opening-squad
 aifpl hermes-state
 aifpl hermes-decision
 aifpl score-decisions

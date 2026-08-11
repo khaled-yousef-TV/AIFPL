@@ -16,9 +16,8 @@ from aifpl.config import HermesSettings, hermes_settings
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
 from aifpl.odds_projections import OddsProjectionStore
-from aifpl.optimizer import OptimizedSquad, optimize_squad
+from aifpl.optimizer import OptimizedSquad
 from aifpl.player_evidence import PlayerEvidenceStore
-from aifpl.projection_catalogs import _aggregate
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import SquadPlayer, SquadRequest, select_best_lineup
 from aifpl.retry import retry_sync
@@ -58,6 +57,7 @@ class HermesState(BaseModel):
     gameweek: int = 0
     decision_path: str = ""
     season_id: str = ""
+    initialization_method: str = ""
 
 
 class HermesDecision(BaseModel):
@@ -185,13 +185,22 @@ class HermesDecisionBackend:
 
     def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int]:
         rows = self._horizon_rows(1, strategy.planning_horizon)
-        candidates = _aggregate(rows)
-        preferred = {row.player_id for row in candidates if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
-        squad = optimize_squad(
-            candidates, preferred_player_ids=preferred,
+        preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
+        plan = plan_horizon_transfers(
+            rows, HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
+            preferred_player_ids=preferred,
             differential_appetite=strategy.differential_appetite,
+            pre_season=True,
         )
-        return squad, min(row.gameweek for row in rows)
+        opening = plan.gameweeks[0]
+        total_cost = sum(player.cost for player in opening.resulting_squad)
+        # Keep the existing initial-decision contract while deriving it from the horizon plan.
+        return OptimizedSquad(
+            players=opening.resulting_squad, total_cost=total_cost, bank=opening.bank_after,
+            projected_points=opening.projected_points, budget=total_cost + opening.bank_after,
+            solver_status=plan.solver_status, methodology=plan.methodology,
+            starting_xi=opening.starting_xi, captain=opening.captain,
+        ), opening.gameweek
 
     def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> HorizonTransferPlan:
         rows = self._horizon_rows(target_gameweek, strategy.planning_horizon)
@@ -281,6 +290,51 @@ class HermesManager:
 
         schedule = DeadlineScheduler(self.root).status()
         return self.run(expected_gameweek=schedule.event, expected_season_id=schedule.season_id)
+
+    def reinitialize_current(self) -> HermesRunResult | None:
+        from aifpl.scheduler import DeadlineScheduler
+
+        schedule = DeadlineScheduler(self.root).status()
+        if schedule.event != 1 or schedule.missed:
+            return None
+        return self.reinitialize_opening_squad(schedule.event, schedule.season_id)
+
+    def reinitialize_opening_squad(
+        self, expected_gameweek: int, expected_season_id: str,
+    ) -> HermesRunResult | None:
+        if expected_gameweek != 1:
+            return None
+        self._expected_gameweek = expected_gameweek
+        self._expected_season_id = expected_season_id
+        lock_path = self.root / "hermes" / "run.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                flock(descriptor, LOCK_EX | LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError("Another Hermes run is already in progress") from exc
+            previous = self.latest_state(optional=True)
+            if (
+                previous is None
+                or previous.gameweek != expected_gameweek
+                or previous.season_id != expected_season_id
+                or previous.initialization_method == "horizon_v1"
+            ):
+                return None
+            self._strategy = previous.strategy
+            self._initial, self._initial_gameweek = self.backend.initial_squad(self._strategy)
+            return self._commit(
+                {
+                    "action": "adopt_initial",
+                    "explanation": "Pre-season reinitialization using the multi-gameweek horizon optimizer.",
+                },
+                previous,
+                model_name=previous.model,
+            )
+        finally:
+            flock(descriptor, LOCK_UN)
+            os.close(descriptor)
 
     def _run_unlocked(self) -> HermesRunResult:
         if self.model is None:
@@ -467,7 +521,9 @@ class HermesManager:
             return self._commit(arguments, previous)
         raise ValueError(f"Unknown Hermes tool: {name}")
 
-    def _commit(self, arguments: dict[str, Any], previous: HermesState | None) -> HermesRunResult:
+    def _commit(
+        self, arguments: dict[str, Any], previous: HermesState | None, model_name: str | None = None,
+    ) -> HermesRunResult:
         if self._strategy is None:
             raise ValueError("Hermes must set a strategy before committing")
         action = arguments["action"]
@@ -511,19 +567,23 @@ class HermesManager:
         squad = HermesSquadState(player_ids=squad_ids, bank=bank, free_transfers=free, purchase_prices=purchase_prices)
         state_path = self.root / "hermes" / "states" / f"{stamp}.json"
         season_id = self._expected_season_id or (previous.season_id if previous else _season_id_for_now(now))
+        decision_model = model_name or (self.model.model_name if self.model is not None else previous.model if previous else "unknown")
         decision = HermesDecision(
             action=action, gameweek=gameweek, squad=squad, captain_id=captain_id,
             starting_xi_ids=starting_ids, transfers_out=outgoing, transfers_in=incoming,
-            explanation=explanation, strategy=self._strategy, model=self.model.model_name,
+            explanation=explanation, strategy=self._strategy, model=decision_model,
             created_at=now, backend_methodology=methodology, decision_path=str(decision_path),
             state_path=str(state_path),
             season_id=season_id,
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
-            model=self.model.model_name, updated_at=now, version=(previous.version + 1 if previous else 1),
+            model=decision_model, updated_at=now, version=(previous.version + 1 if previous else 1),
             gameweek=gameweek, decision_path=str(decision_path),
             season_id=season_id,
+            initialization_method="horizon_v1" if action == "adopt_initial" else (
+                previous.initialization_method if previous else ""
+            ),
         )
         write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
         write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
@@ -543,7 +603,7 @@ def _sibling_exists(root: Path, artifact: Path, sibling_directory: str) -> bool:
 def _tools() -> list[dict[str, Any]]:
     return [
         _tool("set_strategy", "Set your autonomous strategy", {"risk_tolerance": {"type": "number", "minimum": 0, "maximum": 1}, "hit_aversion": {"type": "number", "minimum": 0, "maximum": 1}, "differential_appetite": {"type": "number", "minimum": 0, "maximum": 1}, "planning_horizon": {"type": "integer", "minimum": 3, "maximum": 6}, "preferred_players": {"type": "array", "items": {"type": "string"}}, "rationale": {"type": "string"}}, ["risk_tolerance", "hit_aversion", "differential_appetite", "planning_horizon", "rationale"]),
-        _tool("get_initial_squad", "Get the backend's best initial squad", {}, []),
+        _tool("get_initial_squad", "Get the backend's best multi-gameweek initial squad", {}, []),
         _tool("get_horizon_plan", "Get the backend's transfer plan for the existing squad", {}, []),
         _tool("commit_decision", "Commit one backend-validated action", {"action": {"type": "string", "enum": ["adopt_initial", "execute_horizon", "hold"]}, "explanation": {"type": "string"}}, ["action", "explanation"]),
     ]
