@@ -20,7 +20,7 @@ from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCa
 from aifpl.fpl import FplClient, FplSourceError
 from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError, SeasonImportSummary
 from aifpl.health import SourceHealthChecker, SourceHealthReport
-from aifpl.hermes import HermesDecision, HermesManager, HermesRunResult, HermesState
+from aifpl.hermes import HermesDecision, HermesManager, HermesRunResult, HermesRunTranscript, HermesState
 from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
 from aifpl.optimizer import OptimizedSquad, SquadOptimizationError, optimize_squad
 from aifpl.odds import NormalizedMatchOdds, OddsSnapshotStore, OddsSnapshotSummary, OddsSourceError, TheOddsApiClient
@@ -142,6 +142,22 @@ def latest_hermes_state() -> HermesState:
 def latest_hermes_decision() -> HermesDecision:
     try:
         return HermesManager(data_dir()).latest_decision()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/hermes/decisions", response_model=list[HermesDecision])
+def hermes_decision_history(limit: int = Query(50, ge=1, le=200)) -> list[HermesDecision]:
+    try:
+        return HermesManager(data_dir()).decisions(limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/hermes/runs/latest", response_model=HermesRunTranscript)
+def latest_hermes_run_transcript() -> HermesRunTranscript:
+    try:
+        return HermesManager(data_dir()).latest_transcript()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -84,3 +84,43 @@ def test_current_dashboard_returns_the_backend_payload(monkeypatch, tmp_path) ->
     assert response.status_code == 200
     assert response.json()["projected_points"] == 55.5
     assert response.json()["free_transfers"] == 2
+
+
+def test_hermes_decision_history_is_empty_without_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+
+    response = TestClient(api.app).get("/hermes/decisions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_hermes_run_transcript_is_not_found_without_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+
+    response = TestClient(api.app).get("/hermes/runs/latest")
+
+    assert response.status_code == 404
+
+
+def test_hermes_run_transcript_endpoint_returns_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    transcript = api.HermesRunTranscript(
+        created_at=datetime(2026, 8, 11, 9, 30, tzinfo=timezone.utc),
+        gameweek=1, season_id="2026-27", outcome="succeeded", tool_steps=2,
+        messages=[{"role": "assistant", "tool_calls": [{"function": {"name": "set_strategy"}}]}],
+    )
+
+    class FakeManager:
+        def decisions(self, limit):
+            return []
+        def latest_transcript(self):
+            return transcript
+
+    monkeypatch.setattr(api, "HermesManager", lambda root: FakeManager())
+
+    response = TestClient(api.app).get("/hermes/runs/latest")
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "succeeded"
+    assert response.json()["tool_steps"] == 2

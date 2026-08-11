@@ -70,3 +70,35 @@ def test_context_includes_scored_decision_history(tmp_path) -> None:
     assert context["decision_history"]["summary"]["avg_actual_minus_projected"] == 12.0
     assert context["decision_history"]["summary"]["total_transfer_delta"] == 5.0
     assert context["decision_history"]["rows"][0]["gameweek"] == 1
+
+
+def test_hermes_persists_run_transcript(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
+    manager.run()
+
+    transcript = manager.latest_transcript()
+
+    assert transcript.outcome == "succeeded"
+    assert transcript.tool_steps == 3
+    assert transcript.decision_path
+    roles = [message["role"] for message in transcript.messages]
+    assert roles.count("tool") == 3
+    calls = [
+        call["function"]["name"]
+        for message in transcript.messages
+        if message["role"] == "assistant"
+        for call in (message.get("tool_calls") or [])
+    ]
+    assert "set_strategy" in calls and "get_initial_squad" in calls
+
+
+def test_hermes_decision_history(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
+    result = manager.run()
+    state = manager.latest_state()
+    manager.migrate_legacy_state(dict(state.squad.purchase_prices), result.decision.gameweek, state.season_id)
+
+    history = manager.decisions()
+
+    assert len(history) == 2
+    assert history[0].created_at >= history[1].created_at

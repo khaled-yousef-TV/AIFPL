@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 
 import httpx
@@ -82,6 +82,17 @@ class HermesRunResult(BaseModel):
     decision: HermesDecision
     state_path: str
     tool_steps: int
+
+
+class HermesRunTranscript(BaseModel):
+    created_at: datetime
+    gameweek: int | None = None
+    season_id: str | None = None
+    outcome: Literal["succeeded", "failed", "unknown"] = "unknown"
+    decision_path: str | None = None
+    error: str | None = None
+    tool_steps: int = 0
+    messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class OpenAICompatibleHermesModel:
@@ -297,23 +308,60 @@ class HermesManager:
         ]
         tools = _tools()
         max_steps = self.model.settings.max_tool_steps if isinstance(self.model, OpenAICompatibleHermesModel) else 8
-        for step in range(1, max_steps + 1):
-            message = self.model.complete(messages, tools)
-            messages.append(message)
-            tool_calls = message.get("tool_calls") or []
-            if not tool_calls:
-                raise RuntimeError("Hermes ended without committing a decision")
-            for call in tool_calls:
-                try:
-                    name = call["function"]["name"]
-                    arguments = json.loads(call["function"].get("arguments") or "{}")
-                    output = self._call_tool(name, arguments, previous)
-                except (KeyError, TypeError, json.JSONDecodeError, ValueError, FileNotFoundError) as exc:
-                    output = {"error": str(exc), "recoverable": True}
-                messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(output, default=str)})
-                if isinstance(output, HermesRunResult):
-                    return output.model_copy(update={"tool_steps": step})
-        raise RuntimeError("Hermes exceeded its tool-call step limit")
+        transcript: dict[str, Any] = {"messages": messages}
+        try:
+            for step in range(1, max_steps + 1):
+                message = self.model.complete(messages, tools)
+                messages.append(message)
+                tool_calls = message.get("tool_calls") or []
+                if not tool_calls:
+                    raise RuntimeError("Hermes ended without committing a decision")
+                for call in tool_calls:
+                    try:
+                        name = call["function"]["name"]
+                        arguments = json.loads(call["function"].get("arguments") or "{}")
+                        output = self._call_tool(name, arguments, previous)
+                    except (KeyError, TypeError, json.JSONDecodeError, ValueError, FileNotFoundError) as exc:
+                        output = {"error": str(exc), "recoverable": True}
+                    messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(output, default=str)})
+                    if isinstance(output, HermesRunResult):
+                        transcript["outcome"] = "succeeded"
+                        transcript["tool_steps"] = step
+                        transcript["gameweek"] = output.decision.gameweek
+                        transcript["season_id"] = output.decision.season_id
+                        transcript["decision_path"] = output.decision.decision_path
+                        return output.model_copy(update={"tool_steps": step})
+            raise RuntimeError("Hermes exceeded its tool-call step limit")
+        except Exception as exc:
+            transcript["outcome"] = "failed"
+            transcript["error"] = redact_secrets(f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            transcript.setdefault("created_at", datetime.now(timezone.utc))
+            transcript.setdefault("gameweek", self._expected_gameweek)
+            transcript.setdefault("season_id", self._expected_season_id)
+            transcript.setdefault("tool_steps", 0)
+            self._write_transcript(transcript)
+
+    def _write_transcript(self, transcript: dict[str, Any]) -> None:
+        stamp = transcript["created_at"].strftime("%Y%m%dT%H%M%S%fZ")
+        path = self.root / "hermes" / "runs" / f"{stamp}.json"
+        write_immutable(path, json_bytes(HermesRunTranscript(**transcript).model_dump(mode="json"), pretty=True))
+
+    def latest_transcript(self) -> "HermesRunTranscript":
+        directory = self.root / "hermes" / "runs"
+        files = sorted(directory.glob("*.json")) if directory.exists() else []
+        if not files:
+            raise FileNotFoundError("Hermes has no run transcripts yet")
+        return HermesRunTranscript.model_validate_json(files[-1].read_text(encoding="utf-8"))
+
+    def decisions(self, limit: int = 50) -> list["HermesDecision"]:
+        directory = self.root / "hermes" / "decisions"
+        files = sorted(directory.glob("*.json")) if directory.exists() else []
+        return [
+            HermesDecision.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in reversed(files[-limit:])
+        ]
 
     def latest_state(self, optional: bool = False) -> HermesState | None:
         directory = self.root / "hermes" / "states"
