@@ -22,6 +22,9 @@ class DashboardPlayer(BaseModel):
     projected_points: float
     is_starter: bool
     is_captain: bool
+    form: float = 0.0
+    selected_by_percent: float = 0.0
+    points_per_game: float = 0.0
 
 
 class DashboardTransfer(BaseModel):
@@ -47,6 +50,9 @@ class DashboardScorecard(BaseModel):
     projected: float
     actual: float
     delta: float
+    best_player_id: int | None = None
+    best_player_name: str | None = None
+    best_player_actual: float | None = None
 
 
 class CurrentDashboard(BaseModel):
@@ -149,11 +155,15 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
     scorecard = None
     try:
         latest_scorecard = DecisionScorer(root).latest()
+        best = max(latest_scorecard.players, key=lambda player: player.actual, default=None)
         scorecard = DashboardScorecard(
             gameweek=latest_scorecard.gameweek,
             projected=latest_scorecard.total_projected,
             actual=latest_scorecard.total_actual,
             delta=round(latest_scorecard.total_actual - latest_scorecard.total_projected, 4),
+            best_player_id=best.element if best else None,
+            best_player_name=best.name if best else None,
+            best_player_actual=best.actual if best else None,
         )
     except FileNotFoundError:
         pass
@@ -202,4 +212,7 @@ def _dashboard_player(
         projected_points=round(projected_points, 4),
         is_starter=is_starter,
         is_captain=is_captain,
+        form=round(player.form, 4),
+        selected_by_percent=round(player.selected_by_percent, 4),
+        points_per_game=round(player.points_per_game, 4),
     )

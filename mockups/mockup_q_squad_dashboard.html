@@ -92,6 +92,21 @@
   .box.top { top: 0; border-top: 0; } .box.bottom { bottom: 0; border-bottom: 0; }
   .player { position: absolute; z-index: 2; width: 104px; padding: 7px 6px 6px; border: 2px solid #fffdf9; border-radius: 11px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; opacity: 0; animation: pill-appear .7s ease forwards; animation-delay: var(--delay, 0s); }
   .player:hover { z-index: 5; box-shadow: 0 9px 17px rgba(78, 105, 84, .28); transform: translate(-50%, -50%) scale(1.08) rotate(-2deg); }
+  .player.best-performer { animation: best-flash 1.6s ease 3; }
+  @keyframes best-flash {
+    0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, .9); }
+    50% { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  }
+  .player-tip { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); width: 158px; z-index: 20; background: #fffdf9; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; box-shadow: 0 10px 24px rgba(42, 62, 47, .22); pointer-events: none; }
+  .player-tip .tip-name { font-size: 12px; font-weight: 800; color: var(--ink); }
+  .player-tip .tip-club { font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+  .player-tip .tip-row { display: flex; justify-content: space-between; font-size: 10.5px; padding: 2.5px 0; border-top: 1px solid var(--line); color: var(--ink); }
+  .player-tip .tip-row span { color: var(--muted); }
+  .player-tip .tip-row b { font-family: "SFMono-Regular", Consolas, monospace; font-weight: 800; color: var(--green); }
+  @media (prefers-reduced-motion: reduce) {
+    .player.best-performer { animation: none; }
+  }
   @keyframes pill-appear {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -272,9 +287,31 @@
     return badge;
   }
 
+  function createPlayerTip(player, team) {
+    const tip = document.createElement("div");
+    tip.className = "player-tip";
+    tip.setAttribute("hidden", "");
+    const rows = [
+      ["Price", `\u00a3${(player.cost / 10).toFixed(1)}m`],
+      ["Form", player.form ? player.form.toFixed(1) : "0.0"],
+      ["Ownership", `${player.selected_by_percent.toFixed(1)}%`],
+      ["Projected", `${player.projected_points.toFixed(1)} pts`],
+    ];
+    const clubLine = team ? team.short_name : player.club;
+    tip.innerHTML = `<div class="tip-name">${player.name}</div><div class="tip-club">${clubLine} \u00b7 ${player.position}</div>`;
+    rows.forEach(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "tip-row";
+      row.innerHTML = `<span>${label}</span><b>${value}</b>`;
+      tip.append(row);
+    });
+    return tip;
+  }
+
   function createPlayerPill(player, teams, left, top, delays) {
     const pill = document.createElement("div");
     pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
+    pill.dataset.pid = player.id;
     pill.style.left = `${left}%`;
     pill.style.top = `${top}%`;
     pill.style.transform = "translate(-50%, -50%)";
@@ -295,6 +332,11 @@
     name.textContent = player.name;
     inner.append(name);
     pill.append(inner);
+    const team = teams.get(String(player.club_id));
+    const tip = createPlayerTip(player, team);
+    pill.append(tip);
+    pill.addEventListener("mouseenter", () => tip.removeAttribute("hidden"));
+    pill.addEventListener("mouseleave", () => tip.setAttribute("hidden", ""));
     return pill;
   }
 
@@ -397,6 +439,12 @@
     note.className = "score-note";
     note.textContent = `GW${dashboard.scorecard.gameweek} scored decision \u00b7 projected ${dashboard.scorecard.projected.toFixed(1)} \u00b7 actual ${dashboard.scorecard.actual.toFixed(1)}`;
     container.replaceChildren(score, note);
+    if (dashboard.scorecard.best_player_id) {
+      setTimeout(() => {
+        const pill = document.querySelector(`.player[data-pid="${dashboard.scorecard.best_player_id}"]`);
+        if (pill) pill.classList.add("best-performer");
+      }, 9500);
+    }
   }
 
   function renderDecisionPoints(explanation) {
