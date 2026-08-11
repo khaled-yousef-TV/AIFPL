@@ -44,6 +44,7 @@ Backend optional:
 - `AIFPL_TELEGRAM_ENABLED`, `AIFPL_TELEGRAM_BOT_TOKEN`, and `AIFPL_TELEGRAM_CHAT_ID`: enable Telegram deadline notifications.
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
+- `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. Leave unset locally to keep dev runs cheap.
 
 Frontend required:
 
