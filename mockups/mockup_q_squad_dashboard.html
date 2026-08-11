@@ -100,6 +100,35 @@
   .player.gk { background: #efd49a; } .player.def { background: #b7d7c1; } .player.mid { background: #b9d2e2; } .player.fwd { background: #e9b9a5; }
   .player.captain { background: #f4e6a1; border-color: #fffdf9; outline: 3px solid rgba(228, 194, 107, .6); }
   .badge { position: absolute; top: -8px; right: -8px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 9px; font-weight: 900; }
+  .pill-inner { display: flex; flex-direction: column; align-items: center; width: 100%; }
+  .player .club-badge, .player .player-name, .player .points,
+  .bench-top .club-badge, .bench-top strong, .bench-player small {
+    opacity: 0;
+    animation: pill-reveal .5s cubic-bezier(.2, 1.3, .5, 1) forwards;
+  }
+  .player .club-badge { animation-delay: var(--delay, 0s); }
+  .player .player-name { animation-delay: calc(var(--delay, 0s) + .22s); }
+  .player .points { animation-delay: calc(var(--delay, 0s) + .44s); }
+  .bench-top .club-badge { animation-delay: calc(var(--delay, 0s) + .2s); }
+  .bench-top strong { animation-delay: calc(var(--delay, 0s) + .4s); }
+  .bench-player small { animation-delay: calc(var(--delay, 0s) + .6s); }
+  @keyframes pill-reveal {
+    from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
+  .player .badge { animation: badge-pop .45s cubic-bezier(.2, 1.6, .5, 1) calc(var(--delay, 0s) + .1s) backwards; }
+  @keyframes badge-pop {
+    from { transform: scale(0) rotate(-120deg); }
+    to { transform: scale(1) rotate(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .player .club-badge, .player .player-name, .player .points,
+    .bench-top .club-badge, .bench-top strong, .bench-player small {
+      opacity: 1;
+      animation: none;
+    }
+    .player .badge { animation: none; }
+  }
   .p1 { left: 50%; top: 12%; transform: translate(-50%, -50%); } .p2 { left: 18%; top: 35%; transform: translate(-50%, -50%); } .p3 { left: 41%; top: 37%; transform: translate(-50%, -50%); } .p4 { left: 65%; top: 37%; transform: translate(-50%, -50%); } .p5 { left: 87%; top: 35%; transform: translate(-50%, -50%); }
   .p6 { left: 14%; top: 65%; transform: translate(-50%, -50%); } .p7 { left: 37%; top: 66%; transform: translate(-50%, -50%); } .p8 { left: 61%; top: 66%; transform: translate(-50%, -50%); } .p9 { left: 84%; top: 65%; transform: translate(-50%, -50%); } .p10 { left: 50%; top: 88%; transform: translate(-50%, -50%); }
   .bench { align-self: flex-start; width: 118px; min-height: 0; flex: 0 0 118px; padding: 11px 10px; border: 1px dashed #a8bd9f; border-radius: 11px; background: rgba(255,255,255,.55); }
@@ -241,27 +270,31 @@
     return badge;
   }
 
-  function createPlayerPill(player, teams, left, top) {
+  function createPlayerPill(player, teams, left, top, delay) {
     const pill = document.createElement("div");
     pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
     pill.style.left = `${left}%`;
     pill.style.top = `${top}%`;
     pill.style.transform = "translate(-50%, -50%)";
+    pill.style.setProperty("--delay", `${delay}s`);
+    const inner = document.createElement("div");
+    inner.className = "pill-inner";
     if (player.is_captain) {
       const captain = document.createElement("span");
       captain.className = "badge";
       captain.textContent = "C";
       pill.append(captain);
     }
-    pill.append(createClubBadge(player, teams));
+    inner.append(createClubBadge(player, teams));
     const name = document.createElement("span");
     name.className = "player-name";
     name.textContent = player.name;
-    pill.append(name);
+    inner.append(name);
     const points = document.createElement("span");
     points.className = "points";
     points.textContent = `${player.projected_points.toFixed(1)} pts`;
-    pill.append(points);
+    inner.append(points);
+    pill.append(inner);
     return pill;
   }
 
@@ -269,22 +302,26 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
+    let waveBase = 0.25;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
       const players = starters.filter(player => player.position === position);
       const slots = slotsFor(position, players.length);
       players.forEach((player, index) => {
         const slot = slots[index] || slots.at(-1);
-        container.append(createPlayerPill(player, teams, slot[0], slot[1]));
+        container.append(createPlayerPill(player, teams, slot[0], slot[1], waveBase + index * 0.15));
       });
+      waveBase += 0.4;
     });
   }
 
   function renderBench(dashboard, teams) {
     const container = document.getElementById("bench-players");
     container.replaceChildren();
-    dashboard.players.filter(player => !player.is_starter).forEach(player => {
+    const benchDelay = 0.25 + 4 * 0.4 + 0.3;
+    dashboard.players.filter(player => !player.is_starter).forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "bench-player";
+      row.style.setProperty("--delay", `${benchDelay + index * 0.2}s`);
       const top = document.createElement("div");
       top.className = "bench-top";
       top.append(createClubBadge(player, teams));
