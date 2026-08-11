@@ -27,7 +27,7 @@
   }
   button { font: inherit; }
   .app {
-    width: min(1380px, 100%);
+    width: min(1600px, 100%);
     margin: auto;
     overflow: hidden;
     border: 1px solid #c8c5cd;
@@ -90,16 +90,16 @@
   .circle { position: absolute; left: 50%; top: 50%; width: 19%; aspect-ratio: 1; border: 2px solid rgba(75, 126, 91, .58); border-radius: 50%; transform: translate(-50%, -50%); }
   .box { position: absolute; left: 31%; width: 38%; height: 16%; border: 2px solid rgba(75, 126, 91, .58); }
   .box.top { top: 0; border-top: 0; } .box.bottom { bottom: 0; border-bottom: 0; }
-  .player { position: absolute; z-index: 2; width: 84px; padding: 5px 4px 4px; border: 2px solid #fffdf9; border-radius: 9px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; }
+  .player { position: absolute; z-index: 2; width: 104px; padding: 7px 6px 6px; border: 2px solid #fffdf9; border-radius: 11px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; }
   .player:hover { z-index: 5; box-shadow: 0 9px 17px rgba(78, 105, 84, .28); transform: translate(-50%, -50%) scale(1.08) rotate(-2deg); }
-  .club-badge { display: grid; width: 22px; height: 22px; margin: 0 auto 2px; place-items: center; overflow: hidden; border: 1px solid #d9e2d5; border-radius: 50%; background: #fffdf9; }
-  .club-badge img { display: block; width: 18px; height: 18px; object-fit: contain; }
-  .club-code { color: var(--green); font-size: 7px; font-weight: 900; letter-spacing: -.03em; }
-  .player .player-name { display: block; min-height: 19px; overflow: visible; font-size: 9px; font-weight: 700; line-height: 1.05; overflow-wrap: normal; white-space: normal; }
-  .player .points { display: block; margin-top: 2px; color: #527962; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 800; }
+  .club-badge { display: grid; width: 30px; height: 30px; margin: 0 auto 3px; place-items: center; overflow: hidden; border: 1px solid #d9e2d5; border-radius: 50%; background: #fffdf9; }
+  .club-badge img { display: block; width: 26px; height: 26px; object-fit: contain; }
+  .club-code { color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: -.03em; }
+  .player .player-name { display: block; min-height: 24px; overflow: visible; font-size: 11px; font-weight: 700; line-height: 1.05; overflow-wrap: normal; white-space: normal; }
+  .player .points { display: block; margin-top: 3px; color: #527962; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 800; }
   .player.gk { background: #efd49a; } .player.def { background: #b7d7c1; } .player.mid { background: #b9d2e2; } .player.fwd { background: #e9b9a5; }
   .player.captain { background: #f4e6a1; border-color: #fffdf9; outline: 3px solid rgba(228, 194, 107, .6); }
-  .badge { position: absolute; top: -8px; right: -8px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 9px; font-weight: 900; }
+  .badge { position: absolute; top: -10px; right: -10px; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 12px; font-weight: 900; }
   .pill-inner { display: flex; flex-direction: column; align-items: center; width: 100%; }
   .player .club-badge, .player .player-name, .player .points,
   .bench-top .club-badge, .bench-top strong, .bench-player small {
@@ -129,10 +129,10 @@
   }
   .p1 { left: 50%; top: 12%; transform: translate(-50%, -50%); } .p2 { left: 18%; top: 35%; transform: translate(-50%, -50%); } .p3 { left: 41%; top: 37%; transform: translate(-50%, -50%); } .p4 { left: 65%; top: 37%; transform: translate(-50%, -50%); } .p5 { left: 87%; top: 35%; transform: translate(-50%, -50%); }
   .p6 { left: 14%; top: 65%; transform: translate(-50%, -50%); } .p7 { left: 37%; top: 66%; transform: translate(-50%, -50%); } .p8 { left: 61%; top: 66%; transform: translate(-50%, -50%); } .p9 { left: 84%; top: 65%; transform: translate(-50%, -50%); } .p10 { left: 50%; top: 88%; transform: translate(-50%, -50%); }
-  .bench { align-self: flex-start; width: 118px; min-height: 0; flex: 0 0 118px; padding: 11px 10px; border: 1px dashed #a8bd9f; border-radius: 11px; background: rgba(255,255,255,.55); }
+  .bench { align-self: flex-start; width: 150px; min-height: 0; flex: 0 0 150px; padding: 13px 12px; border: 1px dashed #a8bd9f; border-radius: 11px; background: rgba(255,255,255,.55); }
   .bench-title { margin-bottom: 8px; color: var(--green); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-align: center; }
   .bench-player { padding: 8px 5px; border-top: 1px solid #d6e4d0; text-align: center; }
-  .bench-player:first-of-type { border-top: 0; } .bench-top { display: flex; align-items: center; gap: 5px; text-align: left; } .bench-top .club-badge { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; } .bench-top .club-badge img { width: 16px; height: 16px; } .bench-player strong { display: block; font-size: 10px; } .bench-player small { color: var(--muted); font-size: 9px; }
+  .bench-player:first-of-type { border-top: 0; } .bench-top { display: flex; align-items: center; gap: 6px; text-align: left; } .bench-top .club-badge { flex: 0 0 28px; width: 28px; height: 28px; margin: 0; } .bench-top .club-badge img { width: 24px; height: 24px; } .bench-player strong { display: block; font-size: 12px; } .bench-player small { color: var(--muted); font-size: 10.5px; }
   .decision-card { overflow: hidden; }
   .decision-hero { padding: 19px; background: #718b7c; }
   .decision-label { color: #fff4bc; font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
@@ -186,8 +186,8 @@
   }
   @media (max-width: 620px) {
     .top-actions .sync { display: none; } .brand-sub { display: none; } .topbar { padding: 13px 15px; }
-    .headline-copy { font-size: 12px; } .pitch-area { padding: 10px; } .bench { width: 89px; flex-basis: 89px; padding: 8px 5px; }
-    .player { width: 64px; padding: 4px 3px; } .player .club-badge { width: 18px; height: 18px; } .player .club-badge img { width: 15px; height: 15px; } .player .player-name, .player .points { font-size: 8px; }
+    .headline-copy { font-size: 12px; } .pitch-area { padding: 10px; } .bench { width: 110px; flex-basis: 110px; padding: 8px 5px; }
+    .player { width: 76px; padding: 5px 4px; } .player .club-badge { width: 24px; height: 24px; } .player .club-badge img { width: 20px; height: 20px; } .player .player-name { font-size: 9px; } .player .points { font-size: 9px; }
     .side-stack, .bottom-grid { grid-template-columns: 1fr; } .bottom-card { min-height: 0; } .footer { align-items: flex-start; flex-direction: column; }
   }
 </style>
