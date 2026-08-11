@@ -111,7 +111,9 @@
   .decision-label { color: #fff4bc; font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
   .decision-action { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 8px; color: #fffdf9; }
   .decision-action strong { font-size: 29px; letter-spacing: -.05em; } .decision-action span { color: #e0eadf; font-size: 11px; }
-  .decision-copy { margin-top: 11px; color: #eff5ed; font-size: 12px; line-height: 1.55; }
+  .decision-points { margin-top: 11px; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  .decision-points li { position: relative; padding-left: 14px; color: #eff5ed; font-size: 12px; line-height: 1.45; }
+  .decision-points li::before { content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: #f4e6a1; }
   .confidence { margin-top: 16px; }
   .confidence-row { display: flex; justify-content: space-between; color: #f0f5e9; font-size: 10px; font-weight: 700; }
   .confidence-bar { height: 7px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: #9aac9a; }
@@ -145,13 +147,6 @@
   .history i { flex: 1; min-width: 8px; border-radius: 4px 4px 0 0; background: var(--green); opacity: .75; } .history i:nth-child(2n) { background: var(--orange); opacity: .65; }
   .history-labels { display: flex; justify-content: space-between; margin-top: 6px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
   .telegram { display: flex; align-items: center; gap: 11px; padding: 11px; border-radius: 10px; background: #edf7ff; }
-  .reasoning { display: flex; flex-direction: column; gap: 8px; }
-  .reasoning-meta { color: var(--muted); font-size: 10px; margin-bottom: 4px; }
-  .reasoning-step { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: #fbfaf5; }
-  .reasoning-step b { font-size: 11px; color: var(--ink); }
-  .reasoning-step .kind { font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--green); margin-right: 6px; }
-  .reasoning-step .args, .reasoning-step .out { font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; line-height: 1.4; }
-  .reasoning-step .out { color: #527962; }
   .telegram-mark { display: grid; width: 33px; height: 33px; place-items: center; border-radius: 50%; color: white; background: #2a9bd8; font-size: 16px; font-weight: 800; }
   .telegram strong { display: block; font-size: 12px; } .telegram span { display: block; margin-top: 3px; color: #5f8091; font-size: 10px; }
   .footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; color: var(--muted); font-size: 10px; }
@@ -192,7 +187,7 @@
 
       <div class="side-stack">
         <section class="card decision-card">
-          <div class="decision-hero"><div class="decision-label">Hermes recommendation</div><div class="decision-action"><strong id="decision-action">Loading...</strong><span id="decision-model">backend</span></div><p class="decision-copy" id="decision-copy">Loading the committed explanation.</p><div class="confidence"><div class="confidence-row"><span>Projection source</span><span id="projection-status">loading</span></div><div class="confidence-bar"><i id="projection-fill"></i></div></div></div>
+          <div class="decision-hero"><div class="decision-label">Hermes recommendation</div><div class="decision-action"><strong id="decision-action">Loading...</strong><span id="decision-model">backend</span></div><ul class="decision-points" id="decision-points"><li>Loading the committed explanation.</li></ul><div class="confidence"><div class="confidence-row"><span>Projection source</span><span id="projection-status">loading</span></div><div class="confidence-bar"><i id="projection-fill"></i></div></div></div>
           <div class="decision-body"><div class="mini-head">Decision changes</div><div id="transfer-list"><div class="move"><span class="in">Loading transfers...</span></div></div><div class="captain-box"><div class="cap-mark">C</div><div><strong id="captain-name">Captain: loading</strong><span id="captain-detail">Projected points loading</span></div></div></div>
         </section>
         <section class="card horizon"><div class="horizon-head"><h2>Current XI horizon</h2><div class="horizon-total" id="horizon-total">--</div></div><div id="horizon-rows"><div class="horizon-row"><label>--</label><div class="track"><i style="width: 0%"></i></div><b>--</b></div></div></section>
@@ -203,10 +198,6 @@
     <div class="bottom-grid">
       <section class="card bottom-card"><h2>Scorecard</h2><div id="scorecard-content"><div class="score"><strong>--</strong><span>not scored</span></div><p class="score-note">No scored decision is available yet. Scorecards appear after the gameweek completes.</p></div></section>
       <section class="card bottom-card"><h2>Squad state</h2><div class="score"><strong id="bank-value">--</strong><span id="free-transfer-value">--</span></div><p class="score-note" id="squad-state-note">Loading bank and free transfers from Hermes state.</p></section>
-      <section class="card bottom-card" style="grid-column: 1 / -1; min-height: 0;">
-        <h2>How this decision was made</h2>
-        <div id="reasoning-content" class="reasoning"><p class="score-note">Loading Hermes reasoning trace...</p></div>
-      </section>
     </div>
   </section>
 </main>
@@ -380,67 +371,18 @@
     container.replaceChildren(score, note);
   }
 
-  function truncatePreview(text, maxLength) {
-    const value = String(text == null ? "" : text);
-    return value.length > maxLength ? value.slice(0, maxLength) + "\u2026" : value;
-  }
-
-  function renderTranscript(transcript) {
-    const container = document.getElementById("reasoning-content");
+  function renderDecisionPoints(explanation) {
+    const container = document.getElementById("decision-points");
     container.replaceChildren();
-    const meta = document.createElement("div");
-    meta.className = "reasoning-meta";
-    meta.textContent = `run ${transcript.created_at} \u00b7 outcome: ${transcript.outcome} \u00b7 ${transcript.tool_steps} tool step${transcript.tool_steps === 1 ? "" : "s"}${transcript.decision_path ? " \u00b7 " + transcript.decision_path : ""}`;
-    container.append(meta);
-    if (transcript.error) {
-      const errorStep = document.createElement("div");
-      errorStep.className = "reasoning-step";
-      errorStep.innerHTML = `<span class="kind">error</span><b>${truncatePreview(transcript.error, 400)}</b>`;
-      container.append(errorStep);
-    }
-    let step = 0;
-    const lastOutput = {};
-    transcript.messages.forEach(message => {
-      if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
-        message.tool_calls.forEach(call => {
-          step += 1;
-          const fn = call.function || {};
-          const stepElement = document.createElement("div");
-          stepElement.className = "reasoning-step";
-          const argsText = truncatePreview(fn.arguments, 400);
-          stepElement.innerHTML = `<span class="kind">step ${step}</span><b>${fn.name}</b>`;
-          if (argsText) {
-            const args = document.createElement("div");
-            args.className = "args";
-            args.textContent = argsText;
-            stepElement.append(args);
-          }
-          stepElement.dataset.step = step;
-          container.append(stepElement);
-        });
-      } else if (message.role === "tool") {
-        const stepElement = container.querySelector(`[data-step="${step}"]`);
-        if (stepElement) {
-          const out = document.createElement("div");
-          out.className = "out";
-          out.textContent = truncatePreview(message.content, 500);
-          stepElement.append(out);
-        }
-      }
+    const sentences = String(explanation || "")
+      .split(/(?<=[.;:])\s+/)
+      .map(sentence => sentence.trim())
+      .filter(sentence => sentence.length > 0);
+    sentences.forEach(sentence => {
+      const item = document.createElement("li");
+      item.textContent = sentence;
+      container.append(item);
     });
-  }
-
-  async function loadTranscript() {
-    const container = document.getElementById("reasoning-content");
-    try {
-      const response = await fetch(`${apiBase}/hermes/runs/latest`);
-      if (!response.ok) throw new Error(`transcript request failed: ${response.status}`);
-      const transcript = await response.json();
-      renderTranscript(transcript);
-    } catch (error) {
-      container.innerHTML = '<p class="score-note">No reasoning trace available for this run.</p>';
-      console.info("Hermes transcript unavailable.", error);
-    }
   }
 
   function renderDashboard(dashboard, teams) {
@@ -451,7 +393,7 @@
     document.getElementById("lineup-meta").textContent = `${dashboard.formation} \u00b7 ${dashboard.projected_points.toFixed(1)} projected`;
     document.getElementById("decision-action").textContent = dashboard.action.replaceAll("_", " ");
     document.getElementById("decision-model").textContent = dashboard.model;
-    document.getElementById("decision-copy").textContent = dashboard.explanation;
+    renderDecisionPoints(dashboard.explanation);
     document.getElementById("projection-status").textContent = dashboard.projection_available ? "catalog loaded" : "unavailable";
     document.getElementById("projection-fill").style.width = dashboard.projection_available ? "100%" : "0%";
     const captain = dashboard.players.find(player => player.is_captain);
@@ -492,7 +434,6 @@
         const dashboard = await dashboardResponse.json();
         const teams = new Map((await teamsResponse.json()).map(team => [String(team.id), team]));
         renderDashboard(dashboard, teams);
-        loadTranscript();
         return;
       } catch (error) {
         attempts += 1;
