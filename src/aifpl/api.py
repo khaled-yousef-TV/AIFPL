@@ -432,7 +432,7 @@ def scheduler_log() -> dict[str, object]:
 
 @app.get("/debug/env")
 def debug_env() -> dict[str, object]:
-    keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
+    keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "AIFPL_HERMES_AUTO_RUN", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
     return {
         "present": {key: bool(os.environ.get(key)) for key in keys},
         "data_dir": str(data_dir()),
