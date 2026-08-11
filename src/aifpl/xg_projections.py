@@ -7,6 +7,7 @@ from pathlib import Path
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.current_projections import fpl_source_baseline
+from aifpl.transfer_awareness import NEW_CONTEXT_STAT_DECAY, TransferProfile, TransferAwarenessStore
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, write_immutable, write_manifest
 
 
@@ -45,6 +46,7 @@ def xg_xa_blend(
     player: CurrentPlayer, gameweeks_elapsed: int | None = None,
     apply_next_round_availability: bool = True,
     start_probability_override: float | None = None,
+    transfer_profile: TransferProfile | None = None,
 ) -> XgXaProjection:
     if gameweeks_elapsed is not None and gameweeks_elapsed < 1:
         raise ValueError("gameweeks_elapsed must be at least 1")
@@ -62,11 +64,18 @@ def xg_xa_blend(
     if not 0 <= start_probability <= 1:
         raise ValueError("start_probability_override must be within 0..1")
     expected_minutes *= start_probability * availability
+    if transfer_profile is not None:
+        expected_minutes *= transfer_profile.minutes_multiplier
     if player.minutes > 0:
         xg_per_90 = player.expected_goals / player.minutes * 90
         xa_per_90 = player.expected_assists / player.minutes * 90
         xgi_per_90 = player.expected_goal_involvements / player.minutes * 90
         xgc_per_90 = player.expected_goals_conceded / player.minutes * 90
+    elif transfer_profile is not None and transfer_profile.has_prior_stats:
+        xg_per_90 = transfer_profile.prior_goals_per_90 * NEW_CONTEXT_STAT_DECAY
+        xa_per_90 = transfer_profile.prior_assists_per_90 * NEW_CONTEXT_STAT_DECAY
+        xgi_per_90 = xg_per_90 + xa_per_90
+        xgc_per_90 = 0.0
     else:
         xg_per_90 = xa_per_90 = xgi_per_90 = xgc_per_90 = 0.0
     minute_fraction = expected_minutes / 90
@@ -111,7 +120,8 @@ class XgXaProjectionStore:
     def build(self, source_path: Path) -> XgXaProjectionCatalog:
         players = CurrentPlayerCatalogStore(self.root).load(source_path)
         gameweeks_elapsed = elapsed_gameweeks(self.root, source_path, players)
-        projections = [xg_xa_blend(player, gameweeks_elapsed) for player in players]
+        profiles = TransferAwarenessStore(self.root).latest(players)
+        projections = [xg_xa_blend(player, gameweeks_elapsed, transfer_profile=profiles.get(player.id)) for player in players]
         created_at = datetime.now(timezone.utc)
         run_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")
         output_path = self.root / "normalized" / "current" / "xg_xa_projections" / f"{source_path.stem}.{run_id}.{XG_XA_PROJECTION_METHOD}.jsonl"

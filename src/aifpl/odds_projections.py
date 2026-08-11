@@ -12,6 +12,7 @@ from aifpl.odds_matching import FixtureOddsConsensus, FixtureOddsConsensusStore
 from aifpl.xg_projections import elapsed_gameweeks, xg_xa_blend
 from aifpl.player_evidence import PlayerEvidenceStore, predicted_start_probabilities
 from aifpl.market_signals import MarketSignalStore, PlayerPropSignal, TeamCleanSheetSignal
+from aifpl.transfer_awareness import TransferProfile, TransferAwarenessStore
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, verify_lineage, write_immutable, write_manifest
 
 
@@ -59,6 +60,7 @@ def build_odds_adjusted_projections(
     clean_sheet_signals: list[TeamCleanSheetSignal] | None = None,
     player_prop_signals: list[PlayerPropSignal] | None = None,
     player_prop_weight: float = 0.0,
+    transfer_profiles: dict[int, TransferProfile] | None = None,
 ) -> list[OddsAdjustedGameweekProjection]:
     if start_gameweek < 1 or end_gameweek < start_gameweek:
         raise ValueError("gameweek range is invalid")
@@ -90,6 +92,7 @@ def build_odds_adjusted_projections(
                     player, gameweeks_elapsed,
                     apply_next_round_availability=gameweek == start_gameweek,
                     start_probability_override=start_override,
+                    transfer_profile=(transfer_profiles or {}).get(player.id),
                 )
                 base = blend.projected_points
                 participation = blend.expected_minutes / 90
@@ -180,16 +183,21 @@ class OddsProjectionStore:
         prop_weight = float(__import__("os").environ.get("AIFPL_PLAYER_PROP_WEIGHT", "0"))
         if not __import__("math").isfinite(prop_weight) or not 0 <= prop_weight <= 1:
             raise ValueError("AIFPL_PLAYER_PROP_WEIGHT must be a finite value within 0..1")
+        transfer_profiles = TransferAwarenessStore(self.root).latest(players)
         projections = build_odds_adjusted_projections(
             players, fixtures, consensus, start_gameweek, end_gameweek,
             elapsed_gameweeks(self.root, player_path, players),
             start_probabilities,
             clean_signals, prop_signals, prop_weight,
+            transfer_profiles,
         )
         created_at = datetime.now(timezone.utc)
         run_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")
         output_path = self.root / "normalized" / "current" / "odds_projections" / f"gw{start_gameweek}-{end_gameweek}.{run_id}.{ODDS_PROJECTION_METHOD}.jsonl"
         write_immutable(output_path, jsonl_bytes(projections))
+        new_signings = sum(
+            1 for profile in transfer_profiles.values() if profile.is_new_signing
+        )
         coverage_by_gameweek = {
             gameweek: round(
                 sum(row.odds_backed_fixture_count for row in projections if row.gameweek == gameweek)
@@ -210,6 +218,7 @@ class OddsProjectionStore:
             parameters={"start_gameweek": start_gameweek, "end_gameweek": end_gameweek,
                         "gameweeks_elapsed": elapsed_gameweeks(self.root, player_path, players),
                         "odds_win_weight": ODDS_WIN_WEIGHT, "player_prop_weight": prop_weight,
+                        "new_signing_count": new_signings,
                         "evidence_cutoff": evidence_cutoff.isoformat() if evidence_cutoff else None,
                         "max_evidence_age_hours": max_evidence_age,
                         "odds_coverage_by_gameweek": coverage_by_gameweek},
