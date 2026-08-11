@@ -31,7 +31,7 @@ services:
       - key: HERMES_MODEL
         value: deepseek-v4-flash
       - key: AIFPL_HERMES_AUTO_RUN
-        value: "false"
+        value: "true"
       - key: AIFPL_RENDER_BOOTSTRAP
         value: "true"
       - key: AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK

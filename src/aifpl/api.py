@@ -422,6 +422,14 @@ def bootstrap_log() -> dict[str, object]:
     return {"exists": True, "log": log_path.read_text(encoding="utf-8", errors="replace")[-8000:]}
 
 
+@app.get("/debug/scheduler-log")
+def scheduler_log() -> dict[str, object]:
+    log_path = Path("/tmp/aifpl-scheduler.log")
+    if not log_path.is_file():
+        return {"exists": False, "log": ""}
+    return {"exists": True, "log": log_path.read_text(encoding="utf-8", errors="replace")[-8000:]}
+
+
 @app.get("/debug/env")
 def debug_env() -> dict[str, object]:
     keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
