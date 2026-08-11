@@ -3,7 +3,7 @@ set -eu
 
 data_dir="${AIFPL_DATA_DIR:-data}"
 decision_dir="$data_dir/hermes/decisions"
-projection_dir="$data_dir/normalized/current/odds_projections"
+marker="$data_dir/.deployed-commit"
 
 case "${AIFPL_RENDER_BOOTSTRAP:-true}" in
   true|1|yes) ;;
@@ -13,36 +13,24 @@ case "${AIFPL_RENDER_BOOTSTRAP:-true}" in
     ;;
 esac
 
-latest_decision=""
+has_decision=false
 if [ -d "$decision_dir" ]; then
   for decision in "$decision_dir"/*.json; do
-    [ -f "$decision" ] || continue
-    name="$(basename "$decision")"
-    if [ -z "$latest_decision" ] || [ "$name" \> "$latest_decision" ]; then
-      latest_decision="$name"
+    if [ -f "$decision" ]; then
+      has_decision=true
+      break
     fi
   done
 fi
 
-latest_projection=""
-if [ -d "$projection_dir" ]; then
-  for projection in "$projection_dir"/*.jsonl; do
-    [ -f "$projection" ] || continue
-    name="$(basename "$projection")"
-    stamp="$(printf '%s' "$name" | sed -E 's/^gw[0-9]+-[0-9]+\.([^.]+)\..*/\1/')"
-    if [ -z "$latest_projection" ] || [ "$stamp" \> "$latest_projection" ]; then
-      latest_projection="$stamp"
-    fi
-  done
-fi
-
-if [ -n "$latest_decision" ] && { [ -z "$latest_projection" ] || [ "$latest_decision" \> "$latest_projection" ]; }; then
-  echo "AIFPL data is current (decision $latest_decision newer than projections); skipping bootstrap."
+current_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
+if [ -n "$current_commit" ] && [ -f "$marker" ] && [ "$(cat "$marker")" = "$current_commit" ] && [ "$has_decision" = "true" ]; then
+  echo "AIFPL data is current for commit $current_commit; skipping bootstrap."
   exit 0
 fi
 
-if [ -n "$latest_decision" ]; then
-  echo "Stale projections ($latest_projection) newer than decision ($latest_decision); re-running refresh and Hermes..."
+if [ "$has_decision" = "true" ]; then
+  echo "Code or data changed (commit ${current_commit:-unknown}); re-running refresh and Hermes..."
 else
   echo "Initializing AIFPL data on the persistent Render disk..."
 fi
@@ -52,4 +40,8 @@ aifpl refresh-current-data \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
 aifpl hermes-run
+if [ -n "$current_commit" ]; then
+  mkdir -p "$data_dir"
+  printf '%s\n' "$current_commit" > "$marker"
+fi
 echo "Bootstrap complete."
