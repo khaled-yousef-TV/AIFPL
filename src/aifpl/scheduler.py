@@ -182,9 +182,18 @@ class DeadlineScheduler:
     def run_forever(self) -> None:
         while True:
             try:
-                self.tick()
-            except SchedulerTickError:
-                pass
+                result = self.tick()
+                print(
+                    f"[{result.checked_at.isoformat()}] tick={result.status} "
+                    f"event={result.event} deadline={result.deadline} "
+                    f"refresh_at={result.refresh_at} forced={result.forced} "
+                    f"hermes={result.hermes_decision_path or result.hermes_error or 'skipped'}",
+                    flush=True,
+                )
+            except SchedulerTickError as exc:
+                print(f"[{exc.result.checked_at.isoformat()}] tick={exc.result.status} error={exc.result.error}", flush=True)
+            except Exception as exc:  # pragma: no cover - defensive heartbeat
+                print(f"[tick] unexpected error: {type(exc).__name__}: {exc}", flush=True)
             time.sleep(self.settings.poll_seconds)
 
     def _telegram_notification_path(self, season_id: str, event: int) -> Path:
