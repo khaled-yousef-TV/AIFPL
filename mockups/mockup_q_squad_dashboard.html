@@ -216,7 +216,6 @@
           <div class="decision-body"><div class="mini-head">Decision changes</div><div id="transfer-list"><div class="move"><span class="in">Loading transfers...</span></div></div><div class="captain-box"><div class="cap-mark">C</div><div><strong id="captain-name">Captain: loading</strong><span id="captain-detail">Projected points loading</span></div></div></div>
         </section>
         <section class="card horizon"><div class="horizon-head"><h2>Current XI horizon</h2><div class="horizon-total" id="horizon-total">--</div></div><div id="horizon-rows"><div class="horizon-row"><label>--</label><div class="track"><i style="width: 0%"></i></div><b>--</b></div></div></section>
-        <section class="card health"><div class="health-head"><h2>Decision inputs</h2><span class="healthy" id="input-status">LOADING</span></div><div id="input-list"><div class="health-item"><i></i>Loading backend inputs<strong>...</strong></div></div></section>
       </div>
     </div>
 
@@ -379,19 +378,6 @@
     document.getElementById("horizon-total").textContent = dashboard.horizon.length ? dashboard.projected_points.toFixed(1) : "--";
   }
 
-  function renderInputs(dashboard) {
-    const container = document.getElementById("input-list");
-    container.replaceChildren();
-    dashboard.inputs.forEach(input => {
-      const row = document.createElement("div");
-      row.className = "health-item";
-      row.innerHTML = `<i></i>${input.name}<strong>${input.status}</strong>`;
-      row.title = input.detail;
-      container.append(row);
-    });
-    document.getElementById("input-status").textContent = dashboard.inputs.every(input => input.status === "ready") ? "ALL READY" : "CHECK";
-  }
-
   function renderScorecard(dashboard) {
     const container = document.getElementById("scorecard-content");
     if (!dashboard.scorecard) return;
@@ -439,7 +425,6 @@
     renderBench(dashboard, teams);
     renderTransfers(dashboard);
     renderHorizon(dashboard);
-    renderInputs(dashboard);
     renderScorecard(dashboard);
   }
 
