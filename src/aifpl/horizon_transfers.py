@@ -52,9 +52,14 @@ def plan_horizon_transfers(
     decision_hit_penalty: float = 4.0,
     preferred_player_ids: set[int] | None = None,
     differential_appetite: float = 0.0,
+    pre_season: bool = False,
 ) -> HorizonTransferPlan:
-    if decision_hit_penalty < 4:
-        raise ValueError("Decision hit penalty cannot be lower than the actual four-point hit")
+    if pre_season:
+        effective_hit_penalty = 0.0
+    else:
+        if decision_hit_penalty < 4:
+            raise ValueError("Decision hit penalty cannot be lower than the actual four-point hit")
+        effective_hit_penalty = decision_hit_penalty
     if not 0 <= differential_appetite <= 1:
         raise ValueError("differential_appetite must be within 0..1")
     gameweeks = sorted({row.gameweek for row in rows})
@@ -170,7 +175,7 @@ def plan_horizon_transfers(
         free = model.new_int_var(0, 5, f"free_transfers_{gameweek}")
         free_transfers.append(free)
         if week_index == 0:
-            model.add(free == state.free_transfers)
+            model.add(free == (5 if pre_season else state.free_transfers))
         excess = model.new_int_var(0, 15, f"excess_transfers_{gameweek}")
         model.add_max_equality(excess, [transfers - free, 0])
         excess_transfers.append(excess)
@@ -205,7 +210,7 @@ def plan_horizon_transfers(
     free_by_week = [free_transfers[0]] + [free_transfers[index * 2] for index in range(1, len(gameweeks))]
 
     # Seed a legal hold strategy so a time-limited solve never returns a plan worse than doing nothing.
-    held_free_transfers = state.free_transfers
+    held_free_transfers = 5 if pre_season else state.free_transfers
     initial_hints: dict[int, tuple[set[int], set[int], int]] = {}
     if not current_ids:
         week_one = [row for row in rows if row.gameweek == gameweeks[0]]
@@ -257,7 +262,7 @@ def plan_horizon_transfers(
             captain[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * scale)
             for player_id in player_ids
         )
-        objective.append(-excess_transfers[week_index] * round(decision_hit_penalty * scale))
+        objective.append(-excess_transfers[week_index] * round(effective_hit_penalty * scale))
         objective.append(-transfer_counts[week_index])
         if preferred_player_ids:
             objective.extend(selected[player_id, week_index] * 100 for player_id in preferred_player_ids if player_id in player_ids)
@@ -281,7 +286,7 @@ def plan_horizon_transfers(
         incoming_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(incoming[player_id, week_index])]
         outgoing_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(outgoing[player_id, week_index])]
         projected = sum(player.projected_points for player in lineup) + captain_player.projected_points
-        hit = solver.value(excess_transfers[week_index]) * 4
+        hit = 0 if pre_season else solver.value(excess_transfers[week_index]) * 4
         fixture_total = sum(row.fixture_count for row in rows if row.gameweek == gameweek)
         odds_total = sum(row.odds_backed_fixture_count for row in rows if row.gameweek == gameweek)
         plans.append(HorizonGameweekPlan(

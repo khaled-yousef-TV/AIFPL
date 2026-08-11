@@ -185,11 +185,13 @@ class HermesDecisionBackend:
     def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> HorizonTransferPlan:
         rows = self._horizon_rows(target_gameweek, strategy.planning_horizon)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
+        pre_season = target_gameweek == 1
         return plan_horizon_transfers(rows, HorizonSquadState(
             player_ids=state.player_ids, bank=state.bank, free_transfers=state.free_transfers,
             purchase_prices=state.purchase_prices,
         ), decision_hit_penalty=4 + strategy.hit_aversion * 4 + (1 - strategy.risk_tolerance) * 2,
-            preferred_player_ids=preferred, differential_appetite=strategy.differential_appetite)
+            preferred_player_ids=preferred, differential_appetite=strategy.differential_appetite,
+            pre_season=pre_season)
 
     def hold_week(self, state: HermesSquadState, horizon: int, target_gameweek: int) -> dict[str, Any]:
         rows = self._horizon_rows(target_gameweek, horizon)
@@ -403,7 +405,11 @@ class HermesManager:
             target_gameweek = self._expected_gameweek or previous.gameweek + 1
             self._horizon = self.backend.horizon_plan(previous.squad, self._strategy, target_gameweek)
             self._hold = self.backend.hold_week(previous.squad, self._strategy.planning_horizon, target_gameweek)
-            return _horizon_summary(self._horizon)
+            summary = _horizon_summary(self._horizon)
+            if target_gameweek == 1:
+                summary["pre_season"] = True
+                summary["note"] = "Pre-season: all transfers are free; hit costs shown are informational."
+            return summary
         if name == "commit_decision":
             return self._commit(arguments, previous)
         raise ValueError(f"Unknown Hermes tool: {name}")

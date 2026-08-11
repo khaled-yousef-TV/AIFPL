@@ -59,3 +59,24 @@ def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     assert plan.solver_status in ("OPTIMAL", "FEASIBLE")
     assert {player.player_id for player in first.resulting_squad} >= {1, 2, 13, 14, 15}
     assert all(week.gameweek == gameweek for week, gameweek in zip(plan.gameweeks, (1, 2, 3)))
+
+
+def test_pre_season_planning_uses_free_transfers() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        pre_season=True,
+    )
+
+    assert plan.total_hit_cost == 0
+    assert plan.total_net_projected_points == plan.total_projected_points
+    assert all(week.hit_cost == 0 for week in plan.gameweeks)
+
+
+def test_pre_season_allows_penalty_below_four() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        decision_hit_penalty=0.0, pre_season=True,
+    )
+
+    assert plan.total_hit_cost == 0
+    assert plan.solver_status != "HOLD_FALLBACK"
