@@ -301,8 +301,8 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    const benchEnd = 0.5 + 4 * 0.8;
-    const phaseStep = 0.7;
+    const phaseStep = 1.1;
+    const benchEnd = 0.5 + 4 * phaseStep;
     const phaseGap = 1.4;
     const pointsBase = benchEnd + 0.8;
     const badgeBase = pointsBase + 11 * phaseStep + phaseGap;
@@ -330,7 +330,7 @@
     dashboard.players.filter(player => !player.is_starter).forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "bench-player";
-      row.style.setProperty("--delay", `${benchDelay + index * 0.8}s`);
+      row.style.setProperty("--delay", `${benchDelay + index * 1.1}s`);
       const top = document.createElement("div");
       top.className = "bench-top";
       top.append(createClubBadge(player, teams));
