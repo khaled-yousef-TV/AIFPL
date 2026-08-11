@@ -294,23 +294,19 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    const phaseStep = 0.7;
-    const benchEnd = 0.4 + 4 * phaseStep;
-    const phaseGap = 0.8;
-    const badgeBase = benchEnd + 0.6;
-    const nameBase = badgeBase + 11 * phaseStep + phaseGap;
-    let positionIndex = 0;
+    const subsEnd = 0.4 + 4 * 0.8;
+    let lineDelay = subsEnd + 0.6;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
       const players = starters.filter(player => player.position === position);
       const slots = slotsFor(position, players.length);
       players.forEach((player, index) => {
         const slot = slots[index] || slots.at(-1);
         container.append(createPlayerPill(player, teams, slot[0], slot[1], {
-          badge: badgeBase + positionIndex * phaseStep,
-          name: nameBase + positionIndex * phaseStep,
+          badge: lineDelay,
+          name: lineDelay,
         }));
-        positionIndex += 1;
       });
+      lineDelay += 1.2;
     });
   }
 
