@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from ortools.sat.python import cp_model
 from pydantic import BaseModel, Field
 
+from aifpl.config import (
+    bank_shortfall_penalty,
+    bench_min_projection,
+    bench_weight,
+    dead_bench_penalty,
+    minimum_bank_tenths,
+)
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
@@ -112,6 +119,8 @@ def plan_horizon_transfers(
     selected: dict[tuple[int, int], cp_model.IntVar] = {}
     starter: dict[tuple[int, int], cp_model.IntVar] = {}
     captain: dict[tuple[int, int], cp_model.IntVar] = {}
+    bench: dict[tuple[int, int], cp_model.IntVar] = {}
+    dead_bench: dict[tuple[int, int], cp_model.IntVar] = {}
     incoming: dict[tuple[int, int], cp_model.IntVar] = {}
     outgoing: dict[tuple[int, int], cp_model.IntVar] = {}
     original_holding: dict[tuple[int, int], cp_model.IntVar] = {}
@@ -120,19 +129,33 @@ def plan_horizon_transfers(
     free_transfers: list[cp_model.IntVar] = []
     excess_transfers: list[cp_model.IntVar] = []
     banks: list[cp_model.IntVar] = []
+    bank_shortfalls: list[cp_model.IntVar] = []
+    dead_bench_excess: list[cp_model.IntVar] = []
     scale = 10_000
+    min_bank = minimum_bank_tenths()
+    bench_floor = bench_min_projection()
+    bench_bonus = bench_weight()
+    shortfall_penalty = bank_shortfall_penalty()
+    dead_penalty = dead_bench_penalty()
 
     for week_index, gameweek in enumerate(gameweeks):
         for player_id in player_ids:
             selected[player_id, week_index] = model.new_bool_var(f"selected_{player_id}_{gameweek}")
             starter[player_id, week_index] = model.new_bool_var(f"starter_{player_id}_{gameweek}")
             captain[player_id, week_index] = model.new_bool_var(f"captain_{player_id}_{gameweek}")
+            bench[player_id, week_index] = model.new_bool_var(f"bench_{player_id}_{gameweek}")
+            dead_bench[player_id, week_index] = model.new_bool_var(f"dead_bench_{player_id}_{gameweek}")
             incoming[player_id, week_index] = model.new_bool_var(f"in_{player_id}_{gameweek}")
             outgoing[player_id, week_index] = model.new_bool_var(f"out_{player_id}_{gameweek}")
             original_holding[player_id, week_index] = model.new_bool_var(f"original_{player_id}_{gameweek}")
             original_outgoing[player_id, week_index] = model.new_bool_var(f"original_out_{player_id}_{gameweek}")
             model.add(starter[player_id, week_index] <= selected[player_id, week_index])
             model.add(captain[player_id, week_index] <= starter[player_id, week_index])
+            model.add(selected[player_id, week_index] == starter[player_id, week_index] + bench[player_id, week_index])
+            model.add(dead_bench[player_id, week_index] <= bench[player_id, week_index])
+            model.add(by_player_gameweek[player_id, gameweek].projected_points >= bench_floor).only_enforce_if(
+                selected[player_id, week_index], dead_bench[player_id, week_index].Not()
+            )
 
             previous = 1 if week_index == 0 and player_id in current_ids else 0 if week_index == 0 else selected[player_id, week_index - 1]
             model.add(incoming[player_id, week_index] >= selected[player_id, week_index] - previous)
@@ -200,6 +223,15 @@ def plan_horizon_transfers(
         purchase_cost = sum(incoming[player_id, week_index] * metadata[player_id].cost for player_id in player_ids)
         model.add(bank == previous_bank + initial_funds + sale_value - purchase_cost)
         banks.append(bank)
+        shortfall = model.new_int_var(0, max(1, min_bank), f"bank_shortfall_{gameweek}")
+        model.add_max_equality(shortfall, [min_bank - bank, 0])
+        bank_shortfalls.append(shortfall)
+        excess = model.new_int_var(0, 4, f"dead_bench_excess_{gameweek}")
+        model.add_max_equality(
+            excess,
+            [sum(dead_bench[player_id, week_index] for player_id in player_ids) - 2, 0],
+        )
+        dead_bench_excess.append(excess)
 
     # Rebuild free-transfer rollover constraints without duplicate week variables.
     for week_index in range(1, len(gameweeks)):
@@ -262,8 +294,14 @@ def plan_horizon_transfers(
             captain[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * scale)
             for player_id in player_ids
         )
+        objective.extend(
+            bench[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * bench_bonus * scale)
+            for player_id in player_ids
+        )
         objective.append(-excess_transfers[week_index] * round(effective_hit_penalty * scale))
         objective.append(-transfer_counts[week_index])
+        objective.append(-bank_shortfalls[week_index] * round(shortfall_penalty * scale))
+        objective.append(-dead_bench_excess[week_index] * round(dead_penalty * scale))
         if preferred_player_ids:
             objective.extend(selected[player_id, week_index] * 100 for player_id in preferred_player_ids if player_id in player_ids)
         objective.extend(
@@ -299,7 +337,9 @@ def plan_horizon_transfers(
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
     hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids) if current_ids else []
-    if sum(plan.net_projected_points for plan in plans) < sum(plan.net_projected_points for plan in hold_plans):
+    if pre_season and hold_plans and _hold_plans_violate_robustness(hold_plans, min_bank, bench_floor, by_player_gameweek):
+        hold_plans = []
+    if hold_plans and sum(plan.net_projected_points for plan in plans) < sum(plan.net_projected_points for plan in hold_plans):
         plans = hold_plans
         solver_status = "HOLD_FALLBACK"
     else:
@@ -310,6 +350,25 @@ def plan_horizon_transfers(
         total_net_projected_points=round(sum(plan.net_projected_points for plan in plans), 4),
         solver_status=solver_status, methodology=rows[0].methodology,
     )
+
+
+def _hold_plans_violate_robustness(
+    hold_plans: list[HorizonGameweekPlan], min_bank: int, bench_floor: float,
+    by_player_gameweek: dict[tuple[int, int], OddsAdjustedGameweekProjection],
+) -> bool:
+    for plan in hold_plans:
+        if plan.bank_after < min_bank:
+            return True
+        xi_ids = {player.player_id for player in plan.starting_xi}
+        dead = sum(
+            1
+            for player in plan.resulting_squad
+            if player.player_id not in xi_ids
+            and by_player_gameweek[(player.player_id, plan.gameweek)].projected_points < bench_floor
+        )
+        if dead > 2:
+            return True
+    return False
 
 
 def _hold_plans(

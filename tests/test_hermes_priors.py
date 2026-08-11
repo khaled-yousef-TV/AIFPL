@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 
 import pytest
 
+import aifpl.hermes as hermes_module
 from aifpl.current import CurrentPlayerCatalogStore
-from aifpl.hermes import HermesDecisionBackend, HermesManager
+from aifpl.hermes import HermesDecisionBackend, HermesManager, HermesStrategy
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.priors import PlayerPrior, apply_priors, validate_prior_adjustment
 from aifpl.snapshots import SnapshotStore
@@ -129,6 +130,35 @@ def test_prior_changes_optimized_squad(tmp_path) -> None:
     adjusted_ids = {player.player_id for player in adjusted.players}
     assert 8 in baseline_ids
     assert 8 not in adjusted_ids or adjusted.projected_points < baseline.projected_points
+
+
+def test_initial_squad_uses_empty_squad_horizon_plan(tmp_path, monkeypatch) -> None:
+    backend = FakePriorsBackend(tmp_path)
+    strategy = HermesStrategy(
+        risk_tolerance=0.6, hit_aversion=0.5, differential_appetite=0.4,
+        planning_horizon=3, rationale="Test strategy.",
+    )
+    captured = {}
+    original = hermes_module.plan_horizon_transfers
+
+    def capture_plan(rows, state, **kwargs):
+        plan = original(rows, state, **kwargs)
+        captured["state"] = state
+        captured["pre_season"] = kwargs["pre_season"]
+        captured["plan"] = plan
+        return plan
+
+    monkeypatch.setattr(hermes_module, "plan_horizon_transfers", capture_plan)
+
+    squad, gameweek = backend.initial_squad(strategy)
+
+    opening = captured["plan"].gameweeks[0]
+    assert captured["state"].player_ids == []
+    assert captured["state"].bank == 0
+    assert captured["pre_season"] is True
+    assert gameweek == opening.gameweek
+    assert squad.players == opening.resulting_squad
+    assert squad.bank == opening.bank_after
 
 
 def test_full_run_records_priors_in_decision(tmp_path) -> None:

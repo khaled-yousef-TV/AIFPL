@@ -63,7 +63,7 @@ def test_cli_exposes_documented_commands() -> None:
         "compare-backtests",
         "build-player-evidence", "player-evidence",
         "fetch-event-markets", "build-market-signals",
-        "hermes-run", "hermes-state", "hermes-decision",
+        "hermes-run", "hermes-reinitialize-opening-squad", "hermes-state", "hermes-decision",
         "hermes-migrate-state",
     ):
         assert command in result.stdout

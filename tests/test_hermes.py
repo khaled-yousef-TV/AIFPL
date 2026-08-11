@@ -48,6 +48,26 @@ def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypa
     assert manager.latest_state().version == 1
 
 
+def test_hermes_reinitializes_a_legacy_opening_state_once(tmp_path, monkeypatch) -> None:
+    model = FakeModel()
+    manager = HermesManager(tmp_path, model=model, backend=FakeBackend())
+    initial = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    legacy = manager.latest_state().model_copy(update={"initialization_method": ""})
+    monkeypatch.setattr(manager, "latest_state", lambda optional=False: legacy)
+
+    reinitialized = manager.reinitialize_opening_squad(1, "2026-27")
+
+    assert reinitialized is not None
+    assert reinitialized.decision.action == "adopt_initial"
+    assert model.step == 3  # Reinitialization does not call the LLM.
+    reloaded = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
+    assert reloaded.latest_state().version == 2
+    assert reloaded.latest_state().initialization_method == "horizon_v1"
+    assert len(reloaded.decisions()) == 2
+    assert reloaded.reinitialize_opening_squad(1, "2026-27") is None
+    assert (tmp_path / initial.decision.decision_path).exists()
+
+
 def test_context_includes_scored_decision_history(tmp_path) -> None:
     from aifpl.artifacts import json_bytes, write_immutable
     from aifpl.hermes import HermesDecisionBackend
