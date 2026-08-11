@@ -96,17 +96,15 @@
   .club-badge img { display: block; width: 26px; height: 26px; object-fit: contain; }
   .club-code { color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: -.03em; }
   .player .player-name { display: block; min-height: 24px; overflow: visible; font-size: 11px; font-weight: 700; line-height: 1.05; overflow-wrap: normal; white-space: normal; }
-  .player .points { display: block; margin-top: 3px; color: #527962; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 800; }
   .player.gk { background: #efd49a; } .player.def { background: #b7d7c1; } .player.mid { background: #b9d2e2; } .player.fwd { background: #e9b9a5; }
   .player.captain { background: #f4e6a1; border-color: #fffdf9; outline: 3px solid rgba(228, 194, 107, .6); }
   .badge { position: absolute; top: -10px; right: -10px; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 12px; font-weight: 900; }
   .pill-inner { display: flex; flex-direction: column; align-items: center; width: 100%; }
-  .player .club-badge, .player .player-name, .player .points,
+  .player .club-badge, .player .player-name,
   .bench-top .club-badge, .bench-top strong, .bench-player small {
     opacity: 0;
-    animation: pill-reveal .75s cubic-bezier(.25, 1.4, .45, 1) forwards;
+    animation: pill-reveal .7s cubic-bezier(.25, 1.4, .45, 1) forwards;
   }
-  .player .points { animation-delay: var(--delay-pts, 0s); }
   .player .club-badge { animation-delay: var(--delay-badge, 0s); }
   .player .player-name { animation-delay: var(--delay-name, 0s); }
   .bench-player small, .bench-top .club-badge, .bench-top strong { animation-delay: var(--delay, 0s); }
@@ -114,7 +112,7 @@
     from { opacity: 0; transform: translateY(20px) scale(.8); }
     to { opacity: 1; transform: none; }
   }
-  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay-name, 0s) + .3s) backwards; }
+  .player .badge { animation: badge-pop .6s cubic-bezier(.2, 1.8, .4, 1) calc(var(--delay-name, 0s) + .2s) backwards; }
   @keyframes badge-pop {
     from { transform: scale(0) rotate(-180deg); }
     to { transform: scale(1) rotate(0); }
@@ -273,7 +271,6 @@
     pill.style.left = `${left}%`;
     pill.style.top = `${top}%`;
     pill.style.transform = "translate(-50%, -50%)";
-    pill.style.setProperty("--delay-pts", `${delays.points}s`);
     pill.style.setProperty("--delay-badge", `${delays.badge}s`);
     pill.style.setProperty("--delay-name", `${delays.name}s`);
     const inner = document.createElement("div");
@@ -289,10 +286,6 @@
     name.className = "player-name";
     name.textContent = player.name;
     inner.append(name);
-    const points = document.createElement("span");
-    points.className = "points";
-    points.textContent = `${player.projected_points.toFixed(1)} pts`;
-    inner.append(points);
     pill.append(inner);
     return pill;
   }
@@ -301,11 +294,10 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    const phaseStep = 0.8;
+    const phaseStep = 0.7;
     const benchEnd = 0.4 + 4 * phaseStep;
-    const phaseGap = 1.0;
-    const pointsBase = benchEnd + 0.6;
-    const badgeBase = pointsBase + 11 * phaseStep + phaseGap;
+    const phaseGap = 0.8;
+    const badgeBase = benchEnd + 0.6;
     const nameBase = badgeBase + 11 * phaseStep + phaseGap;
     let positionIndex = 0;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
@@ -314,7 +306,6 @@
       players.forEach((player, index) => {
         const slot = slots[index] || slots.at(-1);
         container.append(createPlayerPill(player, teams, slot[0], slot[1], {
-          points: pointsBase + positionIndex * phaseStep,
           badge: badgeBase + positionIndex * phaseStep,
           name: nameBase + positionIndex * phaseStep,
         }));
@@ -330,7 +321,7 @@
     dashboard.players.filter(player => !player.is_starter).forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "bench-player";
-      row.style.setProperty("--delay", `${benchDelay + index * 0.8}s`);
+      row.style.setProperty("--delay", `${benchDelay + index * 0.7}s`);
       const top = document.createElement("div");
       top.className = "bench-top";
       top.append(createClubBadge(player, teams));
