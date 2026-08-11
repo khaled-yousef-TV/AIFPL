@@ -13,7 +13,7 @@ from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentProjectionStore
-from aifpl.config import minimum_odds_fixture_coverage
+from aifpl.config import minimum_odds_fixture_coverage, partial_odds_fixture_coverage
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient
@@ -42,6 +42,8 @@ class RefreshJobResult(BaseModel):
     artifacts: dict[str, str]
     health_status: str | None = None
     recommendation: dict[str, object] | None = None
+    odds_coverage: float | None = None
+    odds_coverage_status: Literal["full", "partial"] | None = None
     error: str | None = None
     output_path: str
 
@@ -158,10 +160,16 @@ class CurrentDataRefreshJob:
             coverage = len(relevant_ids & matched_ids) / len(relevant_ids) if relevant_ids else 0.0
             if not relevant_ids or coverage < minimum_odds_fixture_coverage():
                 raise ValueError(
-                    f"Odds fixture coverage {coverage:.1%} is below required "
+                    f"Odds fixture coverage {coverage:.1%} is below the hard floor "
                     f"{minimum_odds_fixture_coverage():.1%}"
                 )
-            steps.append("validate_odds_coverage")
+            coverage_status: Literal["full", "partial"] = (
+                "full" if coverage >= partial_odds_fixture_coverage() else "partial"
+            )
+            if coverage_status == "partial":
+                steps.append(f"validate_odds_coverage:partial:{coverage:.1%}")
+            else:
+                steps.append("validate_odds_coverage")
 
             health = SourceHealthChecker(self.root).run()
             health_status = health.overall_status
@@ -181,6 +189,7 @@ class CurrentDataRefreshJob:
                 start_gameweek=start_gameweek, end_gameweek=end_gameweek, budget=budget,
                 completed_steps=steps, artifacts=artifacts, health_status=health_status,
                 recommendation=asdict(recommendation), output_path=str(output_path),
+                odds_coverage=round(coverage, 4), odds_coverage_status=coverage_status,
             )
         except Exception as exc:
             result = RefreshJobResult(

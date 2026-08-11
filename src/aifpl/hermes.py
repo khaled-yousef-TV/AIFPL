@@ -124,7 +124,23 @@ class HermesDecisionBackend:
             "source_health": health,
             "player_evidence_records": evidence_count,
             "decision_history": self._decision_history(),
+            "odds_projection_coverage": self._odds_coverage(),
         }
+
+    def _odds_coverage(self) -> dict[str, Any]:
+        try:
+            from aifpl.odds_projections import OddsProjectionStore
+
+            catalog_id = self._latest_catalog_id(1, 38)
+            path = self.root / "normalized" / "current" / "odds_projections" / catalog_id
+            manifest = json.loads(path.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+            parameters = manifest.get("parameters", {})
+            return {
+                "status": parameters.get("odds_coverage_status", "unknown"),
+                "by_gameweek": parameters.get("odds_coverage_by_gameweek"),
+            }
+        except (FileNotFoundError, ValueError):
+            return {"status": "unknown", "by_gameweek": None}
 
     def _decision_history(self) -> dict[str, Any]:
         try:

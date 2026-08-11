@@ -36,9 +36,18 @@ def freshness_hours(source: str) -> float:
 
 
 def minimum_odds_fixture_coverage() -> float:
-    coverage = float(os.environ.get("AIFPL_MIN_ODDS_FIXTURE_COVERAGE", "0.8"))
+    coverage = float(os.environ.get("AIFPL_MIN_ODDS_FIXTURE_COVERAGE", "0.5"))
     if not 0 <= coverage <= 1:
         raise ValueError("AIFPL_MIN_ODDS_FIXTURE_COVERAGE must be within 0..1")
+    return coverage
+
+
+def partial_odds_fixture_coverage() -> float:
+    coverage = float(os.environ.get("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE", "0.8"))
+    if not 0 <= coverage <= 1:
+        raise ValueError("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE must be within 0..1")
+    if coverage < minimum_odds_fixture_coverage():
+        raise ValueError("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE must be at least AIFPL_MIN_ODDS_FIXTURE_COVERAGE")
     return coverage
 
 

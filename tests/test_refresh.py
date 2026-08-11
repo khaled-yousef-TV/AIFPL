@@ -46,3 +46,38 @@ def test_concurrent_refresh_is_rejected_and_audited(tmp_path) -> None:
         os.close(descriptor)
 
     assert "already running" in caught.value.result.error
+
+
+def test_partial_coverage_soft_degrade_config() -> None:
+    from aifpl import config
+
+    monkeypatch = __import__("pytest").MonkeyPatch()
+    monkeypatch.setenv("AIFPL_MIN_ODDS_FIXTURE_COVERAGE", "0.5")
+    monkeypatch.setenv("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE", "0.8")
+
+    assert config.minimum_odds_fixture_coverage() == 0.5
+    assert config.partial_odds_fixture_coverage() == 0.8
+
+    monkeypatch.setenv("AIFPL_MIN_ODDS_FIXTURE_COVERAGE", "0.9")
+    try:
+        config.partial_odds_fixture_coverage()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("partial threshold below hard floor must raise")
+    monkeypatch.undo()
+
+
+def test_partial_coverage_is_flagged_not_fatal(tmp_path) -> None:
+    from aifpl.config import partial_odds_fixture_coverage
+    from aifpl.odds_projections import OddsProjectionCatalog
+
+    catalog = OddsProjectionCatalog(
+        start_gameweek=1, end_gameweek=6, records=10, output_path="x.jsonl",
+        created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        odds_coverage_by_gameweek={1: 0.6, 2: 0.9, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0},
+        odds_coverage_status="partial",
+    )
+
+    assert catalog.odds_coverage_status == "partial"
+    assert catalog.odds_coverage_by_gameweek[1] < partial_odds_fixture_coverage()

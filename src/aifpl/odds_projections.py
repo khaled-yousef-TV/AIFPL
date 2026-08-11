@@ -51,6 +51,7 @@ class OddsProjectionCatalog:
     methodology: str = ODDS_PROJECTION_METHOD
     manifest_path: str | None = None
     odds_coverage_by_gameweek: dict[int, float] | None = None
+    odds_coverage_status: str | None = None
 
 
 def build_odds_adjusted_projections(
@@ -205,6 +206,14 @@ class OddsProjectionStore:
             )
             for gameweek in range(start_gameweek, end_gameweek + 1)
         }
+        from aifpl.config import partial_odds_fixture_coverage
+
+        partial_threshold = partial_odds_fixture_coverage()
+        coverage_status = (
+            "full"
+            if all(value >= partial_threshold for value in coverage_by_gameweek.values())
+            else "partial"
+        )
         sources = {"player_catalog": player_path, "fixture_catalog": fixture_path, "fixture_odds_consensus": consensus_path}
         if evidence_path is not None:
             sources["player_evidence"] = evidence_path
@@ -221,13 +230,14 @@ class OddsProjectionStore:
                         "new_signing_count": new_signings,
                         "evidence_cutoff": evidence_cutoff.isoformat() if evidence_cutoff else None,
                         "max_evidence_age_hours": max_evidence_age,
-                        "odds_coverage_by_gameweek": coverage_by_gameweek},
+                        "odds_coverage_by_gameweek": coverage_by_gameweek,
+                        "odds_coverage_status": coverage_status},
         )
         return OddsProjectionCatalog(
             start_gameweek, end_gameweek, len(projections), str(output_path), created_at,
             str(player_path), str(fixture_path), str(consensus_path), str(evidence_path) if evidence_path else None,
             ODDS_PROJECTION_METHOD, str(manifest_path),
-            coverage_by_gameweek,
+            coverage_by_gameweek, coverage_status,
         )
 
     def latest_path(self) -> Path:
