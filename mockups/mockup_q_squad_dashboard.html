@@ -298,7 +298,7 @@
     const container = document.getElementById("lineup-players");
     container.replaceChildren();
     const starters = dashboard.players.filter(player => player.is_starter);
-    let waveBase = 0.5;
+    let waveBase = 0.5 + 4 * 0.8 + 0.8;
     ["GK", "DEF", "MID", "FWD"].forEach(position => {
       const players = starters.filter(player => player.position === position);
       const slots = slotsFor(position, players.length);
@@ -313,7 +313,7 @@
   function renderBench(dashboard, teams) {
     const container = document.getElementById("bench-players");
     container.replaceChildren();
-    const benchDelay = 0.5 + 4 * 0.8 + 3 * 0.9 + 0.8;
+    const benchDelay = 0.5;
     dashboard.players.filter(player => !player.is_starter).forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "bench-player";
