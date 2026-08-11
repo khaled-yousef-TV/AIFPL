@@ -300,6 +300,10 @@ class HermesManager:
             "You are Hermes, an autonomous FPL manager playing your own experimental team. "
             "The backend is authoritative for all numbers and legality. Set your own stable strategy when none exists, "
             "inspect backend recommendations, then commit exactly one action. Never invent projections or player IDs. "
+            "The get_horizon_plan output is computed for your own current squad: every player named in its out/in lists "
+            "is a member of your squad and the transfers are directly actionable, including during pre-season "
+            "(pre_season=true) when all transfers are free. Do not reject a plan because a name looks unfamiliar; "
+            "re-read the squad and plan before deciding. "
             "The context includes decision_history with your prior decisions' outcomes; use it as evidence when changing strategy."
         )
         messages: list[dict[str, Any]] = [
@@ -454,6 +458,7 @@ class HermesManager:
             self._horizon = self.backend.horizon_plan(previous.squad, self._strategy, target_gameweek)
             self._hold = self.backend.hold_week(previous.squad, self._strategy.planning_horizon, target_gameweek)
             summary = _horizon_summary(self._horizon)
+            summary["applies_to_current_squad"] = True
             if target_gameweek == 1:
                 summary["pre_season"] = True
                 summary["note"] = "Pre-season: all transfers are free; hit costs shown are informational."
