@@ -23,11 +23,24 @@ if [ -d "$decision_dir" ]; then
   done
 fi
 
+season="${AIFPL_RENDER_BOOTSTRAP_SEASON:-2025-26}"
+historical_dir="$data_dir/normalized/historical/$season/imports"
+import_history() {
+  if [ -d "$historical_dir" ] && ls "$historical_dir"/*.json > /dev/null 2>&1; then
+    echo "Historical season $season already imported; skipping import."
+  else
+    echo "Importing historical season $season for transfer awareness..."
+    aifpl import-season "$season"
+  fi
+}
+
 current_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
 if [ -n "$current_commit" ] && [ -f "$marker" ] && [ "$(cat "$marker")" = "$current_commit" ] && [ "$has_decision" = "true" ]; then
   echo "AIFPL data is current for commit $current_commit; skipping bootstrap."
   exit 0
 fi
+
+import_history
 
 if [ "$has_decision" = "true" ]; then
   echo "Code or data changed (commit ${current_commit:-unknown}); re-running refresh and Hermes..."

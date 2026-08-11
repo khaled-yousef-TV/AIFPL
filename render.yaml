@@ -40,6 +40,8 @@ services:
         value: "6"
       - key: AIFPL_RENDER_BOOTSTRAP_BUDGET
         value: "1000"
+      - key: AIFPL_RENDER_BOOTSTRAP_SEASON
+        value: "2025-26"
       - key: AIFPL_FETCH_EVENT_MARKETS
         value: "true"
       - key: AIFPL_TELEGRAM_ENABLED
