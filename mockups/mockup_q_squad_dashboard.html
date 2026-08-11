@@ -424,7 +424,9 @@
     document.getElementById("captain-name").textContent = `Captain: ${captain ? captain.name : "not set"}`;
     document.getElementById("captain-detail").textContent = captain ? `${captain.projected_points.toFixed(1)} projected points \u00b7 ${captain.club}` : "No captain returned by backend";
     document.getElementById("bank-value").textContent = `\u00a3${(dashboard.bank / 10).toFixed(1)}m`;
-    document.getElementById("free-transfer-value").textContent = `${dashboard.free_transfers} free transfer${dashboard.free_transfers === 1 ? "" : "s"}`;
+    document.getElementById("free-transfer-value").textContent = dashboard.pre_season
+      ? "Unlimited (pre-season)"
+      : `${dashboard.free_transfers} free transfer${dashboard.free_transfers === 1 ? "" : "s"}`;
     document.getElementById("squad-state-note").textContent = `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 backend state`;
     renderLineup(dashboard, teams);
     renderBench(dashboard, teams);

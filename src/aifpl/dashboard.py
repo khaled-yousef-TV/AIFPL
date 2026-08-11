@@ -53,6 +53,7 @@ class CurrentDashboard(BaseModel):
     gameweek: int
     season_id: str
     deadline: datetime
+    pre_season: bool = False
     action: str
     explanation: str
     model: str
@@ -71,8 +72,11 @@ class CurrentDashboard(BaseModel):
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
+    from datetime import datetime, timezone
+
     decision = HermesManager(root).latest_decision()
     schedule = DeadlineScheduler(root).status()
+    pre_season = schedule.event == 1 and schedule.deadline > datetime.now(timezone.utc)
     current_players = CurrentPlayerCatalogStore(root).latest_players()
     players_by_id = {player.id: player for player in current_players}
     projections = OddsProjectionStore(root).latest()
@@ -158,6 +162,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         gameweek=decision.gameweek,
         season_id=decision.season_id,
         deadline=schedule.deadline,
+        pre_season=pre_season,
         action=decision.action,
         explanation=decision.explanation,
         model=decision.model,
