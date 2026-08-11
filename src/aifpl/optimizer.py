@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
-from aifpl.config import bench_min_projection, bench_weight, minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, validate_squad
 
@@ -38,17 +37,10 @@ def optimize_squad(
         raise ValueError("differential_appetite must be within 0..1")
     if len({candidate.player_id for candidate in candidates}) != len(candidates):
         raise ValueError("Candidate player IDs must be unique")
-    min_bank = minimum_bank_tenths()
-    floor = bench_min_projection()
-    bench_bonus = bench_weight()
-    if budget < min_bank:
-        raise ValueError("budget must be at least the minimum bank reserve")
     model = cp_model.CpModel()
     selected = [model.new_bool_var(f"player_{candidate.player_id}") for candidate in candidates]
     starters = [model.new_bool_var(f"starter_{candidate.player_id}") for candidate in candidates]
     captains = [model.new_bool_var(f"captain_{candidate.player_id}") for candidate in candidates]
-    benches = [model.new_bool_var(f"bench_{candidate.player_id}") for candidate in candidates]
-    dead_bench = [model.new_bool_var(f"dead_bench_{candidate.player_id}") for candidate in candidates]
     position_requirements = {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}
     for position, required in position_requirements.items():
         model.add(sum(selected[index] for index, candidate in enumerate(candidates) if candidate.position == position) == required)
@@ -58,10 +50,6 @@ def optimize_squad(
     for index in range(len(candidates)):
         model.add(starters[index] <= selected[index])
         model.add(captains[index] <= starters[index])
-        model.add(selected[index] == starters[index] + benches[index])
-        model.add(dead_bench[index] <= benches[index])
-        model.add(candidates[index].projected_points >= floor).only_enforce_if(selected[index], dead_bench[index].Not())
-    model.add(sum(dead_bench) <= 2)
     model.add(sum(starters) == 11)
     model.add(sum(captains) == 1)
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "GK") == 1)
@@ -71,11 +59,10 @@ def optimize_squad(
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "MID") <= 5)
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") >= 1)
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") <= 3)
-    model.add(sum(selected[index] * candidate.cost for index, candidate in enumerate(candidates)) <= budget - min_bank)
+    model.add(sum(selected[index] * candidate.cost for index, candidate in enumerate(candidates)) <= budget)
     model.maximize(
         sum(starters[index] * round(candidate.projected_points * 10_000) for index, candidate in enumerate(candidates))
         + sum(captains[index] * round(candidate.projected_points * 10_000) for index, candidate in enumerate(candidates))
-        + sum(benches[index] * round(candidate.projected_points * bench_bonus * 10_000) for index, candidate in enumerate(candidates))
         + sum(selected[index] * 100 for index, candidate in enumerate(candidates) if candidate.player_id in (preferred_player_ids or set()))
         + sum(starters[index] * round((100 - candidate.selected_by_percent) * differential_appetite) for index, candidate in enumerate(candidates))
     )
