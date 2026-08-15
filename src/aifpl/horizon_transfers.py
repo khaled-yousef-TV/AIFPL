@@ -45,6 +45,8 @@ class HorizonGameweekPlan:
     odds_coverage: float
     objective_net_points: float = 0.0
     robustness_score: float = 0.0
+    unlimited_transfers: bool = False
+    free_transfers_after: int | None = None
 
 
 @dataclass(frozen=True)
@@ -338,6 +340,12 @@ def plan_horizon_transfers(
         odds_total = sum(row.odds_backed_fixture_count for row in rows if row.gameweek == gameweek)
         rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
         starting_ids = {player.player_id for player in lineup}
+        unlimited = pre_season and week_index == 0
+        free_after = (
+            1
+            if unlimited
+            else min(5, max(0, solver.value(free_by_week[week_index]) - solver.value(transfer_counts[week_index])) + 1)
+        )
         dead_excess = max(
             0,
             sum(1 for player in squad if player.player_id not in starting_ids
@@ -360,6 +368,8 @@ def plan_horizon_transfers(
                 squad, starting_ids, solver.value(banks[week_index]),
                 solver.value(transfer_counts[week_index]), rows_by_id, bench_floor,
             ),
+            unlimited_transfers=unlimited,
+            free_transfers_after=free_after,
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
     hold_plans = _hold_plans(
@@ -431,6 +441,8 @@ def _hold_plans(
         )
         shortfall = max(0, min_bank - state.bank)
         objective_net = lineup.projected_points - shortfall * shortfall_penalty - dead_excess * dead_penalty
+        unlimited = pre_season and week_index == 0
+        free_after = 1 if unlimited else min(5, free + 1)
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=[], incoming=[], resulting_squad=_sort(squad),
             starting_xi=_sort(starters), captain=captain, transfers_made=0,
@@ -440,6 +452,8 @@ def _hold_plans(
             robustness_score=_robustness_score(
                 squad, starting_ids, state.bank, 0, rows_by_id, bench_floor,
             ),
+            unlimited_transfers=unlimited,
+            free_transfers_after=free_after,
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
         free = 1 if pre_season and week_index == 0 else min(5, free + 1)

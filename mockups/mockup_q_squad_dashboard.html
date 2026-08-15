@@ -480,7 +480,9 @@
         parts.push(point.transfers.map(transfer => transfer.out_name ? `${transfer.out_name} \u2192 ${transfer.in_name}` : `+${transfer.in_name}`).join(", "));
       }
       if (point.hit_cost) parts.push(`-${point.hit_cost} pts hit`);
-      if (point.free_transfers_before != null) parts.push(`${point.free_transfers_before} FT`);
+      if (point.unlimited_transfers) parts.push("unlimited FT");
+      else if (point.free_transfers_before != null) parts.push(`${point.free_transfers_before} FT`);
+      if (point.free_transfers_after != null) parts.push(`${point.free_transfers_after} FT after`);
       if (point.bank_after != null) parts.push(`\u00a3${(point.bank_after / 10).toFixed(1)}m`);
       if (point.odds_coverage != null) parts.push(`${Math.round(point.odds_coverage * 100)}% odds`);
       if (point.robustness_score != null) parts.push(`Robustness ${Math.round(point.robustness_score)}`);

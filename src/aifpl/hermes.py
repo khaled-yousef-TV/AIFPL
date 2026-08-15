@@ -106,6 +106,8 @@ class HorizonPlanWeekSnapshot(BaseModel):
     net_projected_points: float
     odds_coverage: float
     robustness_score: float = 0.0
+    unlimited_transfers: bool = False
+    free_transfers_after: int | None = None
     outgoing_ids: list[int] = Field(default_factory=list)
     incoming_ids: list[int] = Field(default_factory=list)
     captain_id: int | None = None
@@ -688,6 +690,8 @@ def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
         net_projected_points=week.net_projected_points,
         odds_coverage=week.odds_coverage,
         robustness_score=week.robustness_score,
+        unlimited_transfers=week.unlimited_transfers,
+        free_transfers_after=week.free_transfers_after,
         outgoing_ids=[player.player_id for player in week.outgoing],
         incoming_ids=[player.player_id for player in week.incoming],
         captain_id=week.captain.player_id,
@@ -707,6 +711,8 @@ def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
                 "in": [p.player_name for p in w.incoming],
                 "transfers_made": w.transfers_made,
                 "free_transfers_before": w.free_transfers_before,
+                "free_transfers_after": w.free_transfers_after,
+                "unlimited_transfers": w.unlimited_transfers,
                 "hits": w.hit_cost,
                 "bank_after": w.bank_after,
                 "captain": w.captain.player_name,

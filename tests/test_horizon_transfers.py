@@ -86,7 +86,19 @@ def test_pre_season_planning_resets_to_one_free_transfer_after_gw1() -> None:
     assert plan.total_hit_cost == 0
     assert plan.total_net_projected_points == plan.total_projected_points
     assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2]
+    assert [week.free_transfers_after for week in plan.gameweeks] == [1, 2, 3]
+    assert [week.unlimited_transfers for week in plan.gameweeks] == [True, False, False]
     assert all(week.hit_cost == 0 for week in plan.gameweeks)
+
+
+def test_normal_planning_reports_free_transfers_after_each_week() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    assert [week.free_transfers_before for week in plan.gameweeks] == [1, 2, 3]
+    assert [week.free_transfers_after for week in plan.gameweeks] == [2, 3, 4]
+    assert all(not week.unlimited_transfers for week in plan.gameweeks)
 
 
 def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None:

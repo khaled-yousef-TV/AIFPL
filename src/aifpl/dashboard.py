@@ -73,6 +73,8 @@ class DashboardHorizonPoint(BaseModel):
     bank_after: int | None = None
     odds_coverage: float | None = None
     robustness_score: float | None = None
+    unlimited_transfers: bool | None = None
+    free_transfers_after: int | None = None
     captain_id: int | None = None
     transfers: list[DashboardTransfer] = Field(default_factory=list)
 
@@ -374,6 +376,8 @@ def _horizon_point(week: HorizonPlanWeekSnapshot, names: dict[int, str]) -> Dash
         bank_after=week.bank_after,
         odds_coverage=week.odds_coverage,
         robustness_score=week.robustness_score,
+        unlimited_transfers=week.unlimited_transfers,
+        free_transfers_after=week.free_transfers_after,
         captain_id=week.captain_id,
         transfers=[
             DashboardTransfer(

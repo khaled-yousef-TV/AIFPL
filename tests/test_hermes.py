@@ -164,6 +164,8 @@ def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:
     assert len(snapshot.weeks) == 4
     assert snapshot.weeks[0].gameweek == 1
     assert snapshot.weeks[0].free_transfers_before == 5
+    assert snapshot.weeks[0].unlimited_transfers is True
+    assert snapshot.weeks[0].free_transfers_after == 1
     assert snapshot.weeks[1].free_transfers_before == 1
     assert len(snapshot.weeks[0].squad_ids) == 15
     assert len(snapshot.weeks[0].starting_xi_ids) == 11

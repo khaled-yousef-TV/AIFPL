@@ -48,7 +48,8 @@ def test_horizon_snapshot_maps_to_dashboard_point() -> None:
     week = HorizonPlanWeekSnapshot(
         gameweek=3, transfers_made=1, free_transfers_before=2, hit_cost=4,
         bank_after=240, projected_points=60.0, net_projected_points=56.0,
-        odds_coverage=0.75, outgoing_ids=[9], incoming_ids=[18], captain_id=18,
+        odds_coverage=0.75, unlimited_transfers=True, free_transfers_after=1,
+        outgoing_ids=[9], incoming_ids=[18], captain_id=18,
         starting_xi_ids=[1], squad_ids=[1, 18],
     )
 
@@ -64,6 +65,8 @@ def test_horizon_snapshot_maps_to_dashboard_point() -> None:
     assert point.odds_coverage == 0.75
     assert point.robustness_score == 0.0
     assert point.captain_id == 18
+    assert point.free_transfers_after == 1
+    assert point.unlimited_transfers is True
     assert point.transfers[0].out_name == "Player 9"
     assert point.transfers[0].in_name == "Player 18"
 
