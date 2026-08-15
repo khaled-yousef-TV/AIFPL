@@ -547,9 +547,13 @@
     const captain = dashboard.players.find(player => player.is_captain);
     document.getElementById("captain-name").textContent = `Captain: ${captain ? captain.name : "not set"}`;
     document.getElementById("captain-detail").textContent = captain ? `${captain.projected_points.toFixed(1)} projected points \u00b7 ${captain.club}` : "No captain returned by backend";
-    const captainOptions = (dashboard.captain_options || []).map(option =>
-      option.is_captain ? `${option.name} ${option.projected_points.toFixed(1)} (C)` : `${option.name} ${option.projected_points.toFixed(1)}`
-    ).join(" \u00b7 ");
+    const captainOptions = (dashboard.captain_options || []).map(option => {
+      const minutes = option.expected_minutes != null ? ` ${Math.round(option.expected_minutes)}m` : "";
+      const safety = option.start_probability != null ? ` (${Math.round(option.start_probability * 100)}%)` : "";
+      return option.is_captain
+        ? `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety} (C)`
+        : `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}`;
+    }).join(" \u00b7 ");
     document.getElementById("captain-options").textContent = captainOptions ? `Options: ${captainOptions}` : "";
     document.getElementById("bank-value").textContent = `\u00a3${(dashboard.bank / 10).toFixed(1)}m`;
     document.getElementById("free-transfer-value").textContent = dashboard.pre_season

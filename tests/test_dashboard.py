@@ -177,3 +177,20 @@ def test_dashboard_captain_options_rank_squad_from_pinned_rows() -> None:
     assert [option.player_id for option in options] == [3, 1, 2]
     assert options[1].is_captain is True
     assert options[0].projected_points == 9.0
+
+
+def test_dashboard_captain_options_carry_participation_evidence() -> None:
+    rows = {
+        (1, 1): projection(1, 1, 7.0),
+        (2, 1): projection(2, 1, 5.0),
+        (3, 1): projection(3, 1, 9.0),
+    }
+    rows[(3, 1)] = OddsAdjustedGameweekProjection(
+        3, "P3", "MID", "A", 50, 1, 1, 1, 9.0, expected_minutes=60.0, start_probability=0.5,
+    )
+
+    options = _dashboard_captain_options(rows, decision(captain_id=1), {1: "A", 2: "B", 3: "C"})
+
+    assert options[0].expected_minutes == 60.0
+    assert options[0].start_probability == 0.5
+    assert options[0].projected_points == 9.0

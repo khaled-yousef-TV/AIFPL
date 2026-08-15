@@ -368,8 +368,9 @@ Each planned transfer is rendered with its computed explanation against the
 pinned catalog: horizon projected gain (in minus out across the planned
 gameweeks), allocated hit cost, net gain, per-gameweek odds coverage, and
 ownership change. The captain box ranks the squad's top projected captain
-options from the committed catalog so the chosen captain is shown in context
-rather than in isolation.
+options from the committed catalog and annotates each with expected minutes and
+start probability, so safety (minutes) and upside (projection) are visible side
+by side instead of presenting a single unqualified pick.
 
 Player rows also expose a transparent `value` (projected points per £m) and a
 `differential_score` (projected points times one minus ownership) so the

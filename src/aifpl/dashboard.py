@@ -58,6 +58,8 @@ class DashboardCaptainOption(BaseModel):
     player_id: int
     name: str
     projected_points: float
+    expected_minutes: float | None = None
+    start_probability: float | None = None
     is_captain: bool = False
 
 
@@ -344,17 +346,20 @@ def _dashboard_captain_options(
 ) -> list[DashboardCaptainOption]:
     gameweek = decision.gameweek
     candidates = [
-        (player_id, projections_by_key[(player_id, gameweek)].projected_points)
+        (player_id, projections_by_key[(player_id, gameweek)])
         for player_id in decision.squad.player_ids
         if (player_id, gameweek) in projections_by_key
     ]
-    candidates.sort(key=lambda item: item[1], reverse=True)
+    candidates.sort(key=lambda item: item[1].projected_points, reverse=True)
     return [
         DashboardCaptainOption(
             player_id=player_id, name=names.get(player_id, f"#{player_id}"),
-            projected_points=round(points, 4), is_captain=player_id == decision.captain_id,
+            projected_points=round(row.projected_points, 4),
+            expected_minutes=row.expected_minutes,
+            start_probability=row.start_probability,
+            is_captain=player_id == decision.captain_id,
         )
-        for player_id, points in candidates[:3]
+        for player_id, row in candidates[:3]
     ]
 
 
