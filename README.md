@@ -275,11 +275,61 @@ horizon, polling, and budget use the `AIFPL_SCHEDULER_*` variables in
     and transfer deltas), persisted as audited scorecards, and the recent
     history plus season summary is fed back into Hermes' context so strategy
     changes are evidence-based rather than blind.
+18. Corrected preseason transfer accounting: unlimited transfers apply only to
+    forming the opening squad, GW2 starts with one free transfer, later weeks
+    charge real hits, and repeated same-gameweek Hermes runs are idempotent.
+19. Committed-plan provenance: each decision persists the projection catalog and
+    full horizon economics (weekly transfers, free transfers before/after,
+    unlimited flag, hits, bank, net points, odds coverage, robustness), and the
+    dashboard renders that plan instead of reprojecting against newer catalogs.
+20. Honest uncertainty presentation: per-gameweek odds coverage and evidence
+    cutoff from the catalog manifest, an explicit `uncalibrated` label, and
+    per-player expected minutes, start probability, availability, value, and
+    differential score.
+21. Explainability: computed per-move horizon gains and hit allocation, captain
+    options ranked with safety (minutes, start probability) and upside
+    (projection) side by side, and the committed plan included in the Telegram digest.
+22. Risk-aware optimization: a real transfer-churn penalty (env-configurable and
+    scaled by Hermes risk tolerance), an objective-consistent hold fallback, a
+    0-100 robustness score, and the playing-bench floor applied to bench players only.
+23. Structured late-return evidence: per-gameweek start probability and minutes
+    multiplier for tournament returners applied across the whole horizon, plus
+    ownership preserved for every projection source.
 
 ### Next
 
-1. **Frontend:** dashboard, evidence view, model comparisons, Hermes strategy,
-   scheduler health, recommendation history, and notification log.
+1. **Calibrated projection intervals:** replace the `uncalibrated` label with
+   real confidence intervals once enough chronological holdout forecasts have
+   accumulated to estimate per-player variance honestly.
+2. **Effective ownership:** FPL exposes only raw `selected_by_percent`; true
+   effective ownership (including captain/TC ownership) needs a data source
+   before the differential metrics can be upgraded beyond the documented proxy.
+3. **Authenticated account integration:** exact selling prices and real transfer
+   execution in place of the current unauthenticated price assumptions.
+
+## Frontend
+
+The deployed static dashboard is `mockups/cockpit.html` (`index.html` redirects
+to it; Render publishes the whole `mockups/` directory and overwrites
+`config.js` with `AIFPL_API_URL` at build time). It is a single-page cockpit
+with five views, all read-only against the backend:
+
+- **Squad:** the committed XI pitch, bench, decision explanation, confidence,
+  planned horizon, transfers with computed gains, captain options, scorecard,
+  and squad state.
+- **Evidence:** player evidence records (`/evidence/players`).
+- **Hermes:** strategy, squad state, latest run transcript, and decision history
+  (`/hermes/state`, `/hermes/runs/latest`, `/hermes/decisions`).
+- **Scheduler:** next deadline, latest refresh job, and recent ticks with
+  notification status (`/scheduler/status`, `/jobs/refresh/current/latest`,
+  `/scheduler/ticks`).
+- **Backtests:** baseline backtest runs with metrics and comparability
+  (`/calibration/backtests`).
+
+No backend change is needed to serve the frontend: it is static and talks to
+the existing API. `AIFPL_CORS_ORIGINS` must include the cockpit origin. The
+older `mockup_*.html` files are retained as design artifacts and are not part
+of the live cockpit.
 
 ## Historical results source
 

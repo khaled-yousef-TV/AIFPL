@@ -118,6 +118,58 @@ def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tm
     assert captured["churn_penalty"] == 2.5
 
 
+def test_scheduler_ticks_returns_recent_ticks_newest_first(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    from aifpl.artifacts import json_bytes, write_immutable
+    from aifpl.scheduler import SchedulerTickResult
+    from datetime import datetime, timezone
+
+    ticks_dir = tmp_path / "scheduler" / "ticks"
+    ticks_dir.mkdir(parents=True)
+    for stamp, status in (("20260815T100000000000Z-1", "succeeded"), ("20260815T090000000000Z-2", "not_due")):
+        write_immutable(
+            ticks_dir / f"{stamp}.json",
+            json_bytes(SchedulerTickResult(
+                status=status, checked_at=datetime(2026, 8, 15, 9, tzinfo=timezone.utc),
+                event=1, deadline=datetime(2026, 8, 21, 18, tzinfo=timezone.utc),
+                refresh_at=datetime(2026, 8, 21, 16, 30, tzinfo=timezone.utc),
+                season_id="2026-27", missed=False, forced=False, output_path=f"ticks/{stamp}.json",
+            ).model_dump(mode="json"), pretty=True),
+        )
+
+    response = TestClient(api.app).get("/scheduler/ticks?limit=10")
+
+    assert response.status_code == 200
+    assert response.json()[0]["status"] == "succeeded"
+
+
+def test_calibration_backtests_lists_manifested_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    import json as json_module
+    from pathlib import Path
+
+    run_dir = tmp_path / "backtests" / "2025-26" / "RUN_A"
+    run_dir.mkdir(parents=True)
+    (run_dir / "predictions.jsonl").write_text("")
+    (run_dir / "backtest.manifest.json").write_text(json_module.dumps({
+        "created_at": "2026-08-15T10:00:00+00:00",
+        "artifact_path": "backtests/2025-26/RUN_A/predictions.jsonl",
+        "parameters": {"season": "2025-26", "window": 5},
+        "metrics": {"predictions": 100, "mae": 2.5, "rmse": 3.1, "bias": 0.2, "coverage": 0.9},
+    }))
+
+    response = TestClient(api.app).get("/calibration/backtests")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert rows[0]["season"] == "2025-26"
+    assert rows[0]["run"] == "RUN_A"
+    assert rows[0]["metrics"]["mae"] == 2.5
+    assert rows[0]["comparable"] is False
+
+
 def test_hermes_decision_history_is_empty_without_runs(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
 

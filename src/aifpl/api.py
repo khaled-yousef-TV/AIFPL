@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -89,6 +91,17 @@ class CalibrationRequest(BaseModel):
 
 class CalibrationComparisonRequest(BaseModel):
     prediction_paths: list[str] = Field(min_length=2)
+
+
+class BacktestRunSummary(BaseModel):
+    season: str
+    run: str
+    created_at: datetime
+    predictions_path: str
+    record_count: int
+    parameters: dict[str, object] = Field(default_factory=dict)
+    metrics: dict[str, object] = Field(default_factory=dict)
+    comparable: bool = False
 
 
 class HermesMigrationRequest(BaseModel):
@@ -216,6 +229,36 @@ def calibrate_backtest(request: CalibrationRequest) -> CalibrationReport:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/calibration/backtests", response_model=list[BacktestRunSummary])
+def list_backtest_runs() -> list[BacktestRunSummary]:
+    root = data_dir()
+    runs: list[BacktestRunSummary] = []
+    for manifest in sorted((root / "backtests").glob("*/*/backtest.manifest.json"), reverse=True):
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        parameters = document.get("parameters", {})
+        metrics = document.get("metrics", {})
+        try:
+            created_at = datetime.fromisoformat(str(document.get("created_at", "")))
+        except ValueError:
+            continue
+        runs.append(BacktestRunSummary(
+            season=manifest.parent.parent.name,
+            run=manifest.parent.name,
+            created_at=created_at,
+            predictions_path=str(document.get("artifact_path", "")),
+            record_count=int(metrics.get("predictions", 0)),
+            parameters=parameters,
+            metrics=metrics,
+        ))
+    counts: dict[str, int] = defaultdict(int)
+    for run in runs:
+        counts[run.season] += 1
+    return [run.model_copy(update={"comparable": counts[run.season] >= 2}) for run in runs]
+
+
 @app.post("/calibration/compare", response_model=dict[str, ErrorMetrics])
 def compare_backtests(request: CalibrationComparisonRequest) -> dict[str, ErrorMetrics]:
     try:
@@ -276,6 +319,19 @@ def scheduler_status() -> DeadlineStatus:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/scheduler/ticks", response_model=list[SchedulerTickResult])
+def scheduler_ticks(limit: int = Query(20, ge=1, le=200)) -> list[SchedulerTickResult]:
+    directory = data_dir() / "scheduler" / "ticks"
+    files = sorted(directory.glob("*.json"), reverse=True) if directory.exists() else []
+    ticks: list[SchedulerTickResult] = []
+    for path in files[:limit]:
+        try:
+            ticks.append(SchedulerTickResult.model_validate_json(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    return ticks
 
 
 @app.post("/scheduler/tick", response_model=SchedulerTickResult)
