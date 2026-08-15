@@ -171,7 +171,7 @@ curl -X POST http://127.0.0.1:8000/squad/lineup \
 curl -X POST 'http://127.0.0.1:8000/transfers/plan?projection_source=odds' \
   -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
   -H 'Content-Type: application/json' --data @examples/current_squad.json
-curl -X POST http://127.0.0.1:8000/transfers/plan/horizon \
+curl -X POST 'http://127.0.0.1:8000/transfers/plan/horizon?pre_season=true&decision_hit_penalty=6' \
   -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
   -H 'Content-Type: application/json' --data @examples/current_squad.json
 curl -X POST http://127.0.0.1:8000/hermes/run \

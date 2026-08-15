@@ -530,11 +530,17 @@ def plan_transfers(
 def plan_horizon(
     squad_file: Path = typer.Argument(..., exists=True, readable=True),
     catalog_id: str | None = typer.Option(None, help="Exact 1-6 GW odds projection JSONL filename"),
+    pre_season: bool = typer.Option(False, help="Unlimited transfers for the opening gameweek only"),
+    decision_hit_penalty: float = typer.Option(4.0, min=0,
+                                                help="Projected-point penalty per transfer over the free allowance"),
 ) -> None:
     """Optimize transfers, hits, free-transfer rollover, and bank across 1-6 gameweeks."""
     try:
         state = HorizonSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
-        plan = plan_horizon_transfers(OddsProjectionStore(data_dir()).latest(catalog_id), state)
+        plan = plan_horizon_transfers(
+            OddsProjectionStore(data_dir()).latest(catalog_id), state,
+            decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
+        )
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(plan))

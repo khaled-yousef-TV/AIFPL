@@ -86,6 +86,37 @@ def test_current_dashboard_returns_the_backend_payload(monkeypatch, tmp_path) ->
     assert response.json()["free_transfers"] == 2
 
 
+def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    captured: dict = {}
+
+    class FakeStore:
+        def latest(self, catalog_id=None):
+            return []
+
+    monkeypatch.setattr(api, "OddsProjectionStore", lambda root: FakeStore())
+
+    def fake_plan(rows, state, **kwargs):
+        captured.update(kwargs)
+        return api.HorizonTransferPlan(
+            gameweeks=[], total_projected_points=0.0, total_hit_cost=0,
+            total_net_projected_points=0.0, solver_status="OPTIMAL", methodology="test",
+        )
+
+    monkeypatch.setattr(api, "plan_horizon_transfers", fake_plan)
+
+    response = TestClient(api.app).post(
+        "/transfers/plan/horizon?pre_season=true&decision_hit_penalty=6",
+        json={"player_ids": [], "bank": 0, "free_transfers": 0},
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    assert captured["pre_season"] is True
+    assert captured["decision_hit_penalty"] == 6.0
+
+
 def test_hermes_decision_history_is_empty_without_runs(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
 
