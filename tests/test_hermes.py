@@ -8,6 +8,7 @@ from aifpl.hermes import (
     HermesStrategy,
     HorizonPlanSnapshot,
 )
+from aifpl.horizon_transfers import PLANNER_VERSION
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import OptimizedSquad
 
@@ -34,7 +35,8 @@ class FakeBackend:
     def initial_squad(self, strategy):
         players = [CurrentPlayerProjection(i, f"Player {i}", "GK" if i <= 2 else "DEF" if i <= 7 else "MID" if i <= 12 else "FWD", chr(65 + i), 50, float(i), 1.0) for i in range(1, 16)]
         return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1, HorizonPlanSnapshot(
-            projection_catalog="fake-catalog.json", pre_season=True, solver_status="OPTIMAL", methodology="test",
+            projection_catalog="fake-catalog.json", pre_season=True, solver_status="OPTIMAL",
+            methodology="test", planner_version=PLANNER_VERSION,
         )
 
 
@@ -213,6 +215,21 @@ def test_hermes_force_reinitializes_a_current_opening_squad(tmp_path) -> None:
     reloaded = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
     assert reloaded.latest_state().version == 2
     assert len(reloaded.decisions()) == 2
+
+
+def test_hermes_reinitializes_when_planner_version_is_stale(tmp_path, monkeypatch) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+    manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    monkeypatch.setattr(hermes_module, "PLANNER_VERSION", "v-next")
+
+    result = manager.reinitialize_opening_squad(1, "2026-27")
+
+    assert result is not None
+    assert result.decision.horizon_plan.planner_version == "v-next"
+    reloaded = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+    assert reloaded.latest_state().version == 2
+    assert reloaded.latest_decision().horizon_plan.planner_version == "v-next"
+    assert reloaded.reinitialize_opening_squad(1, "2026-27") is None
 
 
 def test_context_includes_scored_decision_history(tmp_path) -> None:

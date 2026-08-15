@@ -21,6 +21,12 @@ from aifpl.projection_catalogs import _aggregate
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, select_best_lineup, validate_squad
 
 
+# Bump when plan-generation semantics change (accounting, objective, captain
+# selection, robustness, ...). Committed plans record their version so stale
+# opening squads can be regenerated deterministically.
+PLANNER_VERSION = "v2"
+
+
 class HorizonSquadState(BaseModel):
     player_ids: list[int] = Field(min_length=0, max_length=15)
     bank: int = Field(ge=0, le=5000)

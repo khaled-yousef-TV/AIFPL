@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
 from aifpl.health import SourceHealthChecker
-from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
+from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonSquadState, HorizonTransferPlan, PLANNER_VERSION, plan_horizon_transfers
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.optimizer import OptimizedSquad
 from aifpl.player_evidence import PlayerEvidenceStore
@@ -120,6 +120,7 @@ class HorizonPlanSnapshot(BaseModel):
     pre_season: bool = False
     solver_status: str = ""
     methodology: str = ""
+    planner_version: str = ""
     total_projected_points: float = 0.0
     total_hit_cost: int = 0
     total_net_projected_points: float = 0.0
@@ -375,10 +376,12 @@ class HermesManager:
     def _opening_plan_is_current(self) -> bool:
         try:
             state = self.latest_state(optional=True)
+            plan = self.latest_decision().horizon_plan
             return (
                 state is not None
                 and state.initialization_method == "horizon_v1"
-                and self.latest_decision().horizon_plan is not None
+                and plan is not None
+                and plan.planner_version == PLANNER_VERSION
             )
         except FileNotFoundError:
             return False
@@ -690,6 +693,7 @@ def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool)
         pre_season=pre_season,
         solver_status=plan.solver_status,
         methodology=plan.methodology,
+        planner_version=PLANNER_VERSION,
         total_projected_points=plan.total_projected_points,
         total_hit_cost=plan.total_hit_cost,
         total_net_projected_points=plan.total_net_projected_points,
