@@ -74,6 +74,13 @@ def plan_horizon_transfers(
     pre_season: bool = False,
     churn_penalty: float | None = None,
 ) -> HorizonTransferPlan:
+    """Plan transfers and lineups across the horizon.
+
+    differential_appetite in 0..1 tilts squad purchases toward under-owned players:
+    each selected player earns up to appetite * projected_points * (1 - ownership/100)
+    extra objective value, so it never overrides a positive projection. The starting
+    XI is always the highest-projected legal lineup; appetite does not affect it.
+    """
     if not 0 <= differential_appetite <= 1:
         raise ValueError("differential_appetite must be within 0..1")
     if churn_penalty is not None and churn_penalty < 0:
@@ -325,7 +332,14 @@ def plan_horizon_transfers(
         if preferred_player_ids:
             objective.extend(selected[player_id, week_index] * 100 for player_id in preferred_player_ids if player_id in player_ids)
         objective.extend(
-            starter[player_id, week_index] * round((100 - metadata[player_id].selected_by_percent) * differential_appetite)
+            selected[player_id, week_index]
+            * round(
+                by_player_gameweek[player_id, gameweek].projected_points
+                * differential_appetite
+                * (100 - metadata[player_id].selected_by_percent)
+                / 100
+                * scale
+            )
             for player_id in player_ids
         )
     model.maximize(sum(objective))

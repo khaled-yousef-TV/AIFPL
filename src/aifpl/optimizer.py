@@ -31,7 +31,13 @@ def optimize_squad(
     preferred_player_ids: set[int] | None = None,
     differential_appetite: float = 0.0,
 ) -> OptimizedSquad:
-    """Find the exact highest-projected legal squad from every supplied candidate."""
+    """Find the exact highest-projected legal squad from every supplied candidate.
+
+    differential_appetite in 0..1 tilts squad purchases toward under-owned players:
+    each selected player earns up to appetite * projected_points * (1 - ownership/100)
+    extra objective value, so it never overrides a positive projection. The starting
+    XI is always the highest-projected legal lineup; appetite does not affect it.
+    """
     if budget < 0:
         raise ValueError("budget must not be negative")
     if not 0 <= differential_appetite <= 1:
@@ -77,7 +83,11 @@ def optimize_squad(
         + sum(captains[index] * round(candidate.projected_points * 10_000) for index, candidate in enumerate(candidates))
         + sum(benches[index] * round(candidate.projected_points * bench_bonus * 10_000) for index, candidate in enumerate(candidates))
         + sum(selected[index] * 100 for index, candidate in enumerate(candidates) if candidate.player_id in (preferred_player_ids or set()))
-        + sum(starters[index] * round((100 - candidate.selected_by_percent) * differential_appetite) for index, candidate in enumerate(candidates))
+        + sum(
+            selected[index]
+            * round(candidate.projected_points * differential_appetite * (100 - candidate.selected_by_percent) / 100 * 10_000)
+            for index, candidate in enumerate(candidates)
+        )
     )
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = 1

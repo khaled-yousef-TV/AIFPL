@@ -4,10 +4,10 @@ from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
 
 
-def candidate(identifier: int, position: str, club: str, cost: int, points: float) -> CurrentPlayerProjection:
+def candidate(identifier: int, position: str, club: str, cost: int, points: float, ownership: float = 0.0) -> CurrentPlayerProjection:
     return CurrentPlayerProjection(
         player_id=identifier, player_name=f"Player {identifier}", position=position, club=club, cost=cost,
-        projected_points=points, availability_multiplier=1.0,
+        projected_points=points, availability_multiplier=1.0, selected_by_percent=ownership,
     )
 
 
@@ -74,3 +74,27 @@ def test_optimizer_enforces_club_cap_with_normalized_names() -> None:
     result = optimize_squad(candidates, budget=1000)
 
     assert 16 not in {player.player_id for player in result.players}
+
+
+def test_optimizer_never_starts_a_zero_projection_enabler_regardless_of_appetite() -> None:
+    candidates = full_pool()
+    candidates.append(candidate(16, "FWD", "F", 45, 0.0, ownership=0.2))
+
+    result = optimize_squad(candidates, budget=725, differential_appetite=1.0)
+
+    assert 16 in {player.player_id for player in result.players}
+    assert 16 not in {player.player_id for player in result.starting_xi}
+
+
+def test_optimizer_differential_appetite_tilts_purchases_within_bounded_units() -> None:
+    candidates = full_pool()
+    candidates[12] = candidate(13, "FWD", "F", 50, 9.0, ownership=10.0)
+    candidates[13] = candidate(14, "FWD", "G", 50, 8.0, ownership=90.0)
+    candidates[14] = candidate(15, "FWD", "H", 50, 6.0, ownership=80.0)
+    candidates.append(candidate(16, "FWD", "I", 50, 4.0, ownership=0.0))
+
+    differential = {player.player_id for player in optimize_squad(candidates, budget=730, differential_appetite=1.0).players}
+    baseline = {player.player_id for player in optimize_squad(candidates, budget=730, differential_appetite=0.0).players}
+
+    assert 16 in differential and 15 not in differential
+    assert 15 in baseline and 16 not in baseline

@@ -96,20 +96,19 @@ class SnapshotStore:
         return destination
 
     def _latest_document(self, directory: Path, error: str) -> tuple[Path, dict[str, Any]]:
-        files = list(directory.glob("*.json")) if directory.exists() else []
+        # Filenames carry zero-padded UTC save timestamps, so lexicographic order
+        # is chronological; select the newest file before parsing any payload.
+        files = sorted(directory.glob("*.json")) if directory.exists() else []
         if not files:
             raise SnapshotNotFoundError(error)
-        documents = [(path, json.loads(path.read_text(encoding="utf-8"))) for path in files]
-        return max(documents, key=lambda item: self._fetched_at(item[1]))
+        path = files[-1]
+        return path, json.loads(path.read_text(encoding="utf-8"))
 
     def _document_before(self, directory: Path, cutoff: datetime, error: str) -> tuple[Path, dict[str, Any]]:
-        candidates: list[tuple[datetime, Path, dict[str, Any]]] = []
-        for path in directory.glob("*.json") if directory.exists() else []:
-            document = json.loads(path.read_text(encoding="utf-8"))
-            retrieved = self._fetched_at(document)
-            if retrieved <= cutoff:
-                candidates.append((retrieved, path, document))
+        stamp = cutoff.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ%f")
+        files = sorted(directory.glob("*.json")) if directory.exists() else []
+        candidates = [path for path in files if path.stem <= stamp]
         if not candidates:
             raise SnapshotNotFoundError(error)
-        _, path, document = max(candidates, key=lambda item: item[0])
-        return path, document
+        path = candidates[-1]
+        return path, json.loads(path.read_text(encoding="utf-8"))

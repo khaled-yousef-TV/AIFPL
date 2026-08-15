@@ -1,4 +1,5 @@
 from dataclasses import replace
+from itertools import combinations
 
 import pytest
 
@@ -17,9 +18,11 @@ def disable_robustness_constraints(monkeypatch):
 
 def row(
     identifier: int, position: str, club: str, gameweek: int, points: float, cost: int = 50,
+    ownership: float = 0.0,
 ) -> OddsAdjustedGameweekProjection:
     return OddsAdjustedGameweekProjection(
         identifier, f"Player {identifier}", position, club, cost, gameweek, 1, 1, points,
+        selected_by_percent=ownership,
     )
 
 
@@ -33,6 +36,25 @@ def pool(gameweeks: tuple[int, ...] = (1, 2, 3)) -> list[OddsAdjustedGameweekPro
         (13, "FWD", "F", 9), (14, "FWD", "G", 8), (15, "FWD", "H", 7),
     ]
     return [row(identifier, position, club, gameweek, points) for gameweek in gameweeks for identifier, position, club, points in players]
+
+
+def max_projected_lineup(squad: list, points_by_id: dict[int, float]) -> tuple[float, set[int]]:
+    groups: dict[str, list[int]] = {}
+    for player in squad:
+        groups.setdefault(player.position, []).append(player.player_id)
+    best_sum, best_ids = 0.0, set()
+    for gk in combinations(groups["GK"], 1):
+        for def_count in (3, 4, 5):
+            for df in combinations(groups["DEF"], def_count):
+                for mid_count in (2, 3, 4, 5):
+                    for md in combinations(groups["MID"], mid_count):
+                        fwd_count = 11 - 1 - def_count - mid_count
+                        if 1 <= fwd_count <= 3:
+                            for fw in combinations(groups["FWD"], fwd_count):
+                                total = sum(points_by_id[player_id] for player_id in gk + df + md + fw)
+                                if total > best_sum:
+                                    best_sum, best_ids = total, set(gk + df + md + fw)
+    return best_sum, best_ids
 
 
 def test_horizon_planner_rolls_free_transfers_without_needless_moves() -> None:
@@ -302,3 +324,35 @@ def test_horizon_allows_sub_floor_starter_when_forced(monkeypatch) -> None:
     forwards = [player for player in plan.gameweeks[0].starting_xi if player.position == "FWD"]
     assert len(forwards) == 1
     assert forwards[0].projected_points < 2.0
+
+
+def test_horizon_lineup_is_max_projected_xi_regardless_of_differential_appetite(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_BANK_SHORTFALL_PENALTY", "1")
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
+    rows = []
+    for gameweek in (1, 2):
+        rows.append(row(1, "GK", "A", gameweek, 4, cost=40))
+        rows.append(row(2, "GK", "C", gameweek, 3, cost=40))
+        for identifier, points in ((3, 5.0), (4, 4.0), (5, 3.0), (6, 2.0), (7, 1.0)):
+            rows.append(row(identifier, "DEF", "CDEFG"[identifier - 3], gameweek, points, cost=60))
+        for identifier, points in ((8, 8.0), (9, 7.0), (10, 6.0), (11, 5.0), (12, 1.0)):
+            rows.append(row(identifier, "MID", "ABCDG"[identifier - 8], gameweek, points, cost=60))
+        rows.append(row(13, "FWD", "F", gameweek, 9.0, cost=100))
+        rows.append(row(14, "FWD", "G", gameweek, 8.0, cost=95, ownership=25.6))
+        rows.append(row(15, "FWD", "H", gameweek, 7.0, cost=120))
+        rows.append(row(16, "FWD", "I", gameweek, 0.0, cost=45, ownership=0.2))
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
+        differential_appetite=1.0, pre_season=True,
+    )
+
+    week = plan.gameweeks[0]
+    squad_ids = {player.player_id for player in week.resulting_squad}
+    assert 16 in squad_ids
+    points_by_id = {current.player_id: current.projected_points for current in rows if current.gameweek == 1}
+    best_sum, best_ids = max_projected_lineup(week.resulting_squad, points_by_id)
+    xi_ids = {player.player_id for player in week.starting_xi}
+    assert 16 not in xi_ids
+    assert xi_ids == best_ids
+    assert week.projected_points == round(best_sum + max(points_by_id[player_id] for player_id in best_ids), 4)
