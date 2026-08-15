@@ -175,6 +175,19 @@ def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:
     assert snapshot.total_net_projected_points > 0
 
 
+def test_strategy_churn_penalty_scales_with_risk_tolerance(monkeypatch) -> None:
+    from aifpl.hermes import _strategy_churn_penalty
+
+    monkeypatch.setenv("AIFPL_TRANSFER_PENALTY", "1.0")
+    cautious = HermesStrategy(risk_tolerance=0.0, hit_aversion=0.5, differential_appetite=0.0,
+                              planning_horizon=3, rationale="test")
+    aggressive = HermesStrategy(risk_tolerance=1.0, hit_aversion=0.5, differential_appetite=0.0,
+                                planning_horizon=3, rationale="test")
+
+    assert _strategy_churn_penalty(cautious) == 3.0
+    assert _strategy_churn_penalty(aggressive) == 1.0
+
+
 def test_context_includes_scored_decision_history(tmp_path) -> None:
     from aifpl.artifacts import json_bytes, write_immutable
     from aifpl.hermes import HermesDecisionBackend

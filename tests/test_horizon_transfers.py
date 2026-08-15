@@ -251,6 +251,18 @@ def test_transfer_penalty_discourages_marginal_churn(monkeypatch) -> None:
     assert frugal.gameweeks[0].transfers_made == 0
 
 
+def test_churn_penalty_override_supersedes_the_environment(monkeypatch) -> None:
+    rows = pool() + [row(16, "MID", "I", gameweek, 6.0) for gameweek in (1, 2, 3)]
+    state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
+    monkeypatch.setenv("AIFPL_TRANSFER_PENALTY", "10")
+
+    free_churn = plan_horizon_transfers(rows, state, churn_penalty=0.0)
+    pricey_churn = plan_horizon_transfers(rows, state, churn_penalty=10.0)
+
+    assert free_churn.gameweeks[0].transfers_made == 1
+    assert pricey_churn.gameweeks[0].transfers_made == 0
+
+
 def test_robustness_score_is_bounded_and_averaged() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),

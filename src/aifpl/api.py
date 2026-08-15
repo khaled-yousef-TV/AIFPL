@@ -549,11 +549,13 @@ def horizon_transfer_plan(
     catalog_id: str | None = Query(None),
     pre_season: bool = Query(False, description="Unlimited transfers for the opening gameweek only"),
     decision_hit_penalty: float = Query(4.0, ge=0),
+    churn_penalty: float | None = Query(None, ge=0),
 ) -> HorizonTransferPlan:
     try:
         return plan_horizon_transfers(
             OddsProjectionStore(data_dir()).latest(catalog_id), state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
+            churn_penalty=churn_penalty,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -223,6 +223,7 @@ class HermesDecisionBackend:
             preferred_player_ids=preferred,
             differential_appetite=strategy.differential_appetite,
             pre_season=True,
+            churn_penalty=_strategy_churn_penalty(strategy),
         )
         opening = plan.gameweeks[0]
         total_cost = sum(player.cost for player in opening.resulting_squad)
@@ -243,7 +244,7 @@ class HermesDecisionBackend:
             purchase_prices=state.purchase_prices,
         ), decision_hit_penalty=4 + strategy.hit_aversion * 4 + (1 - strategy.risk_tolerance) * 2,
             preferred_player_ids=preferred, differential_appetite=strategy.differential_appetite,
-            pre_season=pre_season), catalog_id
+            pre_season=pre_season, churn_penalty=_strategy_churn_penalty(strategy)), catalog_id
 
     def hold_week(self, state: HermesSquadState, horizon: int, target_gameweek: int) -> dict[str, Any]:
         rows, _ = self._horizon_rows(target_gameweek, horizon)
@@ -659,6 +660,12 @@ def _tools() -> list[dict[str, Any]]:
 
 def _tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
     return {"type": "function", "function": {"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}}}
+
+
+def _strategy_churn_penalty(strategy: HermesStrategy) -> float:
+    from aifpl.config import transfer_penalty
+
+    return round(transfer_penalty() + (1 - strategy.risk_tolerance) * 2.0, 4)
 
 
 def _squad_summary(squad: OptimizedSquad) -> dict[str, Any]:

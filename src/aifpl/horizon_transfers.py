@@ -66,9 +66,12 @@ def plan_horizon_transfers(
     preferred_player_ids: set[int] | None = None,
     differential_appetite: float = 0.0,
     pre_season: bool = False,
+    churn_penalty: float | None = None,
 ) -> HorizonTransferPlan:
     if not 0 <= differential_appetite <= 1:
         raise ValueError("differential_appetite must be within 0..1")
+    if churn_penalty is not None and churn_penalty < 0:
+        raise ValueError("churn_penalty must not be negative")
     gameweeks = sorted({row.gameweek for row in rows})
     if not 1 <= len(gameweeks) <= 6 or gameweeks != list(range(gameweeks[0], gameweeks[-1] + 1)):
         raise ValueError("Horizon projection catalog must contain 1 to 6 contiguous gameweeks")
@@ -142,7 +145,7 @@ def plan_horizon_transfers(
     bench_bonus = bench_weight()
     shortfall_penalty = bank_shortfall_penalty()
     dead_penalty = dead_bench_penalty()
-    churn_penalty = transfer_penalty()
+    churn_penalty = churn_penalty if churn_penalty is not None else transfer_penalty()
 
     for week_index, gameweek in enumerate(gameweeks):
         for player_id in player_ids:

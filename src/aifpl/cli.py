@@ -533,6 +533,8 @@ def plan_horizon(
     pre_season: bool = typer.Option(False, help="Unlimited transfers for the opening gameweek only"),
     decision_hit_penalty: float = typer.Option(4.0, min=0,
                                                 help="Projected-point penalty per transfer over the free allowance"),
+    churn_penalty: float | None = typer.Option(None, min=0,
+                                               help="Override the planned-transfer penalty (defaults to AIFPL_TRANSFER_PENALTY)"),
 ) -> None:
     """Optimize transfers, hits, free-transfer rollover, and bank across 1-6 gameweeks."""
     try:
@@ -540,6 +542,7 @@ def plan_horizon(
         plan = plan_horizon_transfers(
             OddsProjectionStore(data_dir()).latest(catalog_id), state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
+            churn_penalty=churn_penalty,
         )
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc

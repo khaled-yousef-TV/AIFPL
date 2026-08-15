@@ -107,7 +107,7 @@ def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tm
     monkeypatch.setattr(api, "plan_horizon_transfers", fake_plan)
 
     response = TestClient(api.app).post(
-        "/transfers/plan/horizon?pre_season=true&decision_hit_penalty=6",
+        "/transfers/plan/horizon?pre_season=true&decision_hit_penalty=6&churn_penalty=2.5",
         json={"player_ids": [], "bank": 0, "free_transfers": 0},
         headers={"X-AIFPL-Admin-Key": "test-admin-key"},
     )
@@ -115,6 +115,7 @@ def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tm
     assert response.status_code == 200
     assert captured["pre_season"] is True
     assert captured["decision_hit_penalty"] == 6.0
+    assert captured["churn_penalty"] == 2.5
 
 
 def test_hermes_decision_history_is_empty_without_runs(monkeypatch, tmp_path) -> None:
