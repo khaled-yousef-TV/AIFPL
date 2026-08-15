@@ -52,9 +52,21 @@ aifpl refresh-current-data \
   --start-gameweek "${AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK:-1}" \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
+force_flag=""
 if [ "$has_decision" = "true" ]; then
-  if aifpl hermes-reinitialize-opening-squad; then
-    echo "Reinitialized the legacy pre-season opening squad with the horizon optimizer."
+  # Regenerate the opening squad when the committed decision predates the
+  # deployed code, so optimizer fixes reach the live squad once per deploy
+  # (pre-season only; reinitialize_current is a no-op after GW1).
+  latest_decision="$(ls -1t "$decision_dir"/*.json 2>/dev/null | head -1)"
+  decision_mtime="$(stat -c %Y "$latest_decision" 2>/dev/null || stat -f %m "$latest_decision" 2>/dev/null || echo 0)"
+  commit_time="$(git log -1 --format=%ct 2>/dev/null || echo 0)"
+  if [ -n "$latest_decision" ] && [ "$commit_time" -gt 0 ] && [ "$decision_mtime" -lt "$commit_time" ]; then
+    force_flag="--force"
+  fi
+fi
+if [ "$has_decision" = "true" ]; then
+  if aifpl hermes-reinitialize-opening-squad $force_flag; then
+    echo "Reinitialized the pre-season opening squad with the horizon optimizer."
   else
     reinitialize_status=$?
     if [ "$reinitialize_status" -eq 2 ]; then
