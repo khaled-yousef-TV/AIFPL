@@ -62,6 +62,7 @@ def test_horizon_snapshot_maps_to_dashboard_point() -> None:
     assert point.free_transfers_before == 2
     assert point.bank_after == 240
     assert point.odds_coverage == 0.75
+    assert point.robustness_score == 0.0
     assert point.captain_id == 18
     assert point.transfers[0].out_name == "Player 9"
     assert point.transfers[0].in_name == "Player 18"

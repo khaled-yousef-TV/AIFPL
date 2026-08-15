@@ -481,6 +481,7 @@
       if (point.free_transfers_before != null) parts.push(`${point.free_transfers_before} FT`);
       if (point.bank_after != null) parts.push(`\u00a3${(point.bank_after / 10).toFixed(1)}m`);
       if (point.odds_coverage != null) parts.push(`${Math.round(point.odds_coverage * 100)}% odds`);
+      if (point.robustness_score != null) parts.push(`Robustness ${Math.round(point.robustness_score)}`);
       if (parts.length) {
         const detail = document.createElement("div");
         detail.className = "horizon-detail";
@@ -552,7 +553,9 @@
     document.getElementById("free-transfer-value").textContent = dashboard.pre_season
       ? "Unlimited (pre-season)"
       : `${dashboard.free_transfers} free transfer${dashboard.free_transfers === 1 ? "" : "s"}`;
-    document.getElementById("squad-state-note").textContent = `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 backend state`;
+    document.getElementById("squad-state-note").textContent = dashboard.robustness != null
+      ? `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 robustness ${Math.round(dashboard.robustness)}/100 \u00b7 backend state`
+      : `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 backend state`;
     renderLineup(dashboard, teams);
     renderBench(dashboard, teams);
     renderTransfers(dashboard);

@@ -12,6 +12,7 @@ from aifpl.config import (
     bench_weight,
     dead_bench_penalty,
     minimum_bank_tenths,
+    transfer_penalty,
 )
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
@@ -42,6 +43,8 @@ class HorizonGameweekPlan:
     projected_points: float
     net_projected_points: float
     odds_coverage: float
+    objective_net_points: float = 0.0
+    robustness_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,7 @@ class HorizonTransferPlan:
     total_net_projected_points: float
     solver_status: str
     methodology: str
+    robustness_score: float = 0.0
 
 
 def plan_horizon_transfers(
@@ -136,6 +140,7 @@ def plan_horizon_transfers(
     bench_bonus = bench_weight()
     shortfall_penalty = bank_shortfall_penalty()
     dead_penalty = dead_bench_penalty()
+    churn_penalty = transfer_penalty()
 
     for week_index, gameweek in enumerate(gameweeks):
         for player_id in player_ids:
@@ -303,7 +308,7 @@ def plan_horizon_transfers(
         )
         hit_penalty = 0.0 if pre_season and week_index == 0 else effective_hit_penalty
         objective.append(-excess_transfers[week_index] * round(hit_penalty * scale))
-        objective.append(-transfer_counts[week_index])
+        objective.append(-transfer_counts[week_index] * round(churn_penalty * scale))
         objective.append(-bank_shortfalls[week_index] * round(shortfall_penalty * scale))
         objective.append(-dead_bench_excess[week_index] * round(dead_penalty * scale))
         if preferred_player_ids:
@@ -331,6 +336,18 @@ def plan_horizon_transfers(
         hit = 0 if pre_season and week_index == 0 else solver.value(excess_transfers[week_index]) * 4
         fixture_total = sum(row.fixture_count for row in rows if row.gameweek == gameweek)
         odds_total = sum(row.odds_backed_fixture_count for row in rows if row.gameweek == gameweek)
+        rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
+        starting_ids = {player.player_id for player in lineup}
+        dead_excess = max(
+            0,
+            sum(1 for player in squad if player.player_id not in starting_ids
+                and rows_by_id.get(player.player_id) is not None
+                and rows_by_id[player.player_id].projected_points < bench_floor)
+            - 2,
+        )
+        shortfall = max(0, min_bank - solver.value(banks[week_index]))
+        objective_net = projected - hit - shortfall * shortfall_penalty - dead_excess * dead_penalty
+        objective_net -= solver.value(transfer_counts[week_index]) * churn_penalty
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=_sort(outgoing_players), incoming=_sort(incoming_players),
             resulting_squad=_sort(squad), starting_xi=_sort(lineup), captain=captain_player,
@@ -338,12 +355,20 @@ def plan_horizon_transfers(
             free_transfers_before=solver.value(free_by_week[week_index]), hit_cost=hit,
             bank_after=solver.value(banks[week_index]), projected_points=round(projected, 4),
             net_projected_points=round(projected - hit, 4),
+            objective_net_points=round(objective_net, 4),
+            robustness_score=_robustness_score(
+                squad, starting_ids, solver.value(banks[week_index]),
+                solver.value(transfer_counts[week_index]), rows_by_id, bench_floor,
+            ),
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
-    hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids, pre_season) if current_ids else []
+    hold_plans = _hold_plans(
+        rows, state, gameweeks, by_player_gameweek, current_ids, pre_season,
+        min_bank, bench_floor, shortfall_penalty, dead_penalty, churn_penalty,
+    ) if current_ids else []
     if pre_season and hold_plans and _hold_plans_violate_robustness(hold_plans, min_bank, bench_floor, by_player_gameweek):
         hold_plans = []
-    if hold_plans and sum(plan.net_projected_points for plan in plans) < sum(plan.net_projected_points for plan in hold_plans):
+    if hold_plans and sum(plan.objective_net_points for plan in plans) < sum(plan.objective_net_points for plan in hold_plans):
         plans = hold_plans
         solver_status = "HOLD_FALLBACK"
     else:
@@ -353,6 +378,7 @@ def plan_horizon_transfers(
         total_hit_cost=sum(plan.hit_cost for plan in plans),
         total_net_projected_points=round(sum(plan.net_projected_points for plan in plans), 4),
         solver_status=solver_status, methodology=rows[0].methodology,
+        robustness_score=round(sum(plan.robustness_score for plan in plans) / max(1, len(plans)), 1),
     )
 
 
@@ -378,7 +404,8 @@ def _hold_plans_violate_robustness(
 def _hold_plans(
     rows: list[OddsAdjustedGameweekProjection], state: HorizonSquadState, gameweeks: list[int],
     by_player_gameweek: dict[tuple[int, int], OddsAdjustedGameweekProjection], current_ids: set[int],
-    pre_season: bool,
+    pre_season: bool, min_bank: int, bench_floor: float,
+    shortfall_penalty: float, dead_penalty: float, churn_penalty: float,
 ) -> list[HorizonGameweekPlan]:
     plans: list[HorizonGameweekPlan] = []
     free = 5 if pre_season else state.free_transfers
@@ -393,15 +420,58 @@ def _hold_plans(
         captain = by_id[lineup.captain.id]
         fixture_total = sum(row.fixture_count for row in rows if row.gameweek == gameweek)
         odds_total = sum(row.odds_backed_fixture_count for row in rows if row.gameweek == gameweek)
+        starting_ids = {player.player_id for player in starters}
+        rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
+        dead_excess = max(
+            0,
+            sum(1 for player in squad if player.player_id not in starting_ids
+                and rows_by_id.get(player.player_id) is not None
+                and rows_by_id[player.player_id].projected_points < bench_floor)
+            - 2,
+        )
+        shortfall = max(0, min_bank - state.bank)
+        objective_net = lineup.projected_points - shortfall * shortfall_penalty - dead_excess * dead_penalty
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=[], incoming=[], resulting_squad=_sort(squad),
             starting_xi=_sort(starters), captain=captain, transfers_made=0,
             free_transfers_before=free, hit_cost=0, bank_after=state.bank,
             projected_points=lineup.projected_points, net_projected_points=lineup.projected_points,
+            objective_net_points=round(objective_net, 4),
+            robustness_score=_robustness_score(
+                squad, starting_ids, state.bank, 0, rows_by_id, bench_floor,
+            ),
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
         free = 1 if pre_season and week_index == 0 else min(5, free + 1)
     return plans
+
+
+def _robustness_score(
+    squad: list[CurrentPlayerProjection],
+    starting_ids: set[int],
+    bank_after: int,
+    transfers_made: int,
+    rows_by_id: dict[int, OddsAdjustedGameweekProjection],
+    bench_floor: float,
+) -> float:
+    xi = [player for player in squad if player.player_id in starting_ids]
+    minutes = [rows_by_id[player.player_id].expected_minutes for player in xi if player.player_id in rows_by_id]
+    minutes_factor = sum((value / 90 if value is not None else 0.8 for value in minutes)) / max(1, len(minutes))
+    bench = [player for player in squad if player.player_id not in starting_ids]
+    bench_strength = sum(
+        1 for player in bench
+        if player.player_id in rows_by_id and rows_by_id[player.player_id].projected_points >= bench_floor
+    ) / max(1, len(bench))
+    flexibility = min(1.0, bank_after / 500)
+    rotation_risk = sum(1 for value in minutes if value is not None and value < 60) / max(1, len(minutes))
+    churn = min(1.0, transfers_made / 5)
+    return round(
+        max(0.0, 100 * (
+            0.35 * minutes_factor + 0.25 * bench_strength + 0.20 * flexibility
+            + 0.20 * (1 - rotation_risk) - 0.10 * churn
+        )),
+        1,
+    )
 
 
 def _candidate(row: OddsAdjustedGameweekProjection, gameweek: int) -> CurrentPlayerProjection:

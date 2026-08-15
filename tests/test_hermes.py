@@ -168,6 +168,8 @@ def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:
     assert len(snapshot.weeks[0].squad_ids) == 15
     assert len(snapshot.weeks[0].starting_xi_ids) == 11
     assert snapshot.weeks[0].captain_id is not None
+    assert snapshot.weeks[0].robustness_score >= 0
+    assert snapshot.robustness_score >= 0
     assert snapshot.total_net_projected_points > 0
 
 

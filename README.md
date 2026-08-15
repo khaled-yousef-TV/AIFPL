@@ -475,8 +475,15 @@ catalog. It jointly chooses each week's legal squad, XI, captain, transfers,
 hits, free-transfer rollover up to five, and bank balance. The solver is seeded
 with a legal hold strategy and uses `AIFPL_HORIZON_SOLVER_MAX_SECONDS`; the
 result reports `OPTIMAL` when proven or `FEASIBLE` when it is the best plan
-found before the configured limit. As with the single-week planner, unauthenticated
-inputs use current prices as selling values until account integration is added.
+found before the configured limit. Each planned transfer also costs
+`AIFPL_TRANSFER_PENALTY` projected points (default 1.0) so needless churn is
+discouraged without blocking worthwhile moves. The hold fallback compares plans
+with the same full objective (hits, churn, bank shortfall, and dead-bench
+penalties) so it only fires when holding genuinely beats the optimizer. Every
+week reports a `robustness_score` (0-100) combining expected minutes, bench
+strength, bank flexibility, rotation risk, and planned transfers. As with the
+single-week planner, unauthenticated inputs use current prices as selling values
+until account integration is added.
 
 ## Fixture-aware projections
 

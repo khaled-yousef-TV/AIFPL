@@ -77,6 +77,13 @@ def dead_bench_penalty() -> float:
     return value
 
 
+def transfer_penalty() -> float:
+    value = float(os.environ.get("AIFPL_TRANSFER_PENALTY", "1.0"))
+    if value < 0:
+        raise ValueError("AIFPL_TRANSFER_PENALTY must not be negative")
+    return value
+
+
 def partial_odds_fixture_coverage() -> float:
     coverage = float(os.environ.get("AIFPL_PARTIAL_ODDS_FIXTURE_COVERAGE", "0.8"))
     if not 0 <= coverage <= 1:

@@ -68,6 +68,7 @@ class DashboardHorizonPoint(BaseModel):
     free_transfers_before: int | None = None
     bank_after: int | None = None
     odds_coverage: float | None = None
+    robustness_score: float | None = None
     captain_id: int | None = None
     transfers: list[DashboardTransfer] = Field(default_factory=list)
 
@@ -121,6 +122,7 @@ class CurrentDashboard(BaseModel):
     scorecard: DashboardScorecard | None = None
     projection_catalog: str | None = None
     solver_status: str | None = None
+    robustness: float | None = None
     confidence: DashboardConfidence = Field(default_factory=DashboardConfidence)
 
 
@@ -200,6 +202,14 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             )
             for gameweek in available_gameweeks
         ]
+    robustness = None
+    if plan_snapshot is not None and plan_snapshot.weeks:
+        committed = next(
+            (week for week in plan_snapshot.weeks if week.gameweek == decision.gameweek),
+            None,
+        )
+        if committed is not None:
+            robustness = committed.robustness_score
     moves = _dashboard_moves(plan_snapshot, projections_by_key, names) if plan_snapshot is not None else []
     captain_options = _dashboard_captain_options(projections_by_key, decision, names) if plan_snapshot is not None else []
     transfers = [
@@ -267,6 +277,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         scorecard=scorecard,
         projection_catalog=plan_snapshot.projection_catalog if plan_snapshot is not None else None,
         solver_status=plan_snapshot.solver_status if plan_snapshot is not None else None,
+        robustness=robustness,
         confidence=_dashboard_confidence(root),
     )
 
@@ -355,6 +366,7 @@ def _horizon_point(week: HorizonPlanWeekSnapshot, names: dict[int, str]) -> Dash
         free_transfers_before=week.free_transfers_before,
         bank_after=week.bank_after,
         odds_coverage=week.odds_coverage,
+        robustness_score=week.robustness_score,
         captain_id=week.captain_id,
         transfers=[
             DashboardTransfer(

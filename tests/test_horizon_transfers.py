@@ -209,7 +209,7 @@ def test_pre_season_hold_fallback_suppressed_when_squad_violates_robustness(monk
     assert plan.gameweeks[0].bank_after >= 50
 
 
-def test_mid_season_hold_fallback_still_applies(monkeypatch) -> None:
+def test_mid_season_hold_fallback_uses_full_objective_accounting(monkeypatch) -> None:
     monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
     monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
     monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "0")
@@ -221,5 +221,30 @@ def test_mid_season_hold_fallback_still_applies(monkeypatch) -> None:
         pre_season=False,
     )
 
-    assert plan.solver_status == "HOLD_FALLBACK"
-    assert all(week.transfers_made == 0 for week in plan.gameweeks)
+    assert plan.solver_status != "HOLD_FALLBACK"
+    assert any(week.transfers_made > 0 for week in plan.gameweeks)
+
+
+def test_transfer_penalty_discourages_marginal_churn(monkeypatch) -> None:
+    rows = pool() + [row(16, "MID", "I", gameweek, 6.0) for gameweek in (1, 2, 3)]
+    state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
+
+    monkeypatch.setenv("AIFPL_TRANSFER_PENALTY", "0")
+    churny = plan_horizon_transfers(rows, state)
+
+    monkeypatch.setenv("AIFPL_TRANSFER_PENALTY", "10")
+    frugal = plan_horizon_transfers(rows, state)
+
+    assert churny.gameweeks[0].transfers_made == 1
+    assert frugal.gameweeks[0].transfers_made == 0
+
+
+def test_robustness_score_is_bounded_and_averaged() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    assert all(0 <= week.robustness_score <= 100 for week in plan.gameweeks)
+    assert plan.robustness_score == round(
+        sum(week.robustness_score for week in plan.gameweeks) / len(plan.gameweeks), 1,
+    )

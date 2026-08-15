@@ -105,6 +105,7 @@ class HorizonPlanWeekSnapshot(BaseModel):
     projected_points: float
     net_projected_points: float
     odds_coverage: float
+    robustness_score: float = 0.0
     outgoing_ids: list[int] = Field(default_factory=list)
     incoming_ids: list[int] = Field(default_factory=list)
     captain_id: int | None = None
@@ -120,6 +121,7 @@ class HorizonPlanSnapshot(BaseModel):
     total_projected_points: float = 0.0
     total_hit_cost: int = 0
     total_net_projected_points: float = 0.0
+    robustness_score: float = 0.0
     weeks: list[HorizonPlanWeekSnapshot] = Field(default_factory=list)
 
 
@@ -670,6 +672,7 @@ def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool)
         total_projected_points=plan.total_projected_points,
         total_hit_cost=plan.total_hit_cost,
         total_net_projected_points=plan.total_net_projected_points,
+        robustness_score=plan.robustness_score,
         weeks=[_week_snapshot(week) for week in plan.gameweeks],
     )
 
@@ -684,6 +687,7 @@ def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
         projected_points=week.projected_points,
         net_projected_points=week.net_projected_points,
         odds_coverage=week.odds_coverage,
+        robustness_score=week.robustness_score,
         outgoing_ids=[player.player_id for player in week.outgoing],
         incoming_ids=[player.player_id for player in week.incoming],
         captain_id=week.captain.player_id,
