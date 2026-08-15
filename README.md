@@ -351,6 +351,12 @@ the exact solver, so GW1 ownership is chosen for the coming weeks rather than
 one gameweek of greed. Backend-derived formation and projected-points fields
 remain authoritative when model prose is imprecise.
 
+Each committed decision records the projection catalog used plus a snapshot of
+the full horizon plan: per-gameweek transfers, free transfers before, hits,
+bank, gross/net points, odds coverage, captain, and squad IDs. The dashboard
+renders that persisted plan instead of recomputing it against newer catalogs,
+so committed economics stay auditable and drift-free.
+
 ## Current-player projection baseline
 
 `build-current-projections` creates a transparent real-player baseline from

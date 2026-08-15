@@ -177,10 +177,11 @@
   .horizon { padding: 17px 19px; }
   .horizon-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
   .horizon-head h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; } .horizon-total { color: var(--green); font-family: "SFMono-Regular", Consolas, monospace; font-size: 18px; font-weight: 900; }
-  .horizon-row { display: flex; align-items: center; gap: 9px; margin-top: 9px; }
+  .horizon-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 9px; }
   .horizon-row label { width: 28px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
   .track { flex: 1; height: 9px; overflow: hidden; border-radius: 99px; background: #edf0ea; } .track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #73aa78, var(--green)); }
   .horizon-row b { width: 29px; color: var(--ink); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; text-align: right; }
+  .horizon-detail { flex-basis: 100%; padding: 2px 0 0 37px; color: var(--muted); font-size: 10px; line-height: 1.4; }
   .health { padding: 17px 19px; }
   .health-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; } .health-head h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; } .healthy { color: var(--green); font-size: 10px; font-weight: 900; }
   .health-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; } .health-item:last-child { border-bottom: 0; }
@@ -237,7 +238,7 @@
           <div class="decision-hero"><div class="decision-label">Hermes recommendation</div><div class="decision-action"><strong id="decision-action">Loading...</strong><span id="decision-model">backend</span></div><ul class="decision-points" id="decision-points"><li>Loading the committed explanation.</li></ul><div class="confidence"><div class="confidence-row"><span>Projection source</span><span id="projection-status">loading</span></div><div class="confidence-bar"><i id="projection-fill"></i></div></div></div>
           <div class="decision-body"><div class="mini-head">Decision changes</div><div id="transfer-list"><div class="move"><span class="in">Loading transfers...</span></div></div><div class="captain-box"><div class="cap-mark">C</div><div><strong id="captain-name">Captain: loading</strong><span id="captain-detail">Projected points loading</span></div></div></div>
         </section>
-        <section class="card horizon"><div class="horizon-head"><h2>Current XI horizon</h2><div class="horizon-total" id="horizon-total">--</div></div><div id="horizon-rows"><div class="horizon-row"><label>--</label><div class="track"><i style="width: 0%"></i></div><b>--</b></div></div></section>
+        <section class="card horizon"><div class="horizon-head"><h2>Planned horizon</h2><div class="horizon-total" id="horizon-total">--</div></div><div id="horizon-rows"><div class="horizon-row"><label>--</label><div class="track"><i style="width: 0%"></i></div><b>--</b></div></div></section>
       </div>
     </div>
 
@@ -455,6 +456,19 @@
       const value = document.createElement("b");
       value.textContent = point.projected_points.toFixed(1);
       row.append(label, track, value);
+      const parts = [];
+      if (point.transfers && point.transfers.length) {
+        parts.push(point.transfers.map(transfer => transfer.out_name ? `${transfer.out_name} \u2192 ${transfer.in_name}` : `+${transfer.in_name}`).join(", "));
+      }
+      if (point.hit_cost) parts.push(`-${point.hit_cost} pts hit`);
+      if (point.free_transfers_before != null) parts.push(`${point.free_transfers_before} FT`);
+      if (point.bank_after != null) parts.push(`\u00a3${(point.bank_after / 10).toFixed(1)}m`);
+      if (parts.length) {
+        const detail = document.createElement("div");
+        detail.className = "horizon-detail";
+        detail.textContent = parts.join(" \u00b7 ");
+        row.append(detail);
+      }
       container.append(row);
     });
     document.getElementById("horizon-total").textContent = dashboard.horizon.length ? dashboard.projected_points.toFixed(1) : "--";

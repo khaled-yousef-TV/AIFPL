@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
-from aifpl.hermes import HermesManager
+from aifpl.hermes import HermesManager, HorizonPlanWeekSnapshot
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.scheduler import DeadlineScheduler
 from aifpl.scoring import DecisionScorer
@@ -37,6 +37,14 @@ class DashboardTransfer(BaseModel):
 class DashboardHorizonPoint(BaseModel):
     gameweek: int
     projected_points: float
+    net_projected_points: float | None = None
+    hit_cost: int | None = None
+    transfers_made: int | None = None
+    free_transfers_before: int | None = None
+    bank_after: int | None = None
+    odds_coverage: float | None = None
+    captain_id: int | None = None
+    transfers: list[DashboardTransfer] = Field(default_factory=list)
 
 
 class DashboardInput(BaseModel):
@@ -75,6 +83,8 @@ class CurrentDashboard(BaseModel):
     horizon: list[DashboardHorizonPoint] = Field(default_factory=list)
     inputs: list[DashboardInput] = Field(default_factory=list)
     scorecard: DashboardScorecard | None = None
+    projection_catalog: str | None = None
+    solver_status: str | None = None
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
@@ -119,24 +129,35 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         str(sum(position == role for position in position_by_id.values()))
         for role in ("DEF", "MID", "FWD")
     )
-    available_gameweeks = sorted({row.gameweek for row in projections if row.gameweek >= decision.gameweek})[:6]
-    horizon = [
-        DashboardHorizonPoint(
-            gameweek=gameweek,
-            projected_points=round(
-                sum(
-                    (projections_by_key.get((player_id, gameweek)).projected_points
-                     if projections_by_key.get((player_id, gameweek)) is not None else 0.0)
-                    for player_id in decision.starting_xi_ids
-                )
-                + (projections_by_key.get((decision.captain_id, gameweek)).projected_points
-                   if projections_by_key.get((decision.captain_id, gameweek)) is not None else 0.0),
-                4,
-            ),
-        )
-        for gameweek in available_gameweeks
-    ]
     names = {player_id: player.name for player_id, player in players_by_id.items()}
+    plan_snapshot = decision.horizon_plan
+    horizon: list[DashboardHorizonPoint]
+    if plan_snapshot is not None and plan_snapshot.weeks:
+        horizon = [_horizon_point(week, names) for week in plan_snapshot.weeks]
+        committed = next(
+            (week for week in plan_snapshot.weeks if week.gameweek == decision.gameweek),
+            None,
+        )
+        if committed is not None:
+            projected_points = committed.projected_points
+    else:
+        available_gameweeks = sorted({row.gameweek for row in projections if row.gameweek >= decision.gameweek})[:6]
+        horizon = [
+            DashboardHorizonPoint(
+                gameweek=gameweek,
+                projected_points=round(
+                    sum(
+                        (projections_by_key.get((player_id, gameweek)).projected_points
+                         if projections_by_key.get((player_id, gameweek)) is not None else 0.0)
+                        for player_id in decision.starting_xi_ids
+                    )
+                    + (projections_by_key.get((decision.captain_id, gameweek)).projected_points
+                       if projections_by_key.get((decision.captain_id, gameweek)) is not None else 0.0),
+                    4,
+                ),
+            )
+            for gameweek in available_gameweeks
+        ]
     transfers = [
         DashboardTransfer(
             out_id=out_id,
@@ -168,6 +189,16 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
     except FileNotFoundError:
         pass
 
+    inputs = [
+        DashboardInput(name="FPL bootstrap", status="ready", detail="Latest official snapshot loaded"),
+        DashboardInput(name="Odds projections", status="ready", detail=f"{len(projections)} projection records loaded"),
+        DashboardInput(name="Hermes decision", status="ready", detail=f"GW {decision.gameweek} committed"),
+    ]
+    if plan_snapshot is not None and plan_snapshot.projection_catalog:
+        inputs.append(
+            DashboardInput(name="Projection catalog", status="ready", detail=plan_snapshot.projection_catalog),
+        )
+
     return CurrentDashboard(
         gameweek=decision.gameweek,
         season_id=decision.season_id,
@@ -186,12 +217,33 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         players=squad_rows,
         transfers=transfers,
         horizon=horizon,
-        inputs=[
-            DashboardInput(name="FPL bootstrap", status="ready", detail="Latest official snapshot loaded"),
-            DashboardInput(name="Odds projections", status="ready", detail=f"{len(projections)} projection records loaded"),
-            DashboardInput(name="Hermes decision", status="ready", detail=f"GW {decision.gameweek} committed"),
-        ],
+        inputs=inputs,
         scorecard=scorecard,
+        projection_catalog=plan_snapshot.projection_catalog if plan_snapshot is not None else None,
+        solver_status=plan_snapshot.solver_status if plan_snapshot is not None else None,
+    )
+
+
+def _horizon_point(week: HorizonPlanWeekSnapshot, names: dict[int, str]) -> DashboardHorizonPoint:
+    return DashboardHorizonPoint(
+        gameweek=week.gameweek,
+        projected_points=week.projected_points,
+        net_projected_points=week.net_projected_points,
+        hit_cost=week.hit_cost,
+        transfers_made=week.transfers_made,
+        free_transfers_before=week.free_transfers_before,
+        bank_after=week.bank_after,
+        odds_coverage=week.odds_coverage,
+        captain_id=week.captain_id,
+        transfers=[
+            DashboardTransfer(
+                out_id=out_id,
+                out_name=names.get(out_id),
+                in_id=in_id,
+                in_name=names.get(in_id, f"#{in_id}"),
+            )
+            for out_id, in_id in zip(week.outgoing_ids, week.incoming_ids)
+        ],
     )
 
 

@@ -28,7 +28,7 @@ class FakeBackend:
 
     def initial_squad(self, strategy):
         players = [CurrentPlayerProjection(i, f"Player {i}", "GK" if i <= 2 else "DEF" if i <= 7 else "MID" if i <= 12 else "FWD", chr(65 + i), 50, float(i), 1.0) for i in range(1, 16)]
-        return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1
+        return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1, None
 
 
 class FakeHorizonBackend(HermesDecisionBackend):
@@ -45,7 +45,7 @@ class FakeHorizonBackend(HermesDecisionBackend):
             OddsAdjustedGameweekProjection(identifier, f"Player {identifier}", position, club, 50, gameweek, 1, 1, points)
             for gameweek in range(target_gameweek, target_gameweek + horizon)
             for identifier, position, club, points in players
-        ]
+        ], "fake-catalog.json"
 
 
 def test_hermes_sets_strategy_and_persists_autonomous_decision(tmp_path) -> None:
@@ -87,7 +87,7 @@ def test_initial_squad_uses_empty_squad_horizon_plan(tmp_path, monkeypatch) -> N
 
     monkeypatch.setattr(hermes_module, "plan_horizon_transfers", capture_plan)
 
-    squad, gameweek = backend.initial_squad(strategy)
+    squad, gameweek, snapshot = backend.initial_squad(strategy)
 
     opening = captured["plan"].gameweeks[0]
     assert captured["state"].player_ids == []
@@ -96,6 +96,9 @@ def test_initial_squad_uses_empty_squad_horizon_plan(tmp_path, monkeypatch) -> N
     assert gameweek == opening.gameweek
     assert squad.players == opening.resulting_squad
     assert squad.bank == opening.bank_after
+    assert snapshot.projection_catalog == "fake-catalog.json"
+    assert snapshot.pre_season is True
+    assert snapshot.weeks[0].gameweek == opening.gameweek
 
 
 def test_hermes_reinitializes_a_legacy_opening_state_once(tmp_path, monkeypatch) -> None:
@@ -125,7 +128,7 @@ def test_hermes_gw1_commit_resets_free_transfers(tmp_path, action) -> None:
     manager.run(expected_gameweek=1, expected_season_id="2026-27")
     previous = manager.latest_state()
     manager._strategy = previous.strategy
-    manager._horizon = backend.horizon_plan(previous.squad, previous.strategy, 1)
+    manager._horizon, manager._catalog_id = backend.horizon_plan(previous.squad, previous.strategy, 1)
     manager._hold = backend.hold_week(previous.squad, previous.strategy.planning_horizon, 1)
     manager._expected_gameweek = 1
     manager._expected_season_id = "2026-27"
@@ -147,6 +150,25 @@ def test_hermes_returns_the_existing_decision_for_a_duplicate_current_gameweek(t
     assert manager.latest_state().version == 1
     assert len(manager.decisions()) == 1
     assert model.step == 3
+
+
+def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+
+    result = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    snapshot = result.decision.horizon_plan
+    assert snapshot is not None
+    assert snapshot.projection_catalog == "fake-catalog.json"
+    assert snapshot.pre_season is True
+    assert len(snapshot.weeks) == 4
+    assert snapshot.weeks[0].gameweek == 1
+    assert snapshot.weeks[0].free_transfers_before == 5
+    assert snapshot.weeks[1].free_transfers_before == 1
+    assert len(snapshot.weeks[0].squad_ids) == 15
+    assert len(snapshot.weeks[0].starting_xi_ids) == 11
+    assert snapshot.weeks[0].captain_id is not None
+    assert snapshot.total_net_projected_points > 0
 
 
 def test_context_includes_scored_decision_history(tmp_path) -> None:

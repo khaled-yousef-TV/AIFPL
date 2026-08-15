@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
 from aifpl.health import SourceHealthChecker
-from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
+from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.optimizer import OptimizedSquad
 from aifpl.player_evidence import PlayerEvidenceStore
@@ -76,6 +76,7 @@ class HermesDecision(BaseModel):
     decision_path: str
     state_path: str = ""
     season_id: str = ""
+    horizon_plan: HorizonPlanSnapshot | None = None
 
 
 class HermesRunResult(BaseModel):
@@ -93,6 +94,33 @@ class HermesRunTranscript(BaseModel):
     error: str | None = None
     tool_steps: int = 0
     messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class HorizonPlanWeekSnapshot(BaseModel):
+    gameweek: int
+    transfers_made: int
+    free_transfers_before: int
+    hit_cost: int
+    bank_after: int
+    projected_points: float
+    net_projected_points: float
+    odds_coverage: float
+    outgoing_ids: list[int] = Field(default_factory=list)
+    incoming_ids: list[int] = Field(default_factory=list)
+    captain_id: int | None = None
+    starting_xi_ids: list[int] = Field(default_factory=list)
+    squad_ids: list[int] = Field(default_factory=list)
+
+
+class HorizonPlanSnapshot(BaseModel):
+    projection_catalog: str = ""
+    pre_season: bool = False
+    solver_status: str = ""
+    methodology: str = ""
+    total_projected_points: float = 0.0
+    total_hit_cost: int = 0
+    total_net_projected_points: float = 0.0
+    weeks: list[HorizonPlanWeekSnapshot] = Field(default_factory=list)
 
 
 class OpenAICompatibleHermesModel:
@@ -183,8 +211,8 @@ class HermesDecisionBackend:
             }
         return {"rows": rows, "summary": summary}
 
-    def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int]:
-        rows = self._horizon_rows(1, strategy.planning_horizon)
+    def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int, HorizonPlanSnapshot]:
+        rows, catalog_id = self._horizon_rows(1, strategy.planning_horizon)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         plan = plan_horizon_transfers(
             rows, HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
@@ -200,10 +228,10 @@ class HermesDecisionBackend:
             projected_points=opening.projected_points, budget=total_cost + opening.bank_after,
             solver_status=plan.solver_status, methodology=plan.methodology,
             starting_xi=opening.starting_xi, captain=opening.captain,
-        ), opening.gameweek
+        ), opening.gameweek, _plan_snapshot(plan, catalog_id, pre_season=True)
 
-    def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> HorizonTransferPlan:
-        rows = self._horizon_rows(target_gameweek, strategy.planning_horizon)
+    def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> tuple[HorizonTransferPlan, str]:
+        rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_horizon_transfers(rows, HorizonSquadState(
@@ -211,10 +239,10 @@ class HermesDecisionBackend:
             purchase_prices=state.purchase_prices,
         ), decision_hit_penalty=4 + strategy.hit_aversion * 4 + (1 - strategy.risk_tolerance) * 2,
             preferred_player_ids=preferred, differential_appetite=strategy.differential_appetite,
-            pre_season=pre_season)
+            pre_season=pre_season), catalog_id
 
     def hold_week(self, state: HermesSquadState, horizon: int, target_gameweek: int) -> dict[str, Any]:
-        rows = self._horizon_rows(target_gameweek, horizon)
+        rows, _ = self._horizon_rows(target_gameweek, horizon)
         gameweek = target_gameweek
         by_id = {row.player_id: row for row in rows if row.gameweek == gameweek and row.player_id in state.player_ids}
         players = [CurrentPlayerProjection(row.player_id, row.player_name, row.position, row.club, row.cost, row.projected_points, 1.0, row.methodology) for row in by_id.values()]
@@ -240,7 +268,7 @@ class HermesDecisionBackend:
                 return path.name
         raise FileNotFoundError(f"No odds projection catalog covers {minimum_gameweeks}-{maximum_gameweeks} gameweeks")
 
-    def _horizon_rows(self, target_gameweek: int, horizon: int):
+    def _horizon_rows(self, target_gameweek: int, horizon: int) -> tuple[list[OddsAdjustedGameweekProjection], str]:
         directory = self.root / "normalized" / "current" / "odds_projections"
         candidates: list[tuple[datetime, Path]] = []
         for path in directory.glob("*.jsonl"):
@@ -252,7 +280,7 @@ class HermesDecisionBackend:
             available = sorted({row.gameweek for row in rows})
             if target_gameweek in available:
                 selected = set(range(target_gameweek, min(max(available), target_gameweek + horizon - 1) + 1))
-                return [row for row in rows if row.gameweek in selected]
+                return [row for row in rows if row.gameweek in selected], path.name
         raise FileNotFoundError(f"No odds projection catalog contains gameweek {target_gameweek}")
 
 
@@ -263,7 +291,9 @@ class HermesManager:
         self.backend = backend or HermesDecisionBackend(root)
         self._strategy: HermesStrategy | None = None
         self._initial: OptimizedSquad | None = None
+        self._initial_snapshot: HorizonPlanSnapshot | None = None
         self._horizon: HorizonTransferPlan | None = None
+        self._catalog_id: str | None = None
         self._hold: dict[str, Any] | None = None
         self._initial_gameweek: int | None = None
         self._expected_gameweek: int | None = None
@@ -323,7 +353,7 @@ class HermesManager:
             ):
                 return None
             self._strategy = previous.strategy
-            self._initial, self._initial_gameweek = self.backend.initial_squad(self._strategy)
+            self._initial, self._initial_gameweek, self._initial_snapshot = self.backend.initial_squad(self._strategy)
             return self._commit(
                 {
                     "action": "adopt_initial",
@@ -508,7 +538,7 @@ class HermesManager:
         if name == "get_initial_squad":
             if self._strategy is None:
                 raise ValueError("Set strategy before requesting a squad")
-            self._initial, self._initial_gameweek = self.backend.initial_squad(self._strategy)
+            self._initial, self._initial_gameweek, self._initial_snapshot = self.backend.initial_squad(self._strategy)
             return _squad_summary(self._initial)
         if name == "get_horizon_plan":
             if previous is None:
@@ -516,10 +546,11 @@ class HermesManager:
             if self._strategy is None:
                 raise ValueError("Set strategy before requesting a plan")
             target_gameweek = self._expected_gameweek or previous.gameweek + 1
-            self._horizon = self.backend.horizon_plan(previous.squad, self._strategy, target_gameweek)
+            self._horizon, self._catalog_id = self.backend.horizon_plan(previous.squad, self._strategy, target_gameweek)
             self._hold = self.backend.hold_week(previous.squad, self._strategy.planning_horizon, target_gameweek)
             summary = _horizon_summary(self._horizon)
             summary["applies_to_current_squad"] = True
+            summary["projection_catalog"] = self._catalog_id
             if target_gameweek == 1:
                 summary["pre_season"] = True
                 summary["note"] = "Pre-season: GW1 transfers are free; later gameweeks include normal hit costs."
@@ -535,6 +566,7 @@ class HermesManager:
             raise ValueError("Hermes must set a strategy before committing")
         action = arguments["action"]
         explanation = str(arguments["explanation"])
+        plan_snapshot: HorizonPlanSnapshot | None = None
         if action == "adopt_initial":
             if self._initial is None:
                 raise ValueError("Hermes must inspect the initial squad before adopting it")
@@ -545,6 +577,7 @@ class HermesManager:
             captain_id, bank, free, outgoing, incoming = self._initial.captain.player_id, self._initial.bank, 1, [], squad_ids
             purchase_prices = {player.player_id: player.cost for player in self._initial.players}
             methodology = self._initial.methodology
+            plan_snapshot = self._initial_snapshot
         elif action in ("execute_horizon", "hold"):
             if previous is None or self._horizon is None:
                 raise ValueError("Hermes must inspect a horizon plan before committing")
@@ -564,6 +597,7 @@ class HermesManager:
                 purchase_prices = {player_id: previous.squad.purchase_prices.get(player_id, costs[player_id]) for player_id in squad_ids}
             if gameweek == 1:
                 free = 1
+            plan_snapshot = _plan_snapshot(self._horizon, self._catalog_id or "", pre_season=gameweek == 1)
         else:
             raise ValueError("action must be adopt_initial, execute_horizon, or hold")
         now = datetime.now(timezone.utc)
@@ -584,6 +618,7 @@ class HermesManager:
             created_at=now, backend_methodology=methodology, decision_path=str(decision_path),
             state_path=str(state_path),
             season_id=season_id,
+            horizon_plan=plan_snapshot,
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
@@ -626,8 +661,56 @@ def _squad_summary(squad: OptimizedSquad) -> dict[str, Any]:
     return {"players": [{"id": p.player_id, "name": p.player_name, "position": p.position, "club": p.club, "points": p.projected_points} for p in squad.players], "starting_xi": [p.player_name for p in squad.starting_xi], "captain": squad.captain.player_name, "projected_points": squad.projected_points, "bank": squad.bank, "methodology": squad.methodology}
 
 
+def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool) -> HorizonPlanSnapshot:
+    return HorizonPlanSnapshot(
+        projection_catalog=catalog_id,
+        pre_season=pre_season,
+        solver_status=plan.solver_status,
+        methodology=plan.methodology,
+        total_projected_points=plan.total_projected_points,
+        total_hit_cost=plan.total_hit_cost,
+        total_net_projected_points=plan.total_net_projected_points,
+        weeks=[_week_snapshot(week) for week in plan.gameweeks],
+    )
+
+
+def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
+    return HorizonPlanWeekSnapshot(
+        gameweek=week.gameweek,
+        transfers_made=week.transfers_made,
+        free_transfers_before=week.free_transfers_before,
+        hit_cost=week.hit_cost,
+        bank_after=week.bank_after,
+        projected_points=week.projected_points,
+        net_projected_points=week.net_projected_points,
+        odds_coverage=week.odds_coverage,
+        outgoing_ids=[player.player_id for player in week.outgoing],
+        incoming_ids=[player.player_id for player in week.incoming],
+        captain_id=week.captain.player_id,
+        starting_xi_ids=[player.player_id for player in week.starting_xi],
+        squad_ids=[player.player_id for player in week.resulting_squad],
+    )
+
+
 def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
-    return {"solver_status": plan.solver_status, "total_net_points": plan.total_net_projected_points, "weeks": [{"gameweek": w.gameweek, "out": [p.player_name for p in w.outgoing], "in": [p.player_name for p in w.incoming], "hits": w.hit_cost, "captain": w.captain.player_name, "net_points": w.net_projected_points} for w in plan.gameweeks]}
+    return {
+        "solver_status": plan.solver_status,
+        "total_net_points": plan.total_net_projected_points,
+        "weeks": [
+            {
+                "gameweek": w.gameweek,
+                "out": [p.player_name for p in w.outgoing],
+                "in": [p.player_name for p in w.incoming],
+                "transfers_made": w.transfers_made,
+                "free_transfers_before": w.free_transfers_before,
+                "hits": w.hit_cost,
+                "bank_after": w.bank_after,
+                "captain": w.captain.player_name,
+                "net_points": w.net_projected_points,
+            }
+            for w in plan.gameweeks
+        ],
+    }
 
 
 def _season_id_for_now(now: datetime) -> str:
