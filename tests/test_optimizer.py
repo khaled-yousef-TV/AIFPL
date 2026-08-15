@@ -53,6 +53,21 @@ def test_optimizer_rejects_duplicate_candidate_ids() -> None:
         optimize_squad(full_pool() + [full_pool()[0]])
 
 
+def test_optimizer_allows_sub_floor_starter_when_forced(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "0")
+    weak_forwards = full_pool()
+    weak_forwards[12] = candidate(13, "FWD", "F", 50, 0.5)
+    weak_forwards[13] = candidate(14, "FWD", "G", 50, 0.7)
+    weak_forwards[14] = candidate(15, "FWD", "H", 50, 0.9)
+
+    result = optimize_squad(weak_forwards, budget=750)
+
+    forwards = [player for player in result.starting_xi if player.position == "FWD"]
+    assert len(forwards) == 1
+    assert forwards[0].projected_points < 2.0
+
+
 def test_optimizer_enforces_club_cap_with_normalized_names() -> None:
     candidates = full_pool() + [candidate(16, "FWD", " a ", 50, 100)]
 

@@ -60,7 +60,7 @@ def optimize_squad(
         model.add(captains[index] <= starters[index])
         model.add(selected[index] == starters[index] + benches[index])
         model.add(dead_bench[index] <= benches[index])
-        model.add(candidates[index].projected_points >= floor).only_enforce_if(selected[index], dead_bench[index].Not())
+        model.add(candidates[index].projected_points >= floor).only_enforce_if(selected[index], benches[index], dead_bench[index].Not())
     model.add(sum(dead_bench) <= 2)
     model.add(sum(starters) == 11)
     model.add(sum(captains) == 1)

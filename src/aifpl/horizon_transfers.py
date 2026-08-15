@@ -158,7 +158,7 @@ def plan_horizon_transfers(
             model.add(selected[player_id, week_index] == starter[player_id, week_index] + bench[player_id, week_index])
             model.add(dead_bench[player_id, week_index] <= bench[player_id, week_index])
             model.add(by_player_gameweek[player_id, gameweek].projected_points >= bench_floor).only_enforce_if(
-                selected[player_id, week_index], dead_bench[player_id, week_index].Not()
+                selected[player_id, week_index], bench[player_id, week_index], dead_bench[player_id, week_index].Not()
             )
 
             previous = 1 if week_index == 0 and player_id in current_ids else 0 if week_index == 0 else selected[player_id, week_index - 1]

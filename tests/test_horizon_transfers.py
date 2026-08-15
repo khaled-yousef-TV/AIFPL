@@ -248,3 +248,23 @@ def test_robustness_score_is_bounded_and_averaged() -> None:
     assert plan.robustness_score == round(
         sum(week.robustness_score for week in plan.gameweeks) / len(plan.gameweeks), 1,
     )
+
+
+def test_horizon_allows_sub_floor_starter_when_forced(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_BENCH_MIN_PROJECTION", "2.0")
+    rows = pool()
+    for gameweek in (1, 2, 3):
+        for identifier in (13, 14, 15):
+            index = next(
+                i for i, row in enumerate(rows)
+                if row.player_id == identifier and row.gameweek == gameweek
+            )
+            rows[index] = replace(rows[index], projected_points=0.5)
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    forwards = [player for player in plan.gameweeks[0].starting_xi if player.position == "FWD"]
+    assert len(forwards) == 1
+    assert forwards[0].projected_points < 2.0
