@@ -24,7 +24,7 @@ from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_k
 # Bump when plan-generation semantics change (accounting, objective, captain
 # selection, robustness, ...). Committed plans record their version so stale
 # opening squads can be regenerated deterministically.
-PLANNER_VERSION = "v2"
+PLANNER_VERSION = "v3"
 
 
 class HorizonSquadState(BaseModel):
