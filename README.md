@@ -371,6 +371,14 @@ ownership change. The captain box ranks the squad's top projected captain
 options from the committed catalog so the chosen captain is shown in context
 rather than in isolation.
 
+Player rows also expose a transparent `value` (projected points per £m) and a
+`differential_score` (projected points times one minus ownership) so the
+interface distinguishes price efficiency and under-ownership from raw
+projections. Ownership is preserved for every projection source: xG/xA and
+fixture catalogs fill `selected_by_percent` from the latest player catalog when
+their rows do not carry it, so the differential tie-break is never silently
+zeroed for non-odds sources.
+
 ## Current-player projection baseline
 
 `build-current-projections` creates a transparent real-player baseline from

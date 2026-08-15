@@ -114,7 +114,7 @@ def test_dashboard_confidence_is_unknown_without_manifest(tmp_path) -> None:
 
 
 def test_dashboard_player_carries_participation_evidence() -> None:
-    player = CurrentPlayer(1, "Test", "MID", 1, "Arsenal", 100, "a", None, 0, 5, 100, 1900, 25, 5, 4, 9, 20)
+    player = CurrentPlayer(1, "Test", "MID", 1, "Arsenal", 100, "a", None, 0, 5, 100, 1900, 25, 5, 4, 9, 20, selected_by_percent=20.0)
     projection = OddsAdjustedGameweekProjection(
         1, "Test", "MID", "Arsenal", 100, 1, 1, 1, 6.0,
         expected_minutes=76.0, start_probability=1.0, availability_multiplier=1.0,
@@ -125,6 +125,8 @@ def test_dashboard_player_carries_participation_evidence() -> None:
     assert row.expected_minutes == 76.0
     assert row.start_probability == 1.0
     assert row.availability_multiplier == 1.0
+    assert row.value == 0.6
+    assert row.differential_score == 4.8
 
 
 def test_dashboard_moves_compute_horizon_gain_from_pinned_rows() -> None:

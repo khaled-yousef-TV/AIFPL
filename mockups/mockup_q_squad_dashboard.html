@@ -300,6 +300,8 @@
     ];
     if (player.expected_minutes != null) rows.push(["Expected mins", `${Math.round(player.expected_minutes)}`]);
     if (player.start_probability != null) rows.push(["Start prob", `${Math.round(player.start_probability * 100)}%`]);
+    if (player.value != null) rows.push(["Value", `${player.value.toFixed(2)} pts/\u00a3m`]);
+    if (player.differential_score != null) rows.push(["Differential", `${player.differential_score.toFixed(1)}`]);
     rows.push(["Projected", `${player.projected_points.toFixed(1)} pts`]);
     const clubLine = team ? team.short_name : player.club;
     tip.innerHTML = `<div class="tip-name">${player.name}</div><div class="tip-club">${clubLine} \u00b7 ${player.position}</div>`;

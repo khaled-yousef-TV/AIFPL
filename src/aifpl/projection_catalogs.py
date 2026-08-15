@@ -5,6 +5,7 @@ from collections import defaultdict
 from enum import Enum
 from pathlib import Path
 
+from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.odds_projections import OddsProjectionStore
@@ -23,12 +24,13 @@ def load_projection_candidates(
 ) -> list[CurrentPlayerProjection]:
     if catalog_id is not None and source not in (ProjectionSource.FIXTURE, ProjectionSource.ODDS):
         raise ValueError("catalog_id is supported only for fixture and odds projection sources")
+    ownership = _latest_ownership(root)
     if source == ProjectionSource.CURRENT:
         return CurrentProjectionStore(root).latest()
     if source == ProjectionSource.XG_XA:
         rows = XgXaProjectionStore(root).latest()
     elif source == ProjectionSource.FIXTURE:
-        return _aggregate(FixtureProjectionStore(root).latest(catalog_id))
+        return _aggregate(FixtureProjectionStore(root).latest(catalog_id), ownership)
     else:
         return _aggregate(OddsProjectionStore(root).latest(catalog_id))
     return [
@@ -36,13 +38,24 @@ def load_projection_candidates(
             player_id=row.player_id, player_name=row.player_name, position=row.position,
             club=row.club, cost=row.cost, projected_points=row.projected_points,
             availability_multiplier=1.0, methodology=row.methodology,
-            selected_by_percent=getattr(row, "selected_by_percent", 0.0),
+            selected_by_percent=ownership.get(row.player_id, 0.0),
         )
         for row in rows
     ]
 
 
-def _aggregate(rows: list[object]) -> list[CurrentPlayerProjection]:
+def _latest_ownership(root: Path) -> dict[int, float]:
+    try:
+        return {
+            player.id: player.selected_by_percent
+            for player in CurrentPlayerCatalogStore(root).latest_players()
+        }
+    except FileNotFoundError:
+        return {}
+
+
+def _aggregate(rows: list[object], ownership: dict[int, float] | None = None) -> list[CurrentPlayerProjection]:
+    ownership = ownership or {}
     grouped: dict[int, list[object]] = defaultdict(list)
     seen: set[tuple[int, int]] = set()
     for row in rows:
@@ -67,7 +80,7 @@ def _aggregate(rows: list[object]) -> list[CurrentPlayerProjection]:
             player_id=player_id, player_name=first.player_name, position=first.position,
             club=first.club, cost=first.cost, projected_points=round(points, 4),
             availability_multiplier=1.0, methodology=first.methodology,
-            selected_by_percent=getattr(first, "selected_by_percent", 0.0),
+            selected_by_percent=getattr(first, "selected_by_percent", 0.0) or ownership.get(player_id, 0.0),
         ))
     if not candidates:
         raise ValueError("Projection catalog is empty")

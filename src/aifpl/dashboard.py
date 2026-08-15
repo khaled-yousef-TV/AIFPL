@@ -29,6 +29,8 @@ class DashboardPlayer(BaseModel):
     expected_minutes: float | None = None
     start_probability: float | None = None
     availability_multiplier: float | None = None
+    value: float | None = None
+    differential_score: float | None = None
 
 
 class DashboardTransfer(BaseModel):
@@ -387,6 +389,7 @@ def _dashboard_player(
     is_captain: bool,
 ) -> DashboardPlayer:
     projected_points = float(getattr(projection, "projected_points", 0.0))
+    ownership = player.selected_by_percent
     return DashboardPlayer(
         id=player.id,
         name=player.name,
@@ -398,9 +401,11 @@ def _dashboard_player(
         is_starter=is_starter,
         is_captain=is_captain,
         form=round(player.form, 4),
-        selected_by_percent=round(player.selected_by_percent, 4),
+        selected_by_percent=round(ownership, 4),
         points_per_game=round(player.points_per_game, 4),
         expected_minutes=getattr(projection, "expected_minutes", None),
         start_probability=getattr(projection, "start_probability", None),
         availability_multiplier=getattr(projection, "availability_multiplier", None),
+        value=round(projected_points / (player.cost / 10), 4) if player.cost > 0 else None,
+        differential_score=round(projected_points * (1 - ownership / 100), 4),
     )
