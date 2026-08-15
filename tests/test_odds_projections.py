@@ -49,3 +49,34 @@ def test_clean_sheet_signal_is_scaled_by_expected_participation() -> None:
     projection = build_odds_adjusted_projections([unavailable], [fixture], [], 1, 1, clean_sheet_signals=[signal])[0]
 
     assert projection.projected_points == 0
+
+
+def test_odds_projection_exposes_participation_evidence() -> None:
+    fixture = CurrentFixture(2, 1, "2026-08-15T14:00:00Z", 1, 2, 3, 3, False)
+
+    projection = build_odds_adjusted_projections([player()], [fixture], [], 1, 1)[0]
+
+    assert projection.expected_minutes is not None
+    assert 0 < projection.expected_minutes <= 90
+    assert projection.start_probability is not None
+    assert 0 <= projection.start_probability <= 1
+    assert projection.availability_multiplier == 1.0
+
+
+def test_odds_projection_expected_minutes_reflects_availability() -> None:
+    unavailable = replace(player(), chance_of_playing_next_round=0)
+    fixture = CurrentFixture(2, 1, "2026-08-15T14:00:00Z", 1, 2, 3, 3, False)
+
+    projection = build_odds_adjusted_projections([unavailable], [fixture], [], 1, 1)[0]
+
+    assert projection.expected_minutes == 0
+    assert projection.availability_multiplier == 0
+    assert projection.projected_points == 0
+
+
+def test_odds_projection_without_fixture_has_no_participation_evidence() -> None:
+    projection = build_odds_adjusted_projections([player()], [], [], 1, 1)[0]
+
+    assert projection.expected_minutes is None
+    assert projection.start_probability is None
+    assert projection.availability_multiplier is None

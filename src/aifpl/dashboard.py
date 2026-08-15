@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +26,9 @@ class DashboardPlayer(BaseModel):
     form: float = 0.0
     selected_by_percent: float = 0.0
     points_per_game: float = 0.0
+    expected_minutes: float | None = None
+    start_probability: float | None = None
+    availability_multiplier: float | None = None
 
 
 class DashboardTransfer(BaseModel):
@@ -63,6 +67,15 @@ class DashboardScorecard(BaseModel):
     best_player_actual: float | None = None
 
 
+class DashboardConfidence(BaseModel):
+    status: str = "unknown"
+    calibration: str = "uncalibrated"
+    odds_coverage_by_gameweek: dict[int, float] = Field(default_factory=dict)
+    evidence_cutoff: datetime | None = None
+    max_evidence_age_hours: float | None = None
+    projection_catalog: str | None = None
+
+
 class CurrentDashboard(BaseModel):
     gameweek: int
     season_id: str
@@ -85,6 +98,7 @@ class CurrentDashboard(BaseModel):
     scorecard: DashboardScorecard | None = None
     projection_catalog: str | None = None
     solver_status: str | None = None
+    confidence: DashboardConfidence = Field(default_factory=DashboardConfidence)
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
@@ -221,6 +235,30 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         scorecard=scorecard,
         projection_catalog=plan_snapshot.projection_catalog if plan_snapshot is not None else None,
         solver_status=plan_snapshot.solver_status if plan_snapshot is not None else None,
+        confidence=_dashboard_confidence(root),
+    )
+
+
+def _dashboard_confidence(root: Path) -> DashboardConfidence:
+    try:
+        path = OddsProjectionStore(root).latest_path()
+    except FileNotFoundError:
+        return DashboardConfidence()
+    manifest_path = path.with_suffix(".manifest.json")
+    if not manifest_path.exists():
+        return DashboardConfidence(projection_catalog=path.name)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return DashboardConfidence(projection_catalog=path.name)
+    parameters = manifest.get("parameters", {})
+    coverage = parameters.get("odds_coverage_by_gameweek") or {}
+    return DashboardConfidence(
+        status=parameters.get("odds_coverage_status", "unknown"),
+        odds_coverage_by_gameweek={int(key): float(value) for key, value in coverage.items()},
+        evidence_cutoff=parameters.get("evidence_cutoff"),
+        max_evidence_age_hours=parameters.get("max_evidence_age_hours"),
+        projection_catalog=path.name,
     )
 
 
@@ -267,4 +305,7 @@ def _dashboard_player(
         form=round(player.form, 4),
         selected_by_percent=round(player.selected_by_percent, 4),
         points_per_game=round(player.points_per_game, 4),
+        expected_minutes=getattr(projection, "expected_minutes", None),
+        start_probability=getattr(projection, "start_probability", None),
+        availability_multiplier=getattr(projection, "availability_multiplier", None),
     )

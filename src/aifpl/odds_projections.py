@@ -35,6 +35,9 @@ class OddsAdjustedGameweekProjection:
     clean_sheet_probability: float | None = None
     assist_probability: float | None = None
     selected_by_percent: float = 0.0
+    expected_minutes: float | None = None
+    start_probability: float | None = None
+    availability_multiplier: float | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,9 @@ def build_odds_adjusted_projections(
             odds_backed = 0
             clean_probabilities: list[float] = []
             assist_probabilities: list[float] = []
+            expected_minutes_total = 0.0
+            start_probability: float | None = None
+            availability_multiplier: float | None = None
             for fixture in player_fixtures:
                 start_override = None
                 if gameweek == start_gameweek:
@@ -97,6 +103,16 @@ def build_odds_adjusted_projections(
                 )
                 base = blend.projected_points
                 participation = blend.expected_minutes / 90
+                expected_minutes_total += blend.expected_minutes
+                if start_probability is None:
+                    opportunities = gameweeks_elapsed or max(1, player.starts)
+                    start_probability = (
+                        start_override if start_override is not None else min(1.0, player.starts / opportunities)
+                    )
+                    availability_multiplier = (
+                        (player.chance_of_playing_next_round / 100)
+                        if gameweek == start_gameweek and player.chance_of_playing_next_round is not None else 1.0
+                    )
                 difficulty = fixture.home_difficulty if player.club_id == fixture.home_team_id else fixture.away_difficulty
                 multiplier = DIFFICULTY_MULTIPLIERS[difficulty]
                 market = consensus_by_fixture.get(fixture.id)
@@ -120,6 +136,9 @@ def build_odds_adjusted_projections(
                 clean_sheet_probability=round(sum(clean_probabilities) / len(clean_probabilities), 4) if clean_probabilities else None,
                 assist_probability=round(sum(assist_probabilities) / len(assist_probabilities), 4) if assist_probabilities else None,
                 selected_by_percent=player.selected_by_percent,
+                expected_minutes=round(expected_minutes_total, 4) if player_fixtures else None,
+                start_probability=round(start_probability, 4) if start_probability is not None else None,
+                availability_multiplier=round(availability_multiplier, 4) if availability_multiplier is not None else None,
             ))
     return projections
 

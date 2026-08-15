@@ -357,6 +357,13 @@ bank, gross/net points, odds coverage, captain, and squad IDs. The dashboard
 renders that persisted plan instead of recomputing it against newer catalogs,
 so committed economics stay auditable and drift-free.
 
+The dashboard reports projection confidence honestly rather than as a binary
+"catalog loaded" signal: per-gameweek odds coverage and status from the catalog
+manifest, evidence cutoff/age when lineup evidence was consumed, and an explicit
+`uncalibrated` label until chronological holdout calibration produces intervals.
+Player rows expose expected minutes, start probability, and availability
+multiplier when the projection catalog carries them.
+
 ## Current-player projection baseline
 
 `build-current-projections` creates a transparent real-player baseline from
