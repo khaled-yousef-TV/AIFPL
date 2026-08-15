@@ -7,8 +7,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
-from aifpl.hermes import HermesManager, HorizonPlanWeekSnapshot
-from aifpl.odds_projections import OddsProjectionStore
+from aifpl.hermes import HermesDecision, HermesManager, HorizonPlanSnapshot, HorizonPlanWeekSnapshot
+from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
 from aifpl.scheduler import DeadlineScheduler
 from aifpl.scoring import DecisionScorer
 
@@ -36,6 +36,27 @@ class DashboardTransfer(BaseModel):
     out_name: str | None = None
     in_id: int
     in_name: str
+
+
+class DashboardMove(BaseModel):
+    out_id: int | None = None
+    out_name: str | None = None
+    in_id: int
+    in_name: str
+    gameweek: int
+    horizon_gain: float | None = None
+    hit_cost: int | None = None
+    net_gain: float | None = None
+    odds_coverage: float | None = None
+    out_ownership: float | None = None
+    in_ownership: float | None = None
+
+
+class DashboardCaptainOption(BaseModel):
+    player_id: int
+    name: str
+    projected_points: float
+    is_captain: bool = False
 
 
 class DashboardHorizonPoint(BaseModel):
@@ -93,6 +114,8 @@ class CurrentDashboard(BaseModel):
     projection_available: bool
     players: list[DashboardPlayer]
     transfers: list[DashboardTransfer] = Field(default_factory=list)
+    moves: list[DashboardMove] = Field(default_factory=list)
+    captain_options: list[DashboardCaptainOption] = Field(default_factory=list)
     horizon: list[DashboardHorizonPoint] = Field(default_factory=list)
     inputs: list[DashboardInput] = Field(default_factory=list)
     scorecard: DashboardScorecard | None = None
@@ -107,9 +130,15 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
     decision = HermesManager(root).latest_decision()
     schedule = DeadlineScheduler(root).status()
     pre_season = schedule.event == 1 and schedule.deadline > datetime.now(timezone.utc)
+    plan_snapshot = decision.horizon_plan
     current_players = CurrentPlayerCatalogStore(root).latest_players()
     players_by_id = {player.id: player for player in current_players}
     projections = OddsProjectionStore(root).latest()
+    if plan_snapshot is not None and plan_snapshot.projection_catalog:
+        try:
+            projections = OddsProjectionStore(root).latest(plan_snapshot.projection_catalog)
+        except (FileNotFoundError, ValueError):
+            pass
     projections_by_key = {(row.player_id, row.gameweek): row for row in projections}
 
     missing_ids = set(decision.squad.player_ids) - set(players_by_id)
@@ -144,7 +173,6 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         for role in ("DEF", "MID", "FWD")
     )
     names = {player_id: player.name for player_id, player in players_by_id.items()}
-    plan_snapshot = decision.horizon_plan
     horizon: list[DashboardHorizonPoint]
     if plan_snapshot is not None and plan_snapshot.weeks:
         horizon = [_horizon_point(week, names) for week in plan_snapshot.weeks]
@@ -172,6 +200,8 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             )
             for gameweek in available_gameweeks
         ]
+    moves = _dashboard_moves(plan_snapshot, projections_by_key, names) if plan_snapshot is not None else []
+    captain_options = _dashboard_captain_options(projections_by_key, decision, names) if plan_snapshot is not None else []
     transfers = [
         DashboardTransfer(
             out_id=out_id,
@@ -230,6 +260,8 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         projection_available=any(row is not None for row in current_projection_rows.values()),
         players=squad_rows,
         transfers=transfers,
+        moves=moves,
+        captain_options=captain_options,
         horizon=horizon,
         inputs=inputs,
         scorecard=scorecard,
@@ -260,6 +292,57 @@ def _dashboard_confidence(root: Path) -> DashboardConfidence:
         max_evidence_age_hours=parameters.get("max_evidence_age_hours"),
         projection_catalog=path.name,
     )
+
+
+def _dashboard_moves(
+    plan_snapshot: HorizonPlanSnapshot,
+    projections_by_key: dict[tuple[int, int], OddsAdjustedGameweekProjection],
+    names: dict[int, str],
+) -> list[DashboardMove]:
+    gameweeks = [week.gameweek for week in plan_snapshot.weeks]
+    moves: list[DashboardMove] = []
+    for week in plan_snapshot.weeks:
+        if not week.outgoing_ids or not week.incoming_ids:
+            continue
+        allocated_hit = week.hit_cost / max(1, week.transfers_made)
+        for out_id, in_id in zip(week.outgoing_ids, week.incoming_ids):
+            gain = sum(
+                projections_by_key[(in_id, gameweek)].projected_points
+                - projections_by_key[(out_id, gameweek)].projected_points
+                for gameweek in gameweeks
+                if (in_id, gameweek) in projections_by_key and (out_id, gameweek) in projections_by_key
+            )
+            out_row = projections_by_key.get((out_id, week.gameweek))
+            in_row = projections_by_key.get((in_id, week.gameweek))
+            moves.append(DashboardMove(
+                out_id=out_id, out_name=names.get(out_id), in_id=in_id, in_name=names.get(in_id, f"#{in_id}"),
+                gameweek=week.gameweek, horizon_gain=round(gain, 4), hit_cost=week.hit_cost,
+                net_gain=round(gain - allocated_hit, 4), odds_coverage=week.odds_coverage,
+                out_ownership=out_row.selected_by_percent if out_row is not None else None,
+                in_ownership=in_row.selected_by_percent if in_row is not None else None,
+            ))
+    return moves
+
+
+def _dashboard_captain_options(
+    projections_by_key: dict[tuple[int, int], OddsAdjustedGameweekProjection],
+    decision: HermesDecision,
+    names: dict[int, str],
+) -> list[DashboardCaptainOption]:
+    gameweek = decision.gameweek
+    candidates = [
+        (player_id, projections_by_key[(player_id, gameweek)].projected_points)
+        for player_id in decision.squad.player_ids
+        if (player_id, gameweek) in projections_by_key
+    ]
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    return [
+        DashboardCaptainOption(
+            player_id=player_id, name=names.get(player_id, f"#{player_id}"),
+            projected_points=round(points, 4), is_captain=player_id == decision.captain_id,
+        )
+        for player_id, points in candidates[:3]
+    ]
 
 
 def _horizon_point(week: HorizonPlanWeekSnapshot, names: dict[int, str]) -> DashboardHorizonPoint:

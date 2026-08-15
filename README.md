@@ -364,6 +364,13 @@ manifest, evidence cutoff/age when lineup evidence was consumed, and an explicit
 Player rows expose expected minutes, start probability, and availability
 multiplier when the projection catalog carries them.
 
+Each planned transfer is rendered with its computed explanation against the
+pinned catalog: horizon projected gain (in minus out across the planned
+gameweeks), allocated hit cost, net gain, per-gameweek odds coverage, and
+ownership change. The captain box ranks the squad's top projected captain
+options from the committed catalog so the chosen captain is shown in context
+rather than in isolation.
+
 ## Current-player projection baseline
 
 `build-current-projections` creates a transparent real-player baseline from
