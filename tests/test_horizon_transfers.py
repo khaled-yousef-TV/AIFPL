@@ -77,6 +77,16 @@ def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     assert first.hit_cost == 0
 
 
+def test_horizon_planner_captains_the_highest_projected_starter() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    for week in plan.gameweeks:
+        top = max(week.starting_xi, key=lambda player: player.projected_points)
+        assert week.captain.player_id == top.player_id
+
+
 def test_pre_season_planning_resets_to_one_free_transfer_after_gw1() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),

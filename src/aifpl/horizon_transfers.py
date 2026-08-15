@@ -337,6 +337,12 @@ def plan_horizon_transfers(
         captain_player = next(_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(captain[player_id, week_index]))
         incoming_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(incoming[player_id, week_index])]
         outgoing_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(outgoing[player_id, week_index])]
+        # The captain only affects the double-points term, so given a fixed XI the
+        # max-projected starter is always optimal; a time-limited FEASIBLE solve can
+        # miss it, so apply it deterministically after the solve.
+        top_starter = max(lineup, key=lambda player: player.projected_points)
+        if top_starter.player_id != captain_player.player_id:
+            captain_player = top_starter
         projected = sum(player.projected_points for player in lineup) + captain_player.projected_points
         hit = 0 if pre_season and week_index == 0 else solver.value(excess_transfers[week_index]) * 4
         fixture_total = sum(row.fixture_count for row in rows if row.gameweek == gameweek)
