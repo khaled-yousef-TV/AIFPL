@@ -799,7 +799,11 @@
     status.textContent = "Loading evidence...";
     status.classList.remove("error");
     try {
-      const rows = await getJSON("/evidence/players?limit=500");
+      const [rows, players] = await Promise.all([
+        getJSON("/evidence/players?limit=500"),
+        getJSON("/players/current?limit=1000").catch(() => []),
+      ]);
+      const names = new Map((players || []).map(player => [String(player.id), player.name]));
       const body = document.getElementById("evidence-rows");
       body.replaceChildren();
       if (!rows.length) {
@@ -809,8 +813,9 @@
       }
       rows.forEach(record => {
         const tr = document.createElement("tr");
+        const name = names.get(String(record.player_id));
         tr.innerHTML = `
-          <td>#${record.player_id}</td>
+          <td>${name ? escapeHTML(name) : `#${record.player_id}`} <span class="pill neutral">#${record.player_id}</span></td>
           <td><span class="pill neutral">${escapeHTML(record.evidence_type)}</span></td>
           <td>${record.provider_probability != null ? (record.provider_probability * 100).toFixed(0) + "%" : "--"}</td>
           <td class="wrap">${escapeHTML(record.categorical_value || "--")}</td>
