@@ -12,5 +12,19 @@
     "published_at": "2026-08-21T12:00:00Z",
     "source_url": "https://example.test/predictions/fixture-123",
     "source_class": "named_reporter"
+  },
+  {
+    "provider": "tournament_analysis",
+    "source_record_id": "late-return-player-9-gw1",
+    "player_id": 9,
+    "evidence_type": "late_return",
+    "categorical_value": "returning late from the World Cup",
+    "provider_probability": 0.6,
+    "minutes_multiplier": 0.7,
+    "season_id": "2026-27",
+    "gameweek": 1,
+    "published_at": "2026-08-21T12:00:00Z",
+    "source_url": "https://example.test/tournament-returns",
+    "source_class": "aggregator"
   }
 ]

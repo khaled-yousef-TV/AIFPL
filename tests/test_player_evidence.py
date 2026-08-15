@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aifpl.current import CurrentPlayerCatalogStore
-from aifpl.player_evidence import PlayerEvidence, PlayerEvidenceStore, predicted_start_probabilities
+from aifpl.player_evidence import PlayerEvidence, PlayerEvidenceStore, late_return_adjustments, predicted_start_probabilities
 from aifpl.player_evidence import _parse_external
 from aifpl.snapshots import SnapshotStore
 
@@ -53,3 +53,57 @@ def test_external_evidence_rejects_future_publication() -> None:
 
     with pytest.raises(ValueError, match="later"):
         _parse_external(payload, "2026-08-01T00:00:00+00:00", None, {1})
+
+
+def test_late_return_adjustments_resolve_per_gameweek() -> None:
+    as_of = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+    common = dict(provider="p", player_id=9, evidence_type="late_return", categorical_value="World Cup return",
+                  published_at="2026-08-21T10:00:00Z", fetched_at="2026-08-21T11:00:00Z",
+                  source_url=None, source_class="aggregator", season_id="2026-27")
+    rows = [
+        PlayerEvidence(source_record_id="1", provider_probability=0.5, minutes_multiplier=0.6, gameweek=1, **common),
+        PlayerEvidence(source_record_id="2", provider_probability=0.9, minutes_multiplier=1.0, gameweek=2, **common),
+    ]
+
+    adjustments = late_return_adjustments(rows, "2026-27", as_of)
+
+    assert adjustments == {(9, 1): (0.5, 0.6), (9, 2): (0.9, 1.0)}
+
+
+def test_late_return_adjustments_ignore_stale_or_missing_season() -> None:
+    as_of = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+    common = dict(provider="p", player_id=9, evidence_type="late_return", categorical_value=None,
+                  published_at="2026-08-21T10:00:00Z", fetched_at="2026-08-21T11:00:00Z",
+                  source_url=None, source_class="aggregator")
+    stale_common = dict(common, published_at="2026-07-01T10:00:00Z")
+    rows = [
+        PlayerEvidence(source_record_id="1", provider_probability=0.5, gameweek=1, season_id="2025-26", **common),
+        PlayerEvidence(source_record_id="2", provider_probability=0.6, gameweek=1, season_id="2026-27", **stale_common),
+    ]
+
+    adjustments = late_return_adjustments(rows, "2026-27", as_of)
+
+    assert adjustments == {}
+
+
+def test_external_evidence_accepts_late_return_with_minutes_multiplier() -> None:
+    payload = [{"provider": "tournament_analysis", "source_record_id": "lr-1", "player_id": 1,
+                "evidence_type": "late_return", "provider_probability": 0.6,
+                "minutes_multiplier": 0.7, "published_at": "2026-08-21T12:00:00Z",
+                "gameweek": 1, "season_id": "2026-27", "source_class": "aggregator"}]
+
+    records = _parse_external(payload, "2026-08-21T13:00:00+00:00", None, {1})
+
+    assert records[0].evidence_type == "late_return"
+    assert records[0].minutes_multiplier == 0.7
+    assert records[0].provider_probability == 0.6
+
+
+def test_external_evidence_rejects_out_of_range_minutes_multiplier() -> None:
+    payload = [{"provider": "tournament_analysis", "source_record_id": "lr-1", "player_id": 1,
+                "evidence_type": "late_return", "provider_probability": 0.6,
+                "minutes_multiplier": 2.0, "published_at": "2026-08-21T12:00:00Z",
+                "gameweek": 1, "season_id": "2026-27", "source_class": "aggregator"}]
+
+    with pytest.raises(ValueError, match="minutes_multiplier"):
+        _parse_external(payload, "2026-08-21T13:00:00+00:00", None, {1})

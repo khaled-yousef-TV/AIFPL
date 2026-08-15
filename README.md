@@ -456,6 +456,13 @@ until chronological holdout calibration supports a non-zero `AIFPL_PLAYER_PROP_W
 Automatic event-market fetching is quota-sensitive and remains disabled unless
 `AIFPL_FETCH_EVENT_MARKETS=true`.
 
+External evidence can also carry `late_return` records for players returning
+late from tournaments: a per-gameweek start probability plus an optional
+`minutes_multiplier` (within 0..1.5). These adjustments apply across the whole
+planning horizon, not just the opening gameweek, so World Cup returners are
+scored as `Base × P(Start) × MinutesFactor` for every affected gameweek until
+their own evidence expires or newer sources replace it.
+
 ## Full-market squad optimization
 
 `optimize-current-squad` uses an exact constraint solver over every player in

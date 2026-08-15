@@ -61,3 +61,16 @@ def test_explicit_predicted_start_probability_overrides_historical_rate() -> Non
     projection = xg_xa_blend(player(), gameweeks_elapsed=20, start_probability_override=0.9)
 
     assert projection.expected_minutes == 81
+
+
+def test_minutes_multiplier_override_scales_expected_minutes() -> None:
+    projection = xg_xa_blend(player(), minutes_multiplier_override=0.7)
+
+    assert projection.expected_minutes == 63
+
+
+def test_minutes_multiplier_override_rejects_invalid_range() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="minutes_multiplier_override"):
+        xg_xa_blend(player(), minutes_multiplier_override=2.0)

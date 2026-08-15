@@ -80,3 +80,18 @@ def test_odds_projection_without_fixture_has_no_participation_evidence() -> None
     assert projection.expected_minutes is None
     assert projection.start_probability is None
     assert projection.availability_multiplier is None
+
+
+def test_late_return_evidence_applies_to_later_gameweeks() -> None:
+    fixture = CurrentFixture(3, 2, "2026-08-22T14:00:00Z", 1, 2, 3, 3, False)
+    late_return = {(1, 2): (0.5, 0.5)}
+
+    projections = build_odds_adjusted_projections(
+        [player()], [fixture], [], 1, 2, late_return_evidence=late_return,
+    )
+
+    adjusted = projections[1]
+    unadjusted = build_odds_adjusted_projections([player()], [fixture], [], 1, 2)[1]
+    assert adjusted.start_probability == 0.5
+    assert adjusted.expected_minutes < unadjusted.expected_minutes
+    assert adjusted.projected_points < unadjusted.projected_points

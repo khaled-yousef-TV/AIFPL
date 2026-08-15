@@ -47,9 +47,12 @@ def xg_xa_blend(
     apply_next_round_availability: bool = True,
     start_probability_override: float | None = None,
     transfer_profile: TransferProfile | None = None,
+    minutes_multiplier_override: float | None = None,
 ) -> XgXaProjection:
     if gameweeks_elapsed is not None and gameweeks_elapsed < 1:
         raise ValueError("gameweeks_elapsed must be at least 1")
+    if minutes_multiplier_override is not None and not 0 < minutes_multiplier_override <= 1.5:
+        raise ValueError("minutes_multiplier_override must be within 0..1.5")
     availability = (
         (player.chance_of_playing_next_round / 100)
         if apply_next_round_availability and player.chance_of_playing_next_round is not None else 1.0
@@ -66,6 +69,8 @@ def xg_xa_blend(
     expected_minutes *= start_probability * availability
     if transfer_profile is not None:
         expected_minutes *= transfer_profile.minutes_multiplier
+    if minutes_multiplier_override is not None:
+        expected_minutes *= minutes_multiplier_override
     if player.minutes > 0:
         xg_per_90 = player.expected_goals / player.minutes * 90
         xa_per_90 = player.expected_assists / player.minutes * 90

@@ -10,7 +10,7 @@ from aifpl.fixture_projections import DIFFICULTY_MULTIPLIERS
 from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore
 from aifpl.odds_matching import FixtureOddsConsensus, FixtureOddsConsensusStore
 from aifpl.xg_projections import elapsed_gameweeks, xg_xa_blend
-from aifpl.player_evidence import PlayerEvidenceStore, predicted_start_probabilities
+from aifpl.player_evidence import PlayerEvidenceStore, late_return_adjustments, predicted_start_probabilities
 from aifpl.market_signals import MarketSignalStore, PlayerPropSignal, TeamCleanSheetSignal
 from aifpl.transfer_awareness import TransferProfile, TransferAwarenessStore
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, verify_lineage, write_immutable, write_manifest
@@ -65,6 +65,7 @@ def build_odds_adjusted_projections(
     player_prop_signals: list[PlayerPropSignal] | None = None,
     player_prop_weight: float = 0.0,
     transfer_profiles: dict[int, TransferProfile] | None = None,
+    late_return_evidence: dict[tuple[int, int], tuple[float, float]] | None = None,
 ) -> list[OddsAdjustedGameweekProjection]:
     if start_gameweek < 1 or end_gameweek < start_gameweek:
         raise ValueError("gameweek range is invalid")
@@ -90,8 +91,11 @@ def build_odds_adjusted_projections(
             start_probability: float | None = None
             availability_multiplier: float | None = None
             for fixture in player_fixtures:
+                late = (late_return_evidence or {}).get((player.id, gameweek))
                 start_override = None
-                if gameweek == start_gameweek:
+                if late is not None:
+                    start_override = late[0]
+                elif gameweek == start_gameweek:
                     start_override = (start_probability_by_player or {}).get(
                         (player.id, fixture.id), (start_probability_by_player or {}).get((player.id, None))
                     )
@@ -100,6 +104,7 @@ def build_odds_adjusted_projections(
                     apply_next_round_availability=gameweek == start_gameweek,
                     start_probability_override=start_override,
                     transfer_profile=(transfer_profiles or {}).get(player.id),
+                    minutes_multiplier_override=late[1] if late is not None else None,
                 )
                 base = blend.projected_points
                 participation = blend.expected_minutes / 90
@@ -169,6 +174,7 @@ class OddsProjectionStore:
         )
         evidence_path: Path | None = evidence_catalog_path
         start_probabilities: dict[tuple[int, int | None], float] = {}
+        late_return_evidence: dict[tuple[int, int], tuple[float, float]] = {}
         evidence_cutoff: datetime | None = None
         max_evidence_age: float | None = None
         evidence_store = PlayerEvidenceStore(self.root)
@@ -184,8 +190,12 @@ class OddsProjectionStore:
             if not __import__("math").isfinite(max_age) or max_age <= 0:
                 raise ValueError("AIFPL_EVIDENCE_MAX_AGE_HOURS must be a positive finite value")
             max_evidence_age = max_age
+            evidence_records = evidence_store.load(evidence_path, player_path)
             start_probabilities = predicted_start_probabilities(
-                evidence_store.load(evidence_path, player_path), start_gameweek, season_id, evidence_cutoff, max_age,
+                evidence_records, start_gameweek, season_id, evidence_cutoff, max_age,
+            )
+            late_return_evidence = late_return_adjustments(
+                evidence_records, season_id, evidence_cutoff, max_age,
             )
         clean_signals: list[TeamCleanSheetSignal] = []
         prop_signals: list[PlayerPropSignal] = []
@@ -210,6 +220,7 @@ class OddsProjectionStore:
             start_probabilities,
             clean_signals, prop_signals, prop_weight,
             transfer_profiles,
+            late_return_evidence,
         )
         created_at = datetime.now(timezone.utc)
         run_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")

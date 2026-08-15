@@ -17,7 +17,7 @@ from aifpl.retry import retry_sync
 from aifpl.xg_projections import elapsed_gameweeks
 
 
-EvidenceType = Literal["official_availability", "official_news", "historical_start_rate", "predicted_start", "predicted_lineup", "rotation_assessment"]
+EvidenceType = Literal["official_availability", "official_news", "historical_start_rate", "predicted_start", "predicted_lineup", "rotation_assessment", "late_return"]
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,7 @@ class PlayerEvidence:
     gameweek: int | None = None
     fixture_id: int | None = None
     season_id: str | None = None
+    minutes_multiplier: float | None = None
 
 
 @dataclass(frozen=True)
@@ -158,11 +159,37 @@ def predicted_start_probabilities(
     return {key: value[2] for key, value in selected.items()}
 
 
+def late_return_adjustments(
+    records: list[PlayerEvidence], season_id: str, as_of: datetime, max_age_hours: float = 168,
+) -> dict[tuple[int, int], tuple[float, float]]:
+    """Per-player, per-gameweek (start probability, minutes multiplier) for tournament/late-return players."""
+    if as_of.tzinfo is None:
+        raise ValueError("Evidence cutoff must be timezone-aware")
+    priorities = {"official_club": 3, "named_reporter": 2, "aggregator": 1}
+    selected: dict[tuple[int, int], tuple[int, datetime, float, float]] = {}
+    for record in records:
+        if record.evidence_type != "late_return" or record.provider_probability is None:
+            continue
+        if record.gameweek is None or record.season_id != season_id or record.published_at is None:
+            continue
+        published = datetime.fromisoformat(record.published_at.replace("Z", "+00:00"))
+        if published.tzinfo is None:
+            raise ValueError("Evidence published_at must be timezone-aware")
+        if published > as_of or (as_of - published).total_seconds() > max_age_hours * 3600:
+            continue
+        key = (record.player_id, record.gameweek)
+        multiplier = record.minutes_multiplier if record.minutes_multiplier is not None else 1.0
+        candidate = (priorities.get(record.source_class, 0), published, record.provider_probability, multiplier)
+        if key not in selected or candidate[:2] > selected[key][:2]:
+            selected[key] = candidate
+    return {key: (probability, multiplier) for key, (_, _, probability, multiplier) in selected.items()}
+
+
 def _parse_external(payload: object, fetched_at: str, source_url: str | None, player_ids: set[int]) -> list[PlayerEvidence]:
     if not isinstance(payload, list):
         raise ValueError("External player evidence must be a JSON list")
     records: list[PlayerEvidence] = []
-    allowed_types = {"official_availability", "official_news", "historical_start_rate", "predicted_start", "predicted_lineup", "rotation_assessment"}
+    allowed_types = {"official_availability", "official_news", "historical_start_rate", "predicted_start", "predicted_lineup", "rotation_assessment", "late_return"}
     fetched_time = datetime.fromisoformat(fetched_at)
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
@@ -180,8 +207,11 @@ def _parse_external(payload: object, fetched_at: str, source_url: str | None, pl
         gameweek = int(item["gameweek"]) if item.get("gameweek") is not None else None
         fixture_id = int(item["fixture_id"]) if item.get("fixture_id") is not None else None
         season_id = str(item["season_id"]) if item.get("season_id") is not None else None
-        if evidence_type in ("predicted_start", "predicted_lineup") and (published_at is None or gameweek is None or season_id is None):
-            raise ValueError("Predicted lineup evidence requires published_at, gameweek, and season_id")
+        minutes_multiplier = item.get("minutes_multiplier")
+        if minutes_multiplier is not None and not 0 < float(minutes_multiplier) <= 1.5:
+            raise ValueError("minutes_multiplier must be within 0..1.5")
+        if evidence_type in ("predicted_start", "predicted_lineup", "late_return") and (published_at is None or gameweek is None or season_id is None):
+            raise ValueError(f"{evidence_type} evidence requires published_at, gameweek, and season_id")
         if published_at:
             published_time = datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
             if published_time.tzinfo is None:
@@ -197,5 +227,6 @@ def _parse_external(payload: object, fetched_at: str, source_url: str | None, pl
             source_url=item.get("source_url") or source_url, source_class=str(item["source_class"]),
             gameweek=gameweek, fixture_id=fixture_id,
             season_id=season_id,
+            minutes_multiplier=float(minutes_multiplier) if minutes_multiplier is not None else None,
         ))
     return records
