@@ -85,6 +85,50 @@ def test_message_builds_without_data(tmp_path) -> None:
     assert "No Hermes decision exists yet" in message
 
 
+def test_recommendation_message_includes_the_committed_plan(tmp_path) -> None:
+    from aifpl.artifacts import json_bytes, write_immutable
+    from aifpl.hermes import HermesState, HorizonPlanSnapshot, HorizonPlanWeekSnapshot
+
+    plan = HorizonPlanSnapshot(
+        projection_catalog="gw1-2.x.jsonl", pre_season=True, solver_status="OPTIMAL",
+        methodology="test", total_projected_points=120.0, total_hit_cost=4,
+        total_net_projected_points=116.0, robustness_score=70.0,
+        weeks=[
+            HorizonPlanWeekSnapshot(gameweek=1, transfers_made=0, free_transfers_before=5, hit_cost=0,
+                                    bank_after=250, projected_points=60.0, net_projected_points=60.0,
+                                    odds_coverage=1.0, unlimited_transfers=True, free_transfers_after=1),
+            HorizonPlanWeekSnapshot(gameweek=2, transfers_made=1, free_transfers_before=1, hit_cost=0,
+                                    bank_after=250, projected_points=60.0, net_projected_points=60.0,
+                                    odds_coverage=1.0, free_transfers_after=1,
+                                    outgoing_ids=[3], incoming_ids=[16], captain_id=16),
+        ],
+    )
+    record = decision(transfers_in=[16], transfers_out=[3], action="execute_horizon").model_copy(
+        update={"horizon_plan": plan},
+    )
+    stamp = "20260814T100000000000Z"
+    write_immutable(
+        tmp_path / "hermes" / "decisions" / f"{stamp}.json",
+        json_bytes(record.model_dump(mode="json"), pretty=True),
+    )
+    state = HermesState(
+        strategy=record.strategy, squad=record.squad, captain_id=1,
+        starting_xi_ids=list(range(1, 12)), model="test",
+        updated_at=datetime(2026, 8, 14, tzinfo=timezone.utc), version=1,
+        gameweek=1, season_id="2026-27",
+    )
+    write_immutable(
+        tmp_path / "hermes" / "states" / f"{stamp}.json",
+        json_bytes(state.model_dump(mode="json"), pretty=True),
+    )
+
+    message = build_recommendation_message(tmp_path, 1, "2026-27", datetime(2026, 8, 14, 18, tzinfo=timezone.utc))
+
+    assert "Plan: 116.0 net pts | 4 pts hits | robustness 70" in message
+    assert "GW1 | unlimited transfers | 1 FT after" in message
+    assert "GW2 | 1 transfer(s) | 1 FT after" in message
+
+
 def test_scheduler_notifies_once_within_lead_time(tmp_path, monkeypatch) -> None:
     from aifpl import notifier as notifier_module
 

@@ -109,13 +109,34 @@ def build_recommendation_message(root: Path, event: int, season_id: str, deadlin
     else:
         lines.append("Transfers: none (hold)")
     bench_ids = [element for element in decision.squad.player_ids if element not in set(decision.starting_xi_ids)]
-    bench_points = _bench_projected_points(root, event, bench_ids)
+    catalog_id = decision.horizon_plan.projection_catalog if decision.horizon_plan is not None else None
+    bench_points = _bench_projected_points(root, event, bench_ids, catalog_id)
     chip = recommend_chip(decision, bench_points)
     if chip is None:
         lines.append("Chip: none recommended")
     else:
         lines.append(f"Chip: {chip.chip} - {chip.rationale}")
     lines.append(f"Bank: {decision.squad.bank / 10:.1f}m | Free transfers: {decision.squad.free_transfers}")
+    plan = decision.horizon_plan
+    if plan is not None and plan.weeks:
+        lines.append("-------------------------------------")
+        lines.append(
+            f"Plan: {plan.total_net_projected_points:.1f} net pts | {plan.total_hit_cost} pts hits "
+            f"| robustness {plan.robustness_score:.0f}"
+        )
+        for week in plan.weeks:
+            parts = [f"GW{week.gameweek}"]
+            if week.unlimited_transfers:
+                parts.append("unlimited transfers")
+            elif week.transfers_made:
+                parts.append(f"{week.transfers_made} transfer(s)")
+            else:
+                parts.append("hold")
+            if week.free_transfers_after is not None:
+                parts.append(f"{week.free_transfers_after} FT after")
+            if week.hit_cost:
+                parts.append(f"-{week.hit_cost} pts")
+            lines.append("  " + " | ".join(parts))
     lines.append("-------------------------------------")
     lines.extend(_lineup_section(decision.starting_xi_ids, names))
     lines.append("-------------------------------------")
@@ -192,9 +213,19 @@ def _describe(element: int, names: dict[int, tuple[str, str, str]]) -> str:
     return f"{name} ({club})"
 
 
-def _bench_projected_points(root: Path, gameweek: int, bench_ids: list[int]) -> float:
+def _bench_projected_points(root: Path, gameweek: int, bench_ids: list[int], catalog_id: str | None = None) -> float:
     if not bench_ids:
         return 0.0
+    try:
+        if catalog_id is not None:
+            rows = OddsProjectionStore(root).latest(catalog_id)
+            if gameweek in {row.gameweek for row in rows}:
+                return round(sum(
+                    row.projected_points for row in rows
+                    if row.gameweek == gameweek and row.player_id in set(bench_ids)
+                ), 2)
+    except (FileNotFoundError, ValueError):
+        pass
     directory = root / "normalized" / "current" / "odds_projections"
     candidates: list[tuple[datetime, Path]] = []
     for path in directory.glob("*.jsonl"):
