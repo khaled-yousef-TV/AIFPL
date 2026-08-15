@@ -86,10 +86,13 @@ def hermes_run() -> None:
 
 
 @app.command()
-def hermes_reinitialize_opening_squad() -> None:
-    """Replace a legacy pre-season opening state with the horizon-derived squad once."""
+def hermes_reinitialize_opening_squad(
+    force: bool = typer.Option(False, "--force",
+                               help="Rebuild the opening squad even when it already carries a committed plan"),
+) -> None:
+    """Replace a legacy pre-season opening state with the horizon-derived squad."""
     try:
-        result = HermesManager(data_dir()).reinitialize_current()
+        result = HermesManager(data_dir()).reinitialize_current(force=force)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     if result is None:

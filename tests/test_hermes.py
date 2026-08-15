@@ -2,7 +2,12 @@ import pytest
 
 import aifpl.hermes as hermes_module
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.hermes import HermesDecisionBackend, HermesManager, HermesStrategy
+from aifpl.hermes import (
+    HermesDecisionBackend,
+    HermesManager,
+    HermesStrategy,
+    HorizonPlanSnapshot,
+)
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import OptimizedSquad
 
@@ -28,7 +33,9 @@ class FakeBackend:
 
     def initial_squad(self, strategy):
         players = [CurrentPlayerProjection(i, f"Player {i}", "GK" if i <= 2 else "DEF" if i <= 7 else "MID" if i <= 12 else "FWD", chr(65 + i), 50, float(i), 1.0) for i in range(1, 16)]
-        return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1, None
+        return OptimizedSquad(players, 750, 250, 100.0, 1000, "OPTIMAL", "test", players[0:1] + players[2:7] + players[7:12], players[11]), 1, HorizonPlanSnapshot(
+            projection_catalog="fake-catalog.json", pre_season=True, solver_status="OPTIMAL", methodology="test",
+        )
 
 
 class FakeHorizonBackend(HermesDecisionBackend):
@@ -186,6 +193,26 @@ def test_strategy_churn_penalty_scales_with_risk_tolerance(monkeypatch) -> None:
 
     assert _strategy_churn_penalty(cautious) == 3.0
     assert _strategy_churn_penalty(aggressive) == 1.0
+
+
+def test_hermes_skips_reinitialization_when_opening_plan_is_current(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+    manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    assert manager.reinitialize_opening_squad(1, "2026-27") is None
+
+
+def test_hermes_force_reinitializes_a_current_opening_squad(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+    manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    result = manager.reinitialize_opening_squad(1, "2026-27", force=True)
+
+    assert result is not None
+    assert result.decision.action == "adopt_initial"
+    reloaded = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+    assert reloaded.latest_state().version == 2
+    assert len(reloaded.decisions()) == 2
 
 
 def test_context_includes_scored_decision_history(tmp_path) -> None:

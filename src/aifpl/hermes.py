@@ -326,16 +326,16 @@ class HermesManager:
         schedule = DeadlineScheduler(self.root).status()
         return self.run(expected_gameweek=schedule.event, expected_season_id=schedule.season_id)
 
-    def reinitialize_current(self) -> HermesRunResult | None:
+    def reinitialize_current(self, force: bool = False) -> HermesRunResult | None:
         from aifpl.scheduler import DeadlineScheduler
 
         schedule = DeadlineScheduler(self.root).status()
         if schedule.event != 1 or schedule.missed:
             return None
-        return self.reinitialize_opening_squad(schedule.event, schedule.season_id)
+        return self.reinitialize_opening_squad(schedule.event, schedule.season_id, force=force)
 
     def reinitialize_opening_squad(
-        self, expected_gameweek: int, expected_season_id: str,
+        self, expected_gameweek: int, expected_season_id: str, force: bool = False,
     ) -> HermesRunResult | None:
         if expected_gameweek != 1:
             return None
@@ -354,8 +354,9 @@ class HermesManager:
                 previous is None
                 or previous.gameweek != expected_gameweek
                 or previous.season_id != expected_season_id
-                or previous.initialization_method == "horizon_v1"
             ):
+                return None
+            if not force and self._opening_plan_is_current():
                 return None
             self._strategy = previous.strategy
             self._initial, self._initial_gameweek, self._initial_snapshot = self.backend.initial_squad(self._strategy)
@@ -370,6 +371,17 @@ class HermesManager:
         finally:
             flock(descriptor, LOCK_UN)
             os.close(descriptor)
+
+    def _opening_plan_is_current(self) -> bool:
+        try:
+            state = self.latest_state(optional=True)
+            return (
+                state is not None
+                and state.initialization_method == "horizon_v1"
+                and self.latest_decision().horizon_plan is not None
+            )
+        except FileNotFoundError:
+            return False
 
     def _run_unlocked(self) -> HermesRunResult:
         if self.model is None:
