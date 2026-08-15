@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
@@ -21,7 +23,7 @@ def row(
     )
 
 
-def pool() -> list[OddsAdjustedGameweekProjection]:
+def pool(gameweeks: tuple[int, ...] = (1, 2, 3)) -> list[OddsAdjustedGameweekProjection]:
     players = [
         (1, "GK", "A", 4), (2, "GK", "B", 3),
         (3, "DEF", "A", 5), (4, "DEF", "B", 4), (5, "DEF", "C", 3),
@@ -30,7 +32,7 @@ def pool() -> list[OddsAdjustedGameweekProjection]:
         (11, "MID", "D", 5), (12, "MID", "E", 1),
         (13, "FWD", "F", 9), (14, "FWD", "G", 8), (15, "FWD", "H", 7),
     ]
-    return [row(identifier, position, club, gameweek, points) for gameweek in (1, 2, 3) for identifier, position, club, points in players]
+    return [row(identifier, position, club, gameweek, points) for gameweek in gameweeks for identifier, position, club, points in players]
 
 
 def test_horizon_planner_rolls_free_transfers_without_needless_moves() -> None:
@@ -62,6 +64,7 @@ def test_horizon_planner_executes_and_rolls_over_a_free_upgrade() -> None:
 def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
+        pre_season=True,
     )
 
     first = plan.gameweeks[0]
@@ -70,9 +73,11 @@ def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     assert plan.solver_status in ("OPTIMAL", "FEASIBLE")
     assert {player.player_id for player in first.resulting_squad} >= {1, 2, 13, 14, 15}
     assert all(week.gameweek == gameweek for week, gameweek in zip(plan.gameweeks, (1, 2, 3)))
+    assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2]
+    assert first.hit_cost == 0
 
 
-def test_pre_season_planning_uses_free_transfers() -> None:
+def test_pre_season_planning_resets_to_one_free_transfer_after_gw1() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
         pre_season=True,
@@ -80,17 +85,51 @@ def test_pre_season_planning_uses_free_transfers() -> None:
 
     assert plan.total_hit_cost == 0
     assert plan.total_net_projected_points == plan.total_projected_points
+    assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2]
     assert all(week.hit_cost == 0 for week in plan.gameweeks)
 
 
-def test_pre_season_allows_penalty_below_four() -> None:
+def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "1")
+    rows = [
+        replace(projection, projected_points=10.0)
+        for projection in pool((1, 2, 3, 4))
+    ]
+    rows.extend([
+        row(16, "FWD", "F", 1, 0), row(16, "FWD", "F", 2, 0), row(16, "FWD", "F", 3, 30), row(16, "FWD", "F", 4, 30),
+        row(17, "DEF", "F", 1, 0), row(17, "DEF", "F", 2, 0), row(17, "DEF", "F", 3, 0), row(17, "DEF", "F", 4, 30),
+        row(18, "MID", "G", 1, 0), row(18, "MID", "G", 2, 0), row(18, "MID", "G", 3, 0), row(18, "MID", "G", 4, 30),
+        row(19, "FWD", "I", 1, 0), row(19, "FWD", "I", 2, 0), row(19, "FWD", "I", 3, 0), row(19, "FWD", "I", 4, 30),
+    ])
+
     plan = plan_horizon_transfers(
-        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        pre_season=True,
+    )
+
+    assert [week.transfers_made for week in plan.gameweeks] == [0, 0, 1, 3]
+    assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2, 2]
+    assert [week.hit_cost for week in plan.gameweeks] == [0, 0, 0, 4]
+    assert plan.total_hit_cost == 4
+
+
+def test_pre_season_allows_penalty_below_four_for_the_opening_week_only() -> None:
+    plan = plan_horizon_transfers(
+        [projection for projection in pool() if projection.gameweek == 1],
+        HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
         decision_hit_penalty=0.0, pre_season=True,
     )
 
     assert plan.total_hit_cost == 0
     assert plan.solver_status != "HOLD_FALLBACK"
+
+
+def test_pre_season_rejects_discounted_post_deadline_hits() -> None:
+    with pytest.raises(ValueError, match="cannot be lower"):
+        plan_horizon_transfers(
+            pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+            decision_hit_penalty=0.0, pre_season=True,
+        )
 
 
 def robust_pool() -> list[OddsAdjustedGameweekProjection]:

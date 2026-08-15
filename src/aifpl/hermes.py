@@ -344,6 +344,12 @@ class HermesManager:
             raise ValueError("Legacy Hermes state has no season ID; run hermes-migrate-state first")
         if previous is not None and self._expected_season_id and previous.season_id != self._expected_season_id:
             previous = None
+        if previous is not None and self._expected_gameweek is not None:
+            if previous.gameweek == self._expected_gameweek:
+                decision = self.latest_decision()
+                return HermesRunResult(decision=decision, state_path=decision.state_path, tool_steps=0)
+            if previous.gameweek > self._expected_gameweek:
+                raise ValueError(f"Hermes has already advanced to gameweek {previous.gameweek}")
         if previous is not None and self._expected_gameweek and self._expected_gameweek > previous.gameweek + 1:
             skipped = self._expected_gameweek - previous.gameweek - 1
             previous = previous.model_copy(update={
@@ -355,8 +361,9 @@ class HermesManager:
             "The backend is authoritative for all numbers and legality. Set your own stable strategy when none exists, "
             "inspect backend recommendations, then commit exactly one action. Never invent projections or player IDs. "
             "The get_horizon_plan output is computed for your own current squad: every player named in its out/in lists "
-            "is a member of your squad and the transfers are directly actionable, including during pre-season "
-            "(pre_season=true) when all transfers are free. Do not reject a plan because a name looks unfamiliar; "
+            "is a member of your squad and the transfers are directly actionable. During pre-season, only GW1 "
+            "transfers are free; later gameweeks follow normal free-transfer rollover and hit rules. "
+            "Do not reject a plan because a name looks unfamiliar; "
             "re-read the squad and plan before deciding. "
             "The context includes decision_history with your prior decisions' outcomes; use it as evidence when changing strategy."
         )
@@ -515,7 +522,7 @@ class HermesManager:
             summary["applies_to_current_squad"] = True
             if target_gameweek == 1:
                 summary["pre_season"] = True
-                summary["note"] = "Pre-season: all transfers are free; hit costs shown are informational."
+                summary["note"] = "Pre-season: GW1 transfers are free; later gameweeks include normal hit costs."
             return summary
         if name == "commit_decision":
             return self._commit(arguments, previous)
@@ -555,6 +562,8 @@ class HermesManager:
                 methodology = self._horizon.methodology
                 costs = {player.player_id: player.cost for player in week.resulting_squad}
                 purchase_prices = {player_id: previous.squad.purchase_prices.get(player_id, costs[player_id]) for player_id in squad_ids}
+            if gameweek == 1:
+                free = 1
         else:
             raise ValueError("action must be adopt_initial, execute_horizon, or hold")
         now = datetime.now(timezone.utc)

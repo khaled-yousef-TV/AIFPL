@@ -1,3 +1,5 @@
+import pytest
+
 import aifpl.hermes as hermes_module
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.hermes import HermesDecisionBackend, HermesManager, HermesStrategy
@@ -114,6 +116,37 @@ def test_hermes_reinitializes_a_legacy_opening_state_once(tmp_path, monkeypatch)
     assert len(reloaded.decisions()) == 2
     assert reloaded.reinitialize_opening_squad(1, "2026-27") is None
     assert (tmp_path / initial.decision.decision_path).exists()
+
+
+@pytest.mark.parametrize("action", ("hold", "execute_horizon"))
+def test_hermes_gw1_commit_resets_free_transfers(tmp_path, action) -> None:
+    backend = FakeHorizonBackend(tmp_path)
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=backend)
+    manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    previous = manager.latest_state()
+    manager._strategy = previous.strategy
+    manager._horizon = backend.horizon_plan(previous.squad, previous.strategy, 1)
+    manager._hold = backend.hold_week(previous.squad, previous.strategy.planning_horizon, 1)
+    manager._expected_gameweek = 1
+    manager._expected_season_id = "2026-27"
+
+    result = manager._commit({"action": action, "explanation": "Opening-gameweek state check."}, previous)
+
+    assert result.decision.squad.free_transfers == 1
+
+
+def test_hermes_returns_the_existing_decision_for_a_duplicate_current_gameweek(tmp_path) -> None:
+    model = FakeModel()
+    manager = HermesManager(tmp_path, model=model, backend=FakeBackend())
+    initial = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    repeated = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    assert repeated.decision == initial.decision
+    assert repeated.tool_steps == 0
+    assert manager.latest_state().version == 1
+    assert len(manager.decisions()) == 1
+    assert model.step == 3
 
 
 def test_context_includes_scored_decision_history(tmp_path) -> None:

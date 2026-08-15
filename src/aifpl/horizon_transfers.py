@@ -61,17 +61,16 @@ def plan_horizon_transfers(
     differential_appetite: float = 0.0,
     pre_season: bool = False,
 ) -> HorizonTransferPlan:
-    if pre_season:
-        effective_hit_penalty = 0.0
-    else:
-        if decision_hit_penalty < 4:
-            raise ValueError("Decision hit penalty cannot be lower than the actual four-point hit")
-        effective_hit_penalty = decision_hit_penalty
     if not 0 <= differential_appetite <= 1:
         raise ValueError("differential_appetite must be within 0..1")
     gameweeks = sorted({row.gameweek for row in rows})
     if not 1 <= len(gameweeks) <= 6 or gameweeks != list(range(gameweeks[0], gameweeks[-1] + 1)):
         raise ValueError("Horizon projection catalog must contain 1 to 6 contiguous gameweeks")
+    if pre_season and gameweeks[0] != 1:
+        raise ValueError("Pre-season planning must begin in gameweek 1")
+    if decision_hit_penalty < 4 and (not pre_season or len(gameweeks) > 1):
+        raise ValueError("Decision hit penalty cannot be lower than the actual four-point hit")
+    effective_hit_penalty = decision_hit_penalty
     by_player_gameweek = {(row.player_id, row.gameweek): row for row in rows}
     if len(by_player_gameweek) != len(rows):
         raise ValueError("Projection catalog contains duplicate player-gameweek rows")
@@ -203,12 +202,16 @@ def plan_horizon_transfers(
         model.add_max_equality(excess, [transfers - free, 0])
         excess_transfers.append(excess)
         if week_index + 1 < len(gameweeks):
-            remaining = model.new_int_var(0, 5, f"remaining_free_{gameweek}")
-            model.add_max_equality(remaining, [free - transfers, 0])
-            accrued = model.new_int_var(1, 6, f"accrued_free_{gameweek}")
-            model.add(accrued == remaining + 1)
             next_free = model.new_int_var(0, 5, f"free_transfers_{gameweeks[week_index + 1]}")
-            model.add_min_equality(next_free, [accrued, 5])
+            if pre_season and week_index == 0:
+                # Unlimited opening-squad changes expire at the GW1 deadline.
+                model.add(next_free == 1)
+            else:
+                remaining = model.new_int_var(0, 5, f"remaining_free_{gameweek}")
+                model.add_max_equality(remaining, [free - transfers, 0])
+                accrued = model.new_int_var(1, 6, f"accrued_free_{gameweek}")
+                model.add(accrued == remaining + 1)
+                model.add_min_equality(next_free, [accrued, 5])
             # Reuse this variable when the next week is constructed.
             free_transfers.append(next_free)
 
@@ -282,7 +285,7 @@ def plan_horizon_transfers(
         model.add_hint(free_by_week[week_index], held_free_transfers)
         model.add_hint(excess_transfers[week_index], 0)
         model.add_hint(banks[week_index], state.bank)
-        held_free_transfers = min(5, held_free_transfers + 1)
+        held_free_transfers = 1 if pre_season and week_index == 0 else min(5, held_free_transfers + 1)
 
     objective = []
     for week_index, gameweek in enumerate(gameweeks):
@@ -298,7 +301,8 @@ def plan_horizon_transfers(
             bench[player_id, week_index] * round(by_player_gameweek[player_id, gameweek].projected_points * bench_bonus * scale)
             for player_id in player_ids
         )
-        objective.append(-excess_transfers[week_index] * round(effective_hit_penalty * scale))
+        hit_penalty = 0.0 if pre_season and week_index == 0 else effective_hit_penalty
+        objective.append(-excess_transfers[week_index] * round(hit_penalty * scale))
         objective.append(-transfer_counts[week_index])
         objective.append(-bank_shortfalls[week_index] * round(shortfall_penalty * scale))
         objective.append(-dead_bench_excess[week_index] * round(dead_penalty * scale))
@@ -324,7 +328,7 @@ def plan_horizon_transfers(
         incoming_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(incoming[player_id, week_index])]
         outgoing_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(outgoing[player_id, week_index])]
         projected = sum(player.projected_points for player in lineup) + captain_player.projected_points
-        hit = 0 if pre_season else solver.value(excess_transfers[week_index]) * 4
+        hit = 0 if pre_season and week_index == 0 else solver.value(excess_transfers[week_index]) * 4
         fixture_total = sum(row.fixture_count for row in rows if row.gameweek == gameweek)
         odds_total = sum(row.odds_backed_fixture_count for row in rows if row.gameweek == gameweek)
         plans.append(HorizonGameweekPlan(
@@ -336,7 +340,7 @@ def plan_horizon_transfers(
             net_projected_points=round(projected - hit, 4),
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
-    hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids) if current_ids else []
+    hold_plans = _hold_plans(rows, state, gameweeks, by_player_gameweek, current_ids, pre_season) if current_ids else []
     if pre_season and hold_plans and _hold_plans_violate_robustness(hold_plans, min_bank, bench_floor, by_player_gameweek):
         hold_plans = []
     if hold_plans and sum(plan.net_projected_points for plan in plans) < sum(plan.net_projected_points for plan in hold_plans):
@@ -374,10 +378,11 @@ def _hold_plans_violate_robustness(
 def _hold_plans(
     rows: list[OddsAdjustedGameweekProjection], state: HorizonSquadState, gameweeks: list[int],
     by_player_gameweek: dict[tuple[int, int], OddsAdjustedGameweekProjection], current_ids: set[int],
+    pre_season: bool,
 ) -> list[HorizonGameweekPlan]:
     plans: list[HorizonGameweekPlan] = []
-    free = state.free_transfers
-    for gameweek in gameweeks:
+    free = 5 if pre_season else state.free_transfers
+    for week_index, gameweek in enumerate(gameweeks):
         squad = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in current_ids]
         lineup = select_best_lineup(SquadRequest(
             players=[_squad_player(player) for player in squad],
@@ -395,7 +400,7 @@ def _hold_plans(
             projected_points=lineup.projected_points, net_projected_points=lineup.projected_points,
             odds_coverage=round(odds_total / fixture_total, 4) if fixture_total else 0.0,
         ))
-        free = min(5, free + 1)
+        free = 1 if pre_season and week_index == 0 else min(5, free + 1)
     return plans
 
 
