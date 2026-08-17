@@ -1,4 +1,8 @@
-from aifpl.market_odds import normalize_event_markets
+from aifpl.market_odds import EVENT_MARKETS, normalize_event_markets
+
+
+def test_default_event_markets_exclude_unused_anytime_scorers() -> None:
+    assert EVENT_MARKETS == ("team_totals", "player_assists")
 
 
 def test_complete_over_under_market_is_margin_adjusted() -> None:

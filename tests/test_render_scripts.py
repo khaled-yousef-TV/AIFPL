@@ -55,44 +55,27 @@ def stop_service(process: subprocess.Popen[object]) -> None:
         process.wait(timeout=5)
 
 
-def test_render_start_stops_background_workers_on_shutdown(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
+def test_render_start_only_launches_uvicorn(tmp_path: Path) -> None:
     binaries = tmp_path / "bin"
-    scripts.mkdir()
     binaries.mkdir()
-    bootstrap_pid_file = tmp_path / "bootstrap.pid"
-    scheduler_pid_file = tmp_path / "scheduler.pid"
     server_pid_file = tmp_path / "server.pid"
-
-    write_executable(
-        scripts / "render-bootstrap.sh",
-        """#!/bin/sh
-printf '%s\\n' "$$" > "$BOOTSTRAP_PID_FILE"
-trap 'exit 0' HUP INT TERM
-while :; do sleep 1; done
-""",
-    )
+    scheduler_called_file = tmp_path / "scheduler-called"
     write_executable(
         binaries / "aifpl",
         """#!/bin/sh
-printf '%s\\n' "$$" > "$SCHEDULER_PID_FILE"
-trap 'exit 0' HUP INT TERM
-while :; do sleep 1; done
+touch "$SCHEDULER_CALLED_FILE"
 """,
     )
     write_executable(
         binaries / "uvicorn",
         """#!/bin/sh
 printf '%s\\n' "$$" > "$SERVER_PID_FILE"
-trap 'exit 0' HUP INT TERM
-while :; do sleep 1; done
 """,
     )
     environment = os.environ | {
         "PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}",
-        "BOOTSTRAP_PID_FILE": str(bootstrap_pid_file),
-        "SCHEDULER_PID_FILE": str(scheduler_pid_file),
         "SERVER_PID_FILE": str(server_pid_file),
+        "SCHEDULER_CALLED_FILE": str(scheduler_called_file),
     }
     service = subprocess.Popen(
         ["sh", str(ROOT / "scripts" / "render-start.sh")],
@@ -101,22 +84,14 @@ while :; do sleep 1; done
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    pids: list[int] = []
     try:
-        pids = [
-            int(wait_for_file(bootstrap_pid_file)),
-            int(wait_for_file(scheduler_pid_file)),
-            int(wait_for_file(server_pid_file)),
-        ]
-        stop_service(service)
-        for pid in pids:
-            wait_for_process_exit(pid)
+        wait_for_file(server_pid_file)
+        assert service.wait(timeout=5) == 0
+        assert not scheduler_called_file.exists()
     finally:
         if service.poll() is None:
             service.kill()
             service.wait(timeout=5)
-        for pid in pids:
-            stop_process(pid)
 
 
 def test_render_bootstrap_stops_its_active_command_on_shutdown(tmp_path: Path) -> None:

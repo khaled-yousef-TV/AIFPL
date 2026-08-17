@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from fcntl import LOCK_EX, LOCK_UN, flock
 from pathlib import Path
+from threading import Event
 from typing import Literal
 from uuid import uuid4
 
@@ -179,8 +180,8 @@ class DeadlineScheduler:
         finally:
             self._release_claim(claim)
 
-    def run_forever(self) -> None:
-        while True:
+    def run_forever(self, stop_event: Event | None = None) -> None:
+        while stop_event is None or not stop_event.is_set():
             try:
                 result = self.tick()
                 print(
@@ -194,7 +195,10 @@ class DeadlineScheduler:
                 print(f"[{exc.result.checked_at.isoformat()}] tick={exc.result.status} error={exc.result.error}", flush=True)
             except Exception as exc:  # pragma: no cover - defensive heartbeat
                 print(f"[tick] unexpected error: {type(exc).__name__}: {exc}", flush=True)
-            time.sleep(self.settings.poll_seconds)
+            if stop_event is None:
+                time.sleep(self.settings.poll_seconds)
+            else:
+                stop_event.wait(self.settings.poll_seconds)
 
     def _telegram_notification_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "telegram_notified" / season_id / f"gw{event}.json"

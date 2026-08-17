@@ -44,7 +44,8 @@ Backend optional:
 - `AIFPL_TELEGRAM_ENABLED`, `AIFPL_TELEGRAM_BOT_TOKEN`, and `AIFPL_TELEGRAM_CHAT_ID`: enable Telegram deadline notifications.
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
-- `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. Leave unset locally to keep dev runs cheap.
+- `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
+- `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. The Blueprint disables this on the Starter plan to keep refresh memory bounded; enable it only on a larger instance.
 
 Frontend required:
 
@@ -52,7 +53,7 @@ Frontend required:
 
 `AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
 
-The backend start command is `sh scripts/render-start.sh`. It launches `scripts/render-bootstrap.sh` in the background before Uvicorn listens, so the API comes online immediately while first-run data is being fetched. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. During pre-season, the opening squad is regenerated automatically whenever the committed plan's `planner_version` is stale relative to the deployed code (each plan-generating change bumps the version), so optimizer fixes reach the live squad on every redeployment without manual commands; regeneration is a no-op after the GW1 deadline. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The dashboard polls for a few minutes while first-run initialization completes.
+The Blueprint runs `scripts/render-bootstrap.sh` during pre-deploy, before the API starts. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. During pre-season, the opening squad is regenerated automatically whenever the committed plan's `planner_version` is stale relative to the deployed code (each plan-generating change bumps the version), so optimizer fixes reach the live squad on every redeployment without manual commands; regeneration is a no-op after the GW1 deadline. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The deadline scheduler runs as a managed API thread rather than a second Python process, keeping refresh memory lower on the Starter plan.
 
 If your existing Render service still uses a custom start command, set **Start Command** to `sh scripts/render-start.sh` or use its Render Shell once:
 

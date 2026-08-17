@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from threading import Event
 
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,28 @@ def test_health_endpoint() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_api_lifespan_starts_and_stops_the_scheduler(monkeypatch, tmp_path) -> None:
+    started = Event()
+    stopped = Event()
+
+    class FakeScheduler:
+        def __init__(self, root) -> None:
+            assert root == tmp_path
+
+        def run_forever(self, stop_event: Event) -> None:
+            started.set()
+            stop_event.wait(2)
+            stopped.set()
+
+    monkeypatch.setenv("AIFPL_SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(api, "DeadlineScheduler", FakeScheduler)
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+
+    with TestClient(api.app):
+        assert started.wait(1)
+    assert stopped.is_set()
 
 
 def test_latest_snapshot_returns_not_found_without_data(monkeypatch, tmp_path) -> None:

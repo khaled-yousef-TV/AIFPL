@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from threading import Event, Thread
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,7 +44,32 @@ from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 from aifpl.security import valid_admin_key
 from aifpl.teams import CurrentTeam, CurrentTeamCatalogStore, team_logo_path
 
-app = FastAPI(title="AIFPL Backend", version="0.1.0")
+
+def _scheduler_enabled() -> bool:
+    return os.environ.get("AIFPL_SCHEDULER_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    stop_event = Event()
+    scheduler_thread: Thread | None = None
+    if _scheduler_enabled():
+        scheduler_thread = Thread(
+            target=DeadlineScheduler(data_dir()).run_forever,
+            args=(stop_event,),
+            daemon=True,
+            name="aifpl-deadline-scheduler",
+        )
+        scheduler_thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        if scheduler_thread is not None:
+            scheduler_thread.join(timeout=5)
+
+
+app = FastAPI(title="AIFPL Backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins(),

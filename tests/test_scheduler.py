@@ -173,3 +173,22 @@ def test_deadline_discovery_failure_is_audited(tmp_path) -> None:
     assert result.status == "discovery_failed"
     assert result.event is None
     assert json.loads((tmp_path / result.output_path).read_text(encoding="utf-8"))["status"] == "discovery_failed"
+
+
+def test_scheduler_stops_without_waiting_for_the_poll_interval(tmp_path) -> None:
+    subject = scheduler(tmp_path, FakeRefreshJob(tmp_path))
+    stop_event = threading.Event()
+    calls: list[None] = []
+
+    def stop_after_first_tick() -> None:
+        calls.append(None)
+        stop_event.set()
+        raise RuntimeError("stop")
+
+    subject.tick = stop_after_first_tick  # type: ignore[method-assign]
+    thread = threading.Thread(target=subject.run_forever, args=(stop_event,))
+    thread.start()
+    thread.join(1)
+
+    assert calls == [None]
+    assert not thread.is_alive()

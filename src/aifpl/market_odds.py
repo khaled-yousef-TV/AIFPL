@@ -9,7 +9,7 @@ from aifpl.artifacts import complete_artifact_paths, json_bytes, jsonl_bytes, ve
 from aifpl.odds import OddsSourceError, TheOddsApiClient
 
 
-EVENT_MARKETS = ("team_totals", "player_goal_scorer_anytime", "player_assists")
+EVENT_MARKETS = ("team_totals", "player_assists")
 
 
 @dataclass(frozen=True)
