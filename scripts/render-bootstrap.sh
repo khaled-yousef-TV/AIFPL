@@ -1,6 +1,29 @@
 #!/bin/sh
 set -eu
 
+active_pid=""
+
+stop_active_command() {
+  if [ -n "$active_pid" ] && kill -0 "$active_pid" 2>/dev/null; then
+    kill -TERM "$active_pid" 2>/dev/null || true
+    wait "$active_pid" 2>/dev/null || true
+  fi
+  exit 143
+}
+
+run_command() {
+  "$@" &
+  active_pid=$!
+  set +e
+  wait "$active_pid"
+  command_status=$?
+  set -e
+  active_pid=""
+  return "$command_status"
+}
+
+trap stop_active_command HUP INT TERM
+
 data_dir="${AIFPL_DATA_DIR:-data}"
 decision_dir="$data_dir/hermes/decisions"
 marker="$data_dir/.deployed-commit"
@@ -30,7 +53,7 @@ import_history() {
     echo "Historical season $season already imported; skipping import."
   else
     echo "Importing historical season $season for transfer awareness..."
-    aifpl import-season "$season"
+    run_command aifpl import-season "$season"
   fi
 }
 
@@ -48,7 +71,7 @@ else
   echo "Initializing AIFPL data on the persistent Render disk..."
 fi
 
-aifpl refresh-current-data \
+run_command aifpl refresh-current-data \
   --start-gameweek "${AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK:-1}" \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
@@ -56,18 +79,18 @@ aifpl refresh-current-data \
 # automatically whenever the committed plan's planner_version is stale, and is
 # a no-op afterwards and after GW1.
 if [ "$has_decision" = "true" ]; then
-  if aifpl hermes-reinitialize-opening-squad; then
+  if run_command aifpl hermes-reinitialize-opening-squad; then
     echo "Reinitialized the pre-season opening squad with the horizon optimizer."
   else
     reinitialize_status=$?
     if [ "$reinitialize_status" -eq 2 ]; then
-      aifpl hermes-run
+      run_command aifpl hermes-run
     else
       exit "$reinitialize_status"
     fi
   fi
 else
-  aifpl hermes-run
+  run_command aifpl hermes-run
 fi
 if [ -n "$current_commit" ]; then
   mkdir -p "$data_dir"
