@@ -149,7 +149,11 @@ def player_evidence(limit: int = typer.Option(100, min=1, max=5000)) -> None:
 def fetch_event_markets() -> None:
     """Fetch configured EPL team-total and player-prop markets for matched fixtures."""
     try:
-        event_ids = [row.odds_event_id for row in FixtureOddsConsensusStore(data_dir()).latest()]
+        schedule = DeadlineScheduler(data_dir()).status()
+        consensus = FixtureOddsConsensusStore(data_dir()).latest()
+        event_ids = [row.odds_event_id for row in consensus if row.gameweek == schedule.event]
+        if not event_ids:
+            event_ids = [row.odds_event_id for row in consensus]
         catalog = EventMarketStore(data_dir()).fetch(event_ids)
     except (FileNotFoundError, OddsSourceError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc

@@ -43,7 +43,9 @@ services:
       - key: AIFPL_RENDER_BOOTSTRAP_SEASON
         value: "2025-26"
       - key: AIFPL_FETCH_EVENT_MARKETS
-        value: "false"
+        value: "true"
+      - key: AIFPL_EVENT_MARKET_MAX_EVENTS
+        value: "10"
       - key: AIFPL_TELEGRAM_ENABLED
         value: "false"
       - key: AIFPL_TELEGRAM_BOT_TOKEN

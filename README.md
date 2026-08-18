@@ -45,7 +45,7 @@ Backend optional:
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
 - `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
-- `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. The Blueprint disables this on the Starter plan to keep refresh memory bounded; enable it only on a larger instance.
+- `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. Refresh prioritizes the actionable gameweek and caps the request at `AIFPL_EVENT_MARKET_MAX_EVENTS` (default `10`) to stay within the Starter-plan memory limit.
 
 Frontend required:
 

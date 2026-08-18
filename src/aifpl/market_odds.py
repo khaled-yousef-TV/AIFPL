@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aifpl.artifacts import complete_artifact_paths, json_bytes, jsonl_bytes, verify_artifact, write_immutable, write_manifest
+from aifpl.config import event_market_max_events
 from aifpl.odds import OddsSourceError, TheOddsApiClient
 
 
@@ -87,11 +88,12 @@ class EventMarketStore:
         self.root = root
 
     def fetch(self, event_ids: list[str], client: TheOddsApiClient | None = None) -> EventMarketCatalog:
-        if not event_ids:
+        selected_event_ids = list(dict.fromkeys(event_ids))[:event_market_max_events()]
+        if not selected_event_ids:
             raise ValueError("No odds events are available for event-market fetching")
         client = client or TheOddsApiClient.from_environment()
         created_at = datetime.now(timezone.utc)
-        payloads = [client.fetch_event_markets(event_id, EVENT_MARKETS)[0] for event_id in sorted(set(event_ids))]
+        payloads = [client.fetch_event_markets(event_id, EVENT_MARKETS)[0] for event_id in selected_event_ids]
         raw_path = self.root / "raw" / "odds" / "the_odds_api" / "epl_event_markets" / f"{created_at.strftime('%Y%m%dT%H%M%S%fZ')}.json"
         write_immutable(raw_path, json_bytes({"fetched_at": created_at.isoformat(), "markets": EVENT_MARKETS, "payload": payloads}, pretty=True))
         quotes = normalize_event_markets(payloads)
@@ -101,7 +103,7 @@ class EventMarketStore:
             self.root, output_path, artifact_type="epl_event_markets", created_at=created_at.isoformat(),
             record_count=len(quotes), sources={"raw_event_markets": raw_path}, parameters={"markets": EVENT_MARKETS},
         )
-        return EventMarketCatalog(len(set(event_ids)), len(quotes), str(output_path), created_at, str(manifest_path))
+        return EventMarketCatalog(len(selected_event_ids), len(quotes), str(output_path), created_at, str(manifest_path))
 
     def latest_path(self) -> Path:
         directory = self.root / "normalized" / "odds" / "the_odds_api" / "epl_event_markets"

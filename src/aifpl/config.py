@@ -42,6 +42,13 @@ def minimum_odds_fixture_coverage() -> float:
     return coverage
 
 
+def event_market_max_events() -> int:
+    value = int(os.environ.get("AIFPL_EVENT_MARKET_MAX_EVENTS", "10"))
+    if not 1 <= value <= 10:
+        raise ValueError("AIFPL_EVENT_MARKET_MAX_EVENTS must be within 1..10")
+    return value
+
+
 def minimum_bank_tenths() -> int:
     value = int(os.environ.get("AIFPL_MIN_BANK_TENTHS", "50"))
     if value < 0:

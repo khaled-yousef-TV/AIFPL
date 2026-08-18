@@ -320,7 +320,11 @@ def latest_player_evidence(limit: int = Query(100, ge=1, le=5000)) -> list[Playe
 @app.post("/odds/epl/event-markets", response_model=EventMarketCatalog, status_code=201)
 def fetch_event_markets() -> EventMarketCatalog:
     try:
-        event_ids = [row.odds_event_id for row in FixtureOddsConsensusStore(data_dir()).latest()]
+        schedule = DeadlineScheduler(data_dir()).status()
+        consensus = FixtureOddsConsensusStore(data_dir()).latest()
+        event_ids = [row.odds_event_id for row in consensus if row.gameweek == schedule.event]
+        if not event_ids:
+            event_ids = [row.odds_event_id for row in consensus]
         return EventMarketStore(data_dir()).fetch(event_ids)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

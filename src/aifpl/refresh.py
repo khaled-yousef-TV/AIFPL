@@ -130,17 +130,21 @@ class CurrentDataRefreshJob:
             consensus = consensus_store.build_latest(
                 player_catalog_path, fixture_catalog_path, Path(odds.normalized_path),
             )
+            consensus_rows = consensus_store.load(Path(consensus.output_path))
             signal_path: Path | None = None
             if os.environ.get("AIFPL_FETCH_EVENT_MARKETS", "false").lower() in ("1", "true", "yes"):
-                event_ids = [row.odds_event_id for row in consensus_store.load(Path(consensus.output_path))]
-                market_catalog = EventMarketStore(self.root).fetch(event_ids, odds_client)
-                artifacts["event_markets"] = market_catalog.output_path
-                signals = MarketSignalStore(self.root).build(
-                    player_catalog_path, Path(consensus.output_path), Path(market_catalog.output_path),
-                )
-                signal_path = Path(signals.output_path)
-                artifacts["market_signals"] = signals.output_path
-                steps.append("build_market_signals")
+                event_ids = [row.odds_event_id for row in consensus_rows if row.gameweek == start_gameweek]
+                if not event_ids:
+                    event_ids = [row.odds_event_id for row in consensus_rows]
+                if event_ids:
+                    market_catalog = EventMarketStore(self.root).fetch(event_ids, odds_client)
+                    artifacts["event_markets"] = market_catalog.output_path
+                    signals = MarketSignalStore(self.root).build(
+                        player_catalog_path, Path(consensus.output_path), Path(market_catalog.output_path),
+                    )
+                    signal_path = Path(signals.output_path)
+                    artifacts["market_signals"] = signals.output_path
+                    steps.append("build_market_signals")
             odds_projection = OddsProjectionStore(self.root).build(
                 start_gameweek, end_gameweek, player_catalog_path, fixture_catalog_path, Path(consensus.output_path),
                 Path(evidence.output_path),
@@ -156,7 +160,7 @@ class CurrentDataRefreshJob:
                 if not fixture.finished and fixture.gameweek is not None
                 and fixture.gameweek == start_gameweek
             }
-            matched_ids = {row.fixture_id for row in consensus_store.load(Path(consensus.output_path))}
+            matched_ids = {row.fixture_id for row in consensus_rows}
             coverage = len(relevant_ids & matched_ids) / len(relevant_ids) if relevant_ids else 0.0
             if not relevant_ids or coverage < minimum_odds_fixture_coverage():
                 raise ValueError(

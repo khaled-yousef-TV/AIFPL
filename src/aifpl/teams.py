@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,14 +29,17 @@ class CurrentTeamCatalogStore:
 
     def _latest_snapshot_payload(self) -> dict[str, Any] | None:
         directory = self.root / "raw" / "fpl" / "bootstrap"
-        documents: list[tuple[datetime, dict[str, Any]]] = []
-        for path in directory.glob("*.json") if directory.exists() else []:
-            document = json.loads(path.read_text(encoding="utf-8"))
-            fetched_at = datetime.fromisoformat(document["metadata"]["fetched_at"])
-            documents.append((fetched_at, document["payload"]))
-        if not documents:
+        files = sorted(directory.glob("*.json")) if directory.exists() else []
+        if not files:
             return None
-        return max(documents, key=lambda item: item[0])[1]
+        # SnapshotStore filenames are zero-padded UTC timestamps, so the newest
+        # payload can be selected before parsing. The logo endpoint is requested
+        # once per visible crest on a cold browser cache.
+        document = json.loads(files[-1].read_text(encoding="utf-8"))
+        payload = document.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("Latest FPL bootstrap snapshot has an invalid payload")
+        return payload
 
     @staticmethod
     def _bundled_payload() -> dict[str, Any]:
