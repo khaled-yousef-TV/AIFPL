@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Event
 from typing import Literal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
@@ -89,7 +90,7 @@ class DeadlineScheduler:
             raise ValueError("Bootstrap snapshot has no FPL deadlines")
         upcoming = [item for item in deadlines if item[0] > now]
         deadline, event = min(upcoming) if upcoming else max(deadlines)
-        refresh_at = deadline - timedelta(minutes=self.settings.lead_minutes)
+        refresh_at = self._refresh_at(deadline)
         season_id = self._season_id(deadline)
         return DeadlineStatus(
             checked_at=now, event=event, deadline=deadline, refresh_at=refresh_at,
@@ -301,6 +302,15 @@ class DeadlineScheduler:
     def _tick_path(self, checked_at: datetime) -> Path:
         stamp = checked_at.strftime("%Y%m%dT%H%M%S%fZ")
         return self.root / "scheduler" / "ticks" / f"{stamp}-{uuid4().hex}.json"
+
+    def _refresh_at(self, deadline: datetime) -> datetime:
+        release_timezone = ZoneInfo(self.settings.timezone)
+        local_deadline = deadline.astimezone(release_timezone)
+        local_release = datetime.combine(local_deadline.date(), self.settings.release_time, tzinfo=release_timezone)
+        refresh_at = local_release.astimezone(timezone.utc)
+        if refresh_at >= deadline:
+            return deadline - timedelta(minutes=self.settings.lead_minutes)
+        return refresh_at
 
     def _completion_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "completed" / season_id / f"gw{event}.json"

@@ -225,12 +225,14 @@ including a failed run, is persisted under `data/jobs/refresh/` with completed
 steps, artifact paths, health state, recommendation, and error details.
 
 The deadline scheduler reads the next official FPL `deadline_time` and runs the
-same audited refresh job at the configured lead time. `run-scheduler-tick` is a
-safe one-shot operation; `run-deadline-scheduler` polls continuously for use
-under a service manager. A successful event is marked complete so later polls
-cannot spend odds quota or create duplicate recommendations. Scheduler timing,
-horizon, polling, and budget use the `AIFPL_SCHEDULER_*` variables in
-`.env.example`.
+same audited refresh job at 09:00 on the deadline date in `Europe/London` by
+default. `AIFPL_SCHEDULER_RELEASE_TIME` and `AIFPL_SCHEDULER_TIMEZONE` configure
+that release; the lead-time setting is only a fallback for unusually early
+deadlines. `run-scheduler-tick` is a safe one-shot operation;
+`run-deadline-scheduler` polls continuously for use under a service manager. A
+successful event is marked complete so later polls cannot spend odds quota or
+create duplicate recommendations. Scheduler timing, horizon, polling, and
+budget use the `AIFPL_SCHEDULER_*` variables in `.env.example`.
 
 ## Delivery plan
 
@@ -253,8 +255,8 @@ horizon, polling, and budget use the `AIFPL_SCHEDULER_*` variables in
    persistence, API-surface, and CLI-surface automated tests.
 8. Operational data cycle: health and freshness records, configurable aliases,
    bounded retries, and audited manually runnable refresh jobs.
-9. Deadline-aware scheduler: official deadline detection, configurable lead
-   time and horizon, duplicate-safe execution, audited ticks, and a continuous loop.
+9. Deadline-aware scheduler: official deadline detection, configurable morning
+   release time and horizon, duplicate-safe execution, audited ticks, and a continuous loop.
 10. Backend hardening: secret-safe errors, authenticated mutation routes,
     season/concurrency-safe jobs, verified artifact lineage and hashes, odds
     coverage gates, finished-fixture filtering, and leakage-safe kickoff ordering.

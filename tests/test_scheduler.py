@@ -44,10 +44,10 @@ def scheduler(tmp_path, refresh_job: FakeRefreshJob) -> DeadlineScheduler:
 def test_scheduler_detects_deadline_without_running_early(tmp_path) -> None:
     SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
     refresh = FakeRefreshJob(tmp_path)
-    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 10, tzinfo=timezone.utc))
+    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 7, 59, tzinfo=timezone.utc))
 
     assert result.status == "not_due"
-    assert result.refresh_at == datetime(2026, 8, 15, 10, 30, tzinfo=timezone.utc)
+    assert result.refresh_at == datetime(2026, 8, 15, 8, tzinfo=timezone.utc)
     assert refresh.calls == []
 
 
@@ -56,12 +56,32 @@ def test_scheduler_runs_due_event_once(tmp_path) -> None:
     refresh = FakeRefreshJob(tmp_path)
     subject = scheduler(tmp_path, refresh)
 
-    first = subject.tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
-    second = subject.tick(datetime(2026, 8, 15, 11, 5, tzinfo=timezone.utc))
+    first = subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
+    second = subject.tick(datetime(2026, 8, 15, 8, 5, tzinfo=timezone.utc))
 
     assert first.status == "succeeded"
     assert second.status == "already_completed"
     assert refresh.calls == [(1, 6, 1000)]
+
+
+def test_scheduler_uses_nine_am_uk_time_in_winter(tmp_path) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-12-05T12:00:00Z"), datetime(2026, 12, 1, tzinfo=timezone.utc))
+    refresh = FakeRefreshJob(tmp_path)
+
+    result = scheduler(tmp_path, refresh).tick(datetime(2026, 12, 5, 8, 59, tzinfo=timezone.utc))
+
+    assert result.status == "not_due"
+    assert result.refresh_at == datetime(2026, 12, 5, 9, tzinfo=timezone.utc)
+
+
+def test_scheduler_falls_back_to_lead_time_for_an_early_deadline(tmp_path) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T07:30:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    refresh = FakeRefreshJob(tmp_path)
+
+    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 5, 59, tzinfo=timezone.utc))
+
+    assert result.status == "not_due"
+    assert result.refresh_at == datetime(2026, 8, 15, 6, tzinfo=timezone.utc)
 
 
 def test_scheduler_marks_missed_deadline_without_late_refresh(tmp_path) -> None:
@@ -80,10 +100,10 @@ def test_scheduler_completion_is_isolated_by_season(tmp_path) -> None:
     store.save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
     refresh = FakeRefreshJob(tmp_path)
     subject = scheduler(tmp_path, refresh)
-    first = subject.tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+    first = subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
 
     store.save_bootstrap(bootstrap("2027-08-14T12:00:00Z"), datetime(2027, 8, 1, tzinfo=timezone.utc))
-    second = subject.tick(datetime(2027, 8, 14, 11, tzinfo=timezone.utc))
+    second = subject.tick(datetime(2027, 8, 14, 8, tzinfo=timezone.utc))
 
     assert first.season_id == "2026-27"
     assert second.season_id == "2027-28"
@@ -108,12 +128,12 @@ def test_concurrent_ticks_cannot_both_refresh(tmp_path) -> None:
     subject = scheduler(tmp_path, refresh)
     first: list = []
     thread = threading.Thread(
-        target=lambda: first.append(subject.tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))),
+        target=lambda: first.append(subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))),
     )
     thread.start()
     assert started.wait(2)
 
-    concurrent = subject.tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+    concurrent = subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
     release.set()
     thread.join(2)
 
@@ -130,7 +150,7 @@ def test_preexisting_claim_prevents_duplicate_refresh(tmp_path) -> None:
     claim.parent.mkdir(parents=True)
     claim.write_text('{"token":"other"}', encoding="utf-8")
 
-    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
 
     assert result.status == "in_progress"
     assert refresh.calls == []
@@ -145,7 +165,7 @@ def test_stale_claim_is_recovered(tmp_path) -> None:
     stale = datetime.now(timezone.utc).timestamp() - CLAIM_LEASE_SECONDS - 1
     os.utime(claim, (stale, stale))
 
-    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+    result = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
 
     assert result.status == "succeeded"
     assert refresh.calls == [(1, 6, 1000)]
@@ -157,17 +177,17 @@ def test_failed_refresh_releases_claim_for_retry(tmp_path) -> None:
     subject = scheduler(tmp_path, FailingRefreshJob(tmp_path))
 
     with pytest.raises(SchedulerTickError):
-        subject.tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+        subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
 
     refresh = FakeRefreshJob(tmp_path)
-    retry = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 11, 1, tzinfo=timezone.utc))
+    retry = scheduler(tmp_path, refresh).tick(datetime(2026, 8, 15, 8, 1, tzinfo=timezone.utc))
     assert retry.status == "succeeded"
     assert refresh.calls == [(1, 6, 1000)]
 
 
 def test_deadline_discovery_failure_is_audited(tmp_path) -> None:
     with pytest.raises(SchedulerTickError) as caught:
-        scheduler(tmp_path, FakeRefreshJob(tmp_path)).tick(datetime(2026, 8, 15, 11, tzinfo=timezone.utc))
+        scheduler(tmp_path, FakeRefreshJob(tmp_path)).tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
 
     result = caught.value.result
     assert result.status == "discovery_failed"

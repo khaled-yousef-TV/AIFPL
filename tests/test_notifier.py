@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 import httpx
 import pytest
@@ -155,7 +155,9 @@ def test_scheduler_notifies_once_within_lead_time(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(notifier_module, "TelegramNotifier", FakeNotifier)
     bootstrap = {"elements": [], "teams": [], "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z"}]}
     SnapshotStore(tmp_path).save_bootstrap(bootstrap, datetime(2026, 8, 1, tzinfo=timezone.utc))
-    subject = DeadlineScheduler(tmp_path, refresh_job=FakeRefreshJob(), settings=SchedulerSettings(90, 6, 300, 1000))
+    subject = DeadlineScheduler(
+        tmp_path, refresh_job=FakeRefreshJob(), settings=SchedulerSettings(90, 6, 300, 1000, time(17)),
+    )
 
     first = subject.tick(datetime(2026, 8, 14, 15, tzinfo=timezone.utc))
     second = subject.tick(datetime(2026, 8, 14, 15, 30, tzinfo=timezone.utc))
@@ -188,7 +190,9 @@ def test_scheduler_does_not_notify_outside_lead_window(tmp_path, monkeypatch) ->
     monkeypatch.setattr(notifier_module, "TelegramNotifier", FakeNotifier)
     bootstrap = {"elements": [], "teams": [], "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z"}]}
     SnapshotStore(tmp_path).save_bootstrap(bootstrap, datetime(2026, 8, 1, tzinfo=timezone.utc))
-    subject = DeadlineScheduler(tmp_path, refresh_job=FakeRefreshJob(), settings=SchedulerSettings(90, 6, 300, 1000))
+    subject = DeadlineScheduler(
+        tmp_path, refresh_job=FakeRefreshJob(), settings=SchedulerSettings(90, 6, 300, 1000, time(17)),
+    )
 
     result = subject.tick(datetime(2026, 8, 14, 9, tzinfo=timezone.utc))
 
