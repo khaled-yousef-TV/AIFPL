@@ -8,6 +8,7 @@ from pathlib import Path
 from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore
 from aifpl.fixture_projections import FixtureProjectionStore
+from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.xg_projections import XgXaProjectionStore
 
@@ -32,7 +33,8 @@ def load_projection_candidates(
     elif source == ProjectionSource.FIXTURE:
         return _aggregate(FixtureProjectionStore(root).latest(catalog_id), ownership)
     else:
-        return _aggregate(OddsProjectionStore(root).latest(catalog_id))
+        rows, _ = calibrated_odds_rows(root, catalog_id)
+        return _aggregate(rows)
     return [
         CurrentPlayerProjection(
             player_id=row.player_id, player_name=row.player_name, position=row.position,

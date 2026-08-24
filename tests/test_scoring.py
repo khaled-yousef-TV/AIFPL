@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from aifpl.artifacts import json_bytes, jsonl_bytes, write_immutable, write_manifest
-from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy
+from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy, HorizonPlanSnapshot
 from aifpl.notifier import build_scorecard_message
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.scoring import CompletedDecisionScorer, DecisionScorer
@@ -38,7 +40,7 @@ def write_decision(tmp_path: Path) -> Path:
     return decision_path
 
 
-def write_committed_decision(tmp_path: Path) -> Path:
+def write_committed_decision(tmp_path: Path, catalog_id: str | None = None) -> Path:
     stamp = "20260809T000000000001Z"
     decision_path = tmp_path / "hermes" / "decisions" / f"{stamp}.json"
     state_path = tmp_path / "hermes" / "states" / f"{stamp}.json"
@@ -51,13 +53,14 @@ def write_committed_decision(tmp_path: Path) -> Path:
         transfers_out=[5], transfers_in=[16], explanation="test",
         strategy=strategy(), model="test-model", created_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
         backend_methodology="test", decision_path=str(decision_path), state_path=str(state_path), season_id="2026-27",
+        horizon_plan=HorizonPlanSnapshot(projection_catalog=catalog_id) if catalog_id is not None else None,
     )
     write_immutable(state_path, json_bytes({}, pretty=True))
     write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
     return decision_path
 
 
-def write_catalog(tmp_path: Path) -> None:
+def write_catalog(tmp_path: Path) -> str:
     rows = [
         OddsAdjustedGameweekProjection(
             identifier, f"Player {identifier}", "GK" if identifier <= 2 else "DEF" if identifier <= 7 else "MID" if identifier <= 12 else "FWD",
@@ -70,7 +73,9 @@ def write_catalog(tmp_path: Path) -> None:
     output = directory / "gw1-1.20260809T000000000000Z.test.jsonl"
     write_immutable(output, jsonl_bytes(rows))
     write_manifest(tmp_path, output, artifact_type="odds_projections", created_at="2026-08-09T00:00:00Z",
-                   record_count=len(rows), sources={})
+                   record_count=len(rows), sources={},
+                   parameters={"odds_coverage_status": "full", "odds_coverage_by_gameweek": {1: 1.0}})
+    return output.name
 
 
 def write_event_results(tmp_path: Path) -> None:
@@ -106,6 +111,16 @@ def test_score_requires_event_results(tmp_path) -> None:
         pass
     else:
         raise AssertionError("Expected a missing event snapshot error")
+
+
+def test_manual_score_requires_official_finality(tmp_path) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(
+        {"elements": [], "teams": [], "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True, "data_checked": False}]},
+        datetime(2026, 8, 23, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(ValueError, match="not marked final"):
+        DecisionScorer(tmp_path).require_final_gameweek(1)
 
 
 def test_scorecard_message_formats(tmp_path) -> None:
@@ -152,15 +167,15 @@ def test_completed_scorer_persists_one_final_scorecard(tmp_path) -> None:
             self.bootstrap_calls += 1
             return {
                 "elements": [], "teams": [],
-                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True}],
+                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True, "data_checked": True}],
             }
 
         async def fetch_event_live(self, event: int) -> dict:
             self.event_calls.append(event)
             return {"elements": [{"id": identifier, "stats": {"total_points": identifier + 1}} for identifier in SQUAD_IDS + [16]]}
 
-    write_catalog(tmp_path)
-    decision_path = write_committed_decision(tmp_path)
+    catalog_id = write_catalog(tmp_path)
+    decision_path = write_committed_decision(tmp_path, catalog_id)
     client = FakeFplClient()
     completed = CompletedDecisionScorer(tmp_path, client)
 
@@ -173,6 +188,7 @@ def test_completed_scorer_persists_one_final_scorecard(tmp_path) -> None:
     assert client.event_calls == [1]
     assert DecisionScorer(tmp_path).latest().decision_path == str(decision_path)
     assert DecisionScorer(tmp_path).is_scored(decision_path, 1)
+    assert len(list((tmp_path / "calibration" / "live" / "outcomes" / "2026-27").glob("*/*.jsonl"))) == 1
     from aifpl.hermes import HermesDecisionBackend
 
     assert HermesDecisionBackend(tmp_path).context()["decision_history"]["summary"]["scored_gameweeks"] == 1
@@ -186,7 +202,7 @@ def test_completed_scorer_waits_for_fpl_to_finalize_the_gameweek(tmp_path) -> No
         async def fetch_bootstrap(self) -> dict:
             return {
                 "elements": [], "teams": [],
-                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": False}],
+                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True, "data_checked": False}],
             }
 
         async def fetch_event_live(self, event: int) -> dict:
@@ -198,3 +214,47 @@ def test_completed_scorer_waits_for_fpl_to_finalize_the_gameweek(tmp_path) -> No
 
     assert CompletedDecisionScorer(tmp_path, client).score_pending("2026-27") == []
     assert client.event_calls == []
+
+
+def test_completed_scorer_retries_calibration_after_a_scorecard_exists(tmp_path, monkeypatch) -> None:
+    class FakeFplClient:
+        async def fetch_bootstrap(self) -> dict:
+            return {
+                "elements": [], "teams": [],
+                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True, "data_checked": True}],
+            }
+
+        async def fetch_event_live(self, event: int) -> dict:
+            return {"elements": [{"id": identifier, "stats": {"total_points": identifier + 1}} for identifier in SQUAD_IDS + [16]]}
+
+    class RetryingCalibrationStore:
+        attempts = 0
+
+        def __init__(self, root) -> None:
+            pass
+
+        def needs_outcomes(self, season_id, gameweek, catalog_id) -> bool:
+            return True
+
+        def needs_profile(self, season_id, gameweek, catalog_id) -> bool:
+            return False
+
+        def record_outcomes(self, *args):
+            type(self).attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("temporary calibration failure")
+            return type("Outcome", (), {"methodology": "test", "model_signature": "signature"})()
+
+        def build_profile(self, season_id, methodology, model_signature) -> None:
+            return None
+
+    catalog_id = write_catalog(tmp_path)
+    decision_path = write_committed_decision(tmp_path, catalog_id)
+    monkeypatch.setattr("aifpl.scoring.LiveCalibrationStore", RetryingCalibrationStore)
+    completed = CompletedDecisionScorer(tmp_path, FakeFplClient())
+
+    with pytest.raises(RuntimeError, match="temporary calibration failure"):
+        completed.score_pending("2026-27")
+    assert DecisionScorer(tmp_path).is_scored(decision_path, 1)
+    assert completed.score_pending("2026-27") == []
+    assert RetryingCalibrationStore.attempts == 2

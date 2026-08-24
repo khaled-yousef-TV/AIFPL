@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.hermes import HermesDecision, HermesManager, HorizonPlanSnapshot, HorizonPlanWeekSnapshot
+from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
 from aifpl.scheduler import DeadlineScheduler
 from aifpl.scoring import DecisionScorer
@@ -302,8 +303,16 @@ def _dashboard_confidence(root: Path) -> DashboardConfidence:
         return DashboardConfidence(projection_catalog=path.name)
     parameters = manifest.get("parameters", {})
     coverage = parameters.get("odds_coverage_by_gameweek") or {}
+    calibration = "uncalibrated"
+    try:
+        _, profile = calibrated_odds_rows(root, path.name)
+        if profile is not None:
+            calibration = profile.policy_version if profile.status == "active" else profile.status
+    except (FileNotFoundError, ValueError):
+        pass
     return DashboardConfidence(
         status=parameters.get("odds_coverage_status", "unknown"),
+        calibration=calibration,
         odds_coverage_by_gameweek={int(key): float(value) for key, value in coverage.items()},
         evidence_cutoff=parameters.get("evidence_cutoff"),
         max_evidence_age_hours=parameters.get("max_evidence_age_hours"),

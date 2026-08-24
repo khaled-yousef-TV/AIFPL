@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.fpl import FplClient
 from aifpl.hermes import HermesDecision
+from aifpl.live_calibration import LiveCalibrationStore
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.snapshots import SnapshotStore
 
@@ -63,7 +64,10 @@ class DecisionScorer:
     def score(self, decision_path: Path | str, event: int | None = None) -> DecisionScore:
         decision = HermesDecision.model_validate_json(Path(decision_path).read_text(encoding="utf-8"))
         gameweek = event or decision.gameweek
-        catalog_path = self._catalog_for_gameweek(gameweek)
+        catalog_path = self._catalog_for_gameweek(
+            gameweek,
+            decision.horizon_plan.projection_catalog if decision.horizon_plan is not None else None,
+        )
         rows = [row for row in OddsProjectionStore(self.root).latest(catalog_path.name) if row.gameweek == gameweek]
         projections = {row.player_id: row.projected_points for row in rows}
         names = {row.player_id: (row.player_name, row.position) for row in rows}
@@ -142,8 +146,26 @@ class DecisionScorer:
                 return True
         return False
 
-    def _catalog_for_gameweek(self, gameweek: int) -> Path:
+    def require_final_gameweek(self, gameweek: int) -> None:
+        path, _ = SnapshotStore(self.root).latest_bootstrap()
+        document = json.loads(path.read_text(encoding="utf-8"))
+        finalized = any(
+            isinstance(event, dict)
+            and event.get("id") == gameweek
+            and event.get("finished") is True
+            and event.get("data_checked") is True
+            for event in document.get("payload", {}).get("events", [])
+        )
+        if not finalized:
+            raise ValueError(f"GW{gameweek} is not marked final by FPL")
+
+    def _catalog_for_gameweek(self, gameweek: int, catalog_id: str | None = None) -> Path:
         directory = self.root / "normalized" / "current" / "odds_projections"
+        if catalog_id:
+            rows = OddsProjectionStore(self.root).latest(catalog_id)
+            if gameweek in {row.gameweek for row in rows}:
+                return directory / catalog_id
+            raise ValueError(f"Pinned projection catalog does not contain GW{gameweek}: {catalog_id}")
         candidates: list[tuple[datetime, Path]] = []
         for path in directory.glob("*.jsonl"):
             manifest = path.with_suffix(".manifest.json")
@@ -184,33 +206,67 @@ class CompletedDecisionScorer:
         from aifpl.hermes import HermesManager
 
         scorer = DecisionScorer(self.root)
+        calibration = LiveCalibrationStore(self.root)
         latest_by_gameweek: dict[int, HermesDecision] = {}
         for decision in HermesManager(self.root).decisions():
             if decision.season_id == season_id:
                 latest_by_gameweek.setdefault(decision.gameweek, decision)
-        pending = [
-            decision for decision in latest_by_gameweek.values()
-            if not scorer.is_scored(decision.decision_path, decision.gameweek)
-        ]
+        pending = []
+        for decision in latest_by_gameweek.values():
+            plan = decision.horizon_plan
+            needs_score = not scorer.is_scored(decision.decision_path, decision.gameweek)
+            needs_calibration = (
+                plan is not None
+                and bool(plan.projection_catalog)
+                and (
+                    calibration.needs_outcomes(season_id, decision.gameweek, plan.projection_catalog)
+                    or calibration.needs_profile(season_id, decision.gameweek, plan.projection_catalog)
+                )
+            )
+            if needs_score or needs_calibration:
+                pending.append(decision)
         if not pending:
             return []
 
         bootstrap = asyncio.run(self.fpl_client.fetch_bootstrap())
-        finished_events = {
-            event["id"] for event in bootstrap.get("events", [])
-            if isinstance(event, dict) and isinstance(event.get("id"), int) and event.get("finished") is True
+        finalized_events = {
+            event["id"]
+            for event in bootstrap.get("events", [])
+            if isinstance(event, dict)
+            and isinstance(event.get("id"), int)
+            and event.get("finished") is True
+            and event.get("data_checked") is True
         }
-        completed = [decision for decision in pending if decision.gameweek in finished_events]
+        completed = [decision for decision in pending if decision.gameweek in finalized_events]
         if not completed:
             return []
 
         snapshots = SnapshotStore(self.root)
-        snapshots.save_bootstrap(bootstrap)
+        bootstrap_path, _ = snapshots.save_bootstrap(bootstrap)
         score_paths: list[str] = []
         for decision in completed:
-            snapshots.save_event_live(
+            event_path, _ = snapshots.save_event_live(
                 decision.gameweek,
                 asyncio.run(self.fpl_client.fetch_event_live(decision.gameweek)),
             )
-            score_paths.append(scorer.score(decision.decision_path, decision.gameweek).output_path)
+            if not scorer.is_scored(decision.decision_path, decision.gameweek):
+                score_paths.append(scorer.score(decision.decision_path, decision.gameweek).output_path)
+            plan = decision.horizon_plan
+            if plan is not None and plan.projection_catalog:
+                if calibration.needs_outcomes(season_id, decision.gameweek, plan.projection_catalog):
+                    calibration.record_outcomes(
+                        season_id,
+                        decision.gameweek,
+                        plan.projection_catalog,
+                        bootstrap_path,
+                        event_path,
+                        Path(decision.decision_path),
+                        decision.created_at,
+                    )
+                if calibration.needs_profile(season_id, decision.gameweek, plan.projection_catalog):
+                    applied_path = self.root / "normalized" / "current" / "odds_projections" / plan.projection_catalog
+                    raw_path, _ = calibration._raw_catalog(applied_path)
+                    rows = OddsProjectionStore(self.root).latest(raw_path.name)
+                    methodology = {row.methodology for row in rows if row.gameweek == decision.gameweek}.pop()
+                    calibration.build_profile(season_id, methodology, calibration._model_signature(raw_path))
         return score_paths

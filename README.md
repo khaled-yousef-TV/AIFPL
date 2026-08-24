@@ -232,8 +232,8 @@ deadlines. `run-scheduler-tick` is a safe one-shot operation;
 `run-deadline-scheduler` polls continuously for use under a service manager. A
 successful event is marked complete so later polls cannot spend odds quota or
 create duplicate recommendations. While polling, it also checks unscored
-committed teams: once FPL marks their gameweek complete, it stores final
-event-live points, produces one scorecard, and supplies that history to Hermes
+committed teams: once FPL marks their gameweek finished and data-checked, it
+stores final event-live points, produces one scorecard, and supplies that history to Hermes
 before the next decision. Scheduler timing, horizon, polling, and budget use
 the `AIFPL_SCHEDULER_*` variables in `.env.example`.
 
@@ -301,12 +301,16 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
 23. Structured late-return evidence: per-gameweek start probability and minutes
     multiplier for tournament returners applied across the whole horizon, plus
     ownership preserved for every projection source.
+24. Live projection calibration: completed gameweeks produce full-population,
+    pre-deadline odds-projection outcome ledgers. A capped recency-weighted
+    affine correction activates only after four gameweeks and 1,000 player-GW
+    observations, then applies only to future catalogs.
 
 ### Next
 
-1. **Calibrated projection intervals:** replace the `uncalibrated` label with
-   real confidence intervals once enough chronological holdout forecasts have
-   accumulated to estimate per-player variance honestly.
+1. **Calibrated projection intervals:** add real confidence intervals once
+   enough chronological holdout forecasts have accumulated to estimate
+   per-player variance honestly.
 2. **Effective ownership:** FPL exposes only raw `selected_by_percent`; true
    effective ownership (including captain/TC ownership) needs a data source
    before the differential metrics can be upgraded beyond the documented proxy.
@@ -416,9 +420,9 @@ so committed economics stay auditable and drift-free.
 The dashboard reports projection confidence honestly rather than as a binary
 "catalog loaded" signal: per-gameweek odds coverage and status from the catalog
 manifest, evidence cutoff/age when lineup evidence was consumed, and an explicit
-`uncalibrated` label until chronological holdout calibration produces intervals.
-Player rows expose expected minutes, start probability, and availability
-multiplier when the projection catalog carries them.
+calibration state (`uncalibrated`, `warming_up`, or `rolling_affine_v1`). Player
+rows expose expected minutes, start probability, and availability multiplier
+when the projection catalog carries them.
 
 Each planned transfer is rendered with its computed explanation against the
 pinned catalog: horizon projected gain (in minus out across the planned
@@ -497,6 +501,14 @@ population. Existing outcome-only history can calibrate the rolling baseline;
 advanced xG, odds, clean-sheet, and lineup models can only be evaluated after
 their own pre-deadline forecasts have accumulated. The backend never recreates
 historical forecasts from today's API.
+
+The live odds model records every eligible player from the exact catalog pinned
+to a completed decision, then matches it to final official FPL event points. It
+uses the latest eight completed gameweeks with recency weighting, but remains in
+`warming_up` mode until at least four gameweeks and 1,000 player-gameweek
+observations exist. Once active, its affine correction is shrunk toward identity
+and capped per fixture; it can only be applied to later gameweeks, never to the
+catalog used to score the completed decision.
 
 `build-player-evidence` preserves official FPL news/status and historical start
 rates. Optional structured feeds come from `AIFPL_PLAYER_EVIDENCE_FILE` or

@@ -114,11 +114,7 @@ def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tm
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
     captured: dict = {}
 
-    class FakeStore:
-        def latest(self, catalog_id=None):
-            return []
-
-    monkeypatch.setattr(api, "OddsProjectionStore", lambda root: FakeStore())
+    monkeypatch.setattr(api, "calibrated_odds_rows", lambda root, catalog_id: ([], None))
 
     def fake_plan(rows, state, **kwargs):
         captured.update(kwargs)

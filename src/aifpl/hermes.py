@@ -15,6 +15,7 @@ from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonSquadState, HorizonTransferPlan, PLANNER_VERSION, plan_horizon_transfers
+from aifpl.live_calibration import calibrated_odds_catalog
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.optimizer import OptimizedSquad
 from aifpl.player_evidence import PlayerEvidenceStore
@@ -262,7 +263,7 @@ class HermesDecisionBackend:
         candidates: list[tuple[datetime, Path]] = []
         for path in directory.glob("*.jsonl"):
             manifest = path.with_suffix(".manifest.json")
-            if manifest.exists():
+            if manifest.exists() and OddsProjectionStore._is_raw_catalog(path):
                 candidates.append((datetime.fromisoformat(json.loads(manifest.read_text(encoding="utf-8"))["created_at"]), path))
         for _, path in sorted(candidates, reverse=True):
             try:
@@ -279,14 +280,14 @@ class HermesDecisionBackend:
         candidates: list[tuple[datetime, Path]] = []
         for path in directory.glob("*.jsonl"):
             manifest = path.with_suffix(".manifest.json")
-            if manifest.exists():
+            if manifest.exists() and OddsProjectionStore._is_raw_catalog(path):
                 candidates.append((datetime.fromisoformat(json.loads(manifest.read_text(encoding="utf-8"))["created_at"]), path))
         for _, path in sorted(candidates, reverse=True):
-            rows = OddsProjectionStore(self.root).latest(path.name)
-            available = sorted({row.gameweek for row in rows})
+            calibrated = calibrated_odds_catalog(self.root, path.name)
+            available = sorted({row.gameweek for row in calibrated.rows})
             if target_gameweek in available:
                 selected = set(range(target_gameweek, min(max(available), target_gameweek + horizon - 1) + 1))
-                return [row for row in rows if row.gameweek in selected], path.name
+                return [row for row in calibrated.rows if row.gameweek in selected], calibrated.catalog_id
         raise FileNotFoundError(f"No odds projection catalog contains gameweek {target_gameweek}")
 
 

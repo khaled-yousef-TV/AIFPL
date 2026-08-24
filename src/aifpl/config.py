@@ -159,6 +159,32 @@ def scheduler_settings() -> SchedulerSettings:
 
 
 @dataclass(frozen=True)
+class LiveCalibrationSettings:
+    window_gameweeks: int
+    min_gameweeks: int
+    min_observations: int
+    recency_decay: float
+
+
+def live_calibration_settings() -> LiveCalibrationSettings:
+    settings = LiveCalibrationSettings(
+        window_gameweeks=int(os.environ.get("AIFPL_LIVE_CALIBRATION_WINDOW_GAMEWEEKS", "8")),
+        min_gameweeks=int(os.environ.get("AIFPL_LIVE_CALIBRATION_MIN_GAMEWEEKS", "4")),
+        min_observations=int(os.environ.get("AIFPL_LIVE_CALIBRATION_MIN_OBSERVATIONS", "1000")),
+        recency_decay=float(os.environ.get("AIFPL_LIVE_CALIBRATION_RECENCY_DECAY", "0.85")),
+    )
+    if not 1 <= settings.window_gameweeks <= 38:
+        raise ValueError("AIFPL_LIVE_CALIBRATION_WINDOW_GAMEWEEKS must be within 1..38")
+    if not 1 <= settings.min_gameweeks <= settings.window_gameweeks:
+        raise ValueError("AIFPL_LIVE_CALIBRATION_MIN_GAMEWEEKS must be within the calibration window")
+    if settings.min_observations < 1:
+        raise ValueError("AIFPL_LIVE_CALIBRATION_MIN_OBSERVATIONS must be positive")
+    if not 0 < settings.recency_decay <= 1:
+        raise ValueError("AIFPL_LIVE_CALIBRATION_RECENCY_DECAY must be within (0, 1]")
+    return settings
+
+
+@dataclass(frozen=True)
 class TelegramSettings:
     bot_token: str
     chat_id: str

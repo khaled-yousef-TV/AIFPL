@@ -18,6 +18,7 @@ from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError
 from aifpl.health import SourceHealthChecker
 from aifpl.hermes import HermesManager
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
+from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.projections import BaselineBacktester
 from aifpl.projection_catalogs import ProjectionSource, load_projection_candidates
 from aifpl.player_evidence import PlayerEvidenceStore
@@ -547,7 +548,7 @@ def plan_horizon(
     try:
         state = HorizonSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
         plan = plan_horizon_transfers(
-            OddsProjectionStore(data_dir()).latest(catalog_id), state,
+            calibrated_odds_rows(data_dir(), catalog_id)[0], state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
             churn_penalty=churn_penalty,
         )
@@ -620,8 +621,11 @@ def score_decisions(event: int | None = typer.Option(None, min=1, max=38)) -> No
     from aifpl.scoring import DecisionScorer
 
     try:
-        decision_path = HermesManager(data_dir()).latest_decision().decision_path
-        record = DecisionScorer(data_dir()).score(decision_path, event=event)
+        decision = HermesManager(data_dir()).latest_decision()
+        scorer = DecisionScorer(data_dir())
+        target_gameweek = event or decision.gameweek
+        scorer.require_final_gameweek(target_gameweek)
+        record = scorer.score(decision.decision_path, event=target_gameweek)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(record))

@@ -26,6 +26,7 @@ from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError, Se
 from aifpl.health import SourceHealthChecker, SourceHealthReport
 from aifpl.hermes import HermesDecision, HermesManager, HermesRunResult, HermesRunTranscript, HermesState
 from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
+from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.optimizer import OptimizedSquad, SquadOptimizationError, optimize_squad
 from aifpl.odds import NormalizedMatchOdds, OddsSnapshotStore, OddsSnapshotSummary, OddsSourceError, TheOddsApiClient
 from aifpl.odds_matching import FixtureOddsConsensus, FixtureOddsConsensusCatalog, FixtureOddsConsensusStore, load_team_aliases
@@ -640,7 +641,7 @@ def horizon_transfer_plan(
 ) -> HorizonTransferPlan:
     try:
         return plan_horizon_transfers(
-            OddsProjectionStore(data_dir()).latest(catalog_id), state,
+            calibrated_odds_rows(data_dir(), catalog_id)[0], state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
             churn_penalty=churn_penalty,
         )

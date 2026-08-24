@@ -273,6 +273,7 @@ class OddsProjectionStore:
     def latest_path(self) -> Path:
         directory = self.root / "normalized" / "current" / "odds_projections"
         files = complete_artifact_paths(list(directory.glob("*.jsonl"))) if directory.exists() else []
+        files = [path for path in files if self._is_raw_catalog(path)]
         if not files:
             raise FileNotFoundError("No odds projections exist; run build-odds-projections first")
         return max(files, key=lambda path: path.name.split(".")[1] if len(path.name.split(".")) >= 4 else path.name)
@@ -289,6 +290,16 @@ class OddsProjectionStore:
         if not path.exists():
             raise FileNotFoundError(f"Odds projection catalog does not exist: {catalog_id}")
         return path
+
+    @staticmethod
+    def _is_raw_catalog(path: Path) -> bool:
+        manifest_path = path.with_suffix(".manifest.json")
+        if not manifest_path.exists():
+            return True
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8")).get("artifact_type") != "calibrated_odds_projections"
+        except (OSError, json.JSONDecodeError):
+            return True
 
 
 def _season_id(fixtures: list[CurrentFixture]) -> str:

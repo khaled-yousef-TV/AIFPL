@@ -2,6 +2,7 @@ import pytest
 
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore
 from aifpl.fixture_projections import FixtureGameweekProjection
+from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.projection_catalogs import ProjectionSource, _aggregate, _latest_ownership, load_projection_candidates
 from aifpl.xg_projections import XgXaProjection
 
@@ -45,6 +46,19 @@ def test_xg_xa_source_carries_ownership_from_the_player_catalog(tmp_path, monkey
     candidate = load_projection_candidates(tmp_path, ProjectionSource.XG_XA)[0]
 
     assert candidate.selected_by_percent == 41.0
+
+
+def test_odds_source_uses_calibrated_rows(tmp_path, monkeypatch) -> None:
+    rows = [
+        OddsAdjustedGameweekProjection(1, "Player", "MID", "Arsenal", 75, 1, 1, 1, 6.5, methodology="test.calibrated"),
+        OddsAdjustedGameweekProjection(1, "Player", "MID", "Arsenal", 75, 2, 1, 1, 5.5, methodology="test.calibrated"),
+    ]
+    monkeypatch.setattr("aifpl.projection_catalogs.calibrated_odds_rows", lambda root, catalog_id: (rows, None))
+
+    candidate = load_projection_candidates(tmp_path, ProjectionSource.ODDS, "catalog.jsonl")[0]
+
+    assert candidate.projected_points == 12.0
+    assert candidate.methodology == "test.calibrated"
 
 
 class FakeXgStore:
