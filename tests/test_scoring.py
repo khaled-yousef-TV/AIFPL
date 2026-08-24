@@ -7,7 +7,7 @@ from aifpl.artifacts import json_bytes, jsonl_bytes, write_immutable, write_mani
 from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy
 from aifpl.notifier import build_scorecard_message
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
-from aifpl.scoring import DecisionScorer
+from aifpl.scoring import CompletedDecisionScorer, DecisionScorer
 from aifpl.snapshots import SnapshotStore
 
 SQUAD_IDS = list(range(1, 16))
@@ -34,6 +34,25 @@ def write_decision(tmp_path: Path) -> Path:
         backend_methodology="test", decision_path=str(decision_path),
         state_path=str(tmp_path / "state.json"), season_id="2026-27",
     )
+    write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
+    return decision_path
+
+
+def write_committed_decision(tmp_path: Path) -> Path:
+    stamp = "20260809T000000000001Z"
+    decision_path = tmp_path / "hermes" / "decisions" / f"{stamp}.json"
+    state_path = tmp_path / "hermes" / "states" / f"{stamp}.json"
+    squad = HermesSquadState(
+        player_ids=SQUAD_IDS, bank=20, free_transfers=1,
+        purchase_prices={element: 50 for element in SQUAD_IDS},
+    )
+    decision = HermesDecision(
+        action="hold", gameweek=1, squad=squad, captain_id=1, starting_xi_ids=list(range(1, 12)),
+        transfers_out=[5], transfers_in=[16], explanation="test",
+        strategy=strategy(), model="test-model", created_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+        backend_methodology="test", decision_path=str(decision_path), state_path=str(state_path), season_id="2026-27",
+    )
+    write_immutable(state_path, json_bytes({}, pretty=True))
     write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
     return decision_path
 
@@ -121,3 +140,61 @@ def test_recent_returns_newest_scores_first(tmp_path) -> None:
 
     assert len(recent) == 2
     assert recent[0].scoring_at > recent[1].scoring_at
+
+
+def test_completed_scorer_persists_one_final_scorecard(tmp_path) -> None:
+    class FakeFplClient:
+        def __init__(self) -> None:
+            self.bootstrap_calls = 0
+            self.event_calls: list[int] = []
+
+        async def fetch_bootstrap(self) -> dict:
+            self.bootstrap_calls += 1
+            return {
+                "elements": [], "teams": [],
+                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": True}],
+            }
+
+        async def fetch_event_live(self, event: int) -> dict:
+            self.event_calls.append(event)
+            return {"elements": [{"id": identifier, "stats": {"total_points": identifier + 1}} for identifier in SQUAD_IDS + [16]]}
+
+    write_catalog(tmp_path)
+    decision_path = write_committed_decision(tmp_path)
+    client = FakeFplClient()
+    completed = CompletedDecisionScorer(tmp_path, client)
+
+    first = completed.score_pending("2026-27")
+    second = completed.score_pending("2026-27")
+
+    assert len(first) == 1
+    assert second == []
+    assert client.bootstrap_calls == 1
+    assert client.event_calls == [1]
+    assert DecisionScorer(tmp_path).latest().decision_path == str(decision_path)
+    assert DecisionScorer(tmp_path).is_scored(decision_path, 1)
+    from aifpl.hermes import HermesDecisionBackend
+
+    assert HermesDecisionBackend(tmp_path).context()["decision_history"]["summary"]["scored_gameweeks"] == 1
+
+
+def test_completed_scorer_waits_for_fpl_to_finalize_the_gameweek(tmp_path) -> None:
+    class FakeFplClient:
+        def __init__(self) -> None:
+            self.event_calls: list[int] = []
+
+        async def fetch_bootstrap(self) -> dict:
+            return {
+                "elements": [], "teams": [],
+                "events": [{"id": 1, "deadline_time": "2026-08-14T18:00:00Z", "finished": False}],
+            }
+
+        async def fetch_event_live(self, event: int) -> dict:
+            self.event_calls.append(event)
+            return {"elements": []}
+
+    client = FakeFplClient()
+    write_committed_decision(tmp_path)
+
+    assert CompletedDecisionScorer(tmp_path, client).score_pending("2026-27") == []
+    assert client.event_calls == []

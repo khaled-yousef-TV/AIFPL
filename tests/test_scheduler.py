@@ -37,8 +37,21 @@ class FailingRefreshJob(FakeRefreshJob):
         raise RefreshJobError(failed)
 
 
-def scheduler(tmp_path, refresh_job: FakeRefreshJob) -> DeadlineScheduler:
-    return DeadlineScheduler(tmp_path, refresh_job=refresh_job, settings=SchedulerSettings(90, 6, 300, 1000))
+class FakeCompletedScorer:
+    def __init__(self, score_paths: list[str] | None = None, calls: list[str] | None = None) -> None:
+        self.score_paths = score_paths or []
+        self.calls = calls if calls is not None else []
+
+    def score_pending(self, season_id: str) -> list[str]:
+        self.calls.append(season_id)
+        return self.score_paths
+
+
+def scheduler(tmp_path, refresh_job: FakeRefreshJob, completed_scorer=None) -> DeadlineScheduler:
+    return DeadlineScheduler(
+        tmp_path, refresh_job=refresh_job, settings=SchedulerSettings(90, 6, 300, 1000),
+        completed_scorer=completed_scorer,
+    )
 
 
 def test_scheduler_detects_deadline_without_running_early(tmp_path) -> None:
@@ -62,6 +75,46 @@ def test_scheduler_runs_due_event_once(tmp_path) -> None:
     assert first.status == "succeeded"
     assert second.status == "already_completed"
     assert refresh.calls == [(1, 6, 1000)]
+
+
+def test_scheduler_scores_completed_teams_before_hermes_runs(tmp_path, monkeypatch) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    refresh = FakeRefreshJob(tmp_path)
+    order: list[str] = []
+    scorer = FakeCompletedScorer(["scoring/gw1.json"], order)
+    subject = scheduler(tmp_path, refresh, scorer)
+
+    def run_hermes(event: int, season_id: str) -> str:
+        order.append("hermes")
+        assert event == 1
+        assert season_id == "2026-27"
+        return "hermes/decisions/gw1.json"
+
+    monkeypatch.setenv("AIFPL_HERMES_AUTO_RUN", "true")
+    monkeypatch.setattr(subject, "_run_hermes_for_event", run_hermes)
+    result = subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
+
+    assert order == ["2026-27", "hermes"]
+    assert result.scored_decision_paths == ["scoring/gw1.json"]
+    assert result.hermes_decision_path == "hermes/decisions/gw1.json"
+
+
+def test_scheduler_continues_when_scorecard_creation_fails(tmp_path, monkeypatch) -> None:
+    class FailingCompletedScorer:
+        def score_pending(self, season_id: str) -> list[str]:
+            raise RuntimeError("final results unavailable")
+
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    subject = scheduler(tmp_path, FakeRefreshJob(tmp_path), FailingCompletedScorer())
+    monkeypatch.setenv("AIFPL_HERMES_AUTO_RUN", "true")
+    monkeypatch.setattr(subject, "_run_hermes_for_event", lambda event, season_id: "hermes/decisions/gw1.json")
+
+    result = subject.tick(datetime(2026, 8, 15, 8, tzinfo=timezone.utc))
+
+    assert result.status == "succeeded"
+    assert result.scored_decision_paths == []
+    assert result.scoring_error == "RuntimeError: final results unavailable"
+    assert result.hermes_decision_path == "hermes/decisions/gw1.json"
 
 
 def test_scheduler_uses_nine_am_uk_time_in_winter(tmp_path) -> None:

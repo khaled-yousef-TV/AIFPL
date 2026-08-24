@@ -11,11 +11,12 @@ from typing import Literal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.config import SchedulerSettings, scheduler_settings
 from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
+from aifpl.scoring import CompletedDecisionScorer
 from aifpl.security import redact_secrets
 from aifpl.snapshots import SnapshotStore
 
@@ -50,6 +51,8 @@ class SchedulerTickResult(BaseModel):
     refresh_job_path: str | None = None
     hermes_decision_path: str | None = None
     hermes_error: str | None = None
+    scored_decision_paths: list[str] = Field(default_factory=list)
+    scoring_error: str | None = None
     telegram_notified: bool | None = None
     telegram_error: str | None = None
     error: str | None = None
@@ -65,11 +68,12 @@ class SchedulerTickError(RuntimeError):
 class DeadlineScheduler:
     def __init__(
         self, root: Path, refresh_job: CurrentDataRefreshJob | None = None,
-        settings: SchedulerSettings | None = None,
+        settings: SchedulerSettings | None = None, completed_scorer: CompletedDecisionScorer | None = None,
     ) -> None:
         self.root = root
         self.refresh_job = refresh_job or CurrentDataRefreshJob(root)
         self.settings = settings or scheduler_settings()
+        self.completed_scorer = completed_scorer or CompletedDecisionScorer(root)
 
     def status(self, checked_at: datetime | None = None) -> DeadlineStatus:
         now = checked_at or datetime.now(timezone.utc)
@@ -118,35 +122,44 @@ class DeadlineScheduler:
             result = self._persist_discovery_failure(now.astimezone(timezone.utc), force, exc)
             raise SchedulerTickError(result) from exc
         output_path = self._tick_path(schedule.checked_at)
+        scored_decision_paths, scoring_error = self._score_completed_decisions(schedule.season_id)
+        scorecard_kwargs = {
+            "scored_decision_paths": scored_decision_paths,
+            "scoring_error": scoring_error,
+        }
         if schedule.completed:
             if os.environ.get("AIFPL_HERMES_AUTO_RUN", "false").lower() in ("1", "true", "yes") and not self._hermes_completion_path(schedule.season_id, schedule.event).exists():
                 try:
                     decision_path = self._run_hermes_for_event(schedule.event, schedule.season_id)
-                    result = self._persist_tick(output_path, schedule, "already_completed", force, hermes_decision_path=decision_path)
+                    result = self._persist_tick(
+                        output_path, schedule, "already_completed", force,
+                        hermes_decision_path=decision_path, **scorecard_kwargs,
+                    )
                     write_immutable(self._hermes_completion_path(schedule.season_id, schedule.event), json_bytes({"decision_path": decision_path}, pretty=True))
                     return result
                 except Exception as exc:
                     return self._persist_tick(
                         output_path, schedule, "already_completed", force,
                         hermes_error=redact_secrets(f"{type(exc).__name__}: {exc}"),
+                        **scorecard_kwargs,
                     )
-            return self._persist_tick(output_path, schedule, "already_completed", force)
+            return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
         if schedule.missed:
-            result = self._persist_tick(output_path, schedule, "missed", force)
+            result = self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
             write_immutable(
                 self._completion_path(schedule.season_id, schedule.event),
                 json_bytes(result.model_dump(mode="json"), pretty=True),
             )
             return result
         if not schedule.due and not force:
-            return self._persist_tick(output_path, schedule, "not_due", force)
+            return self._persist_tick(output_path, schedule, "not_due", force, **scorecard_kwargs)
         claim = self._claim(schedule)
         if claim is None:
             status = "already_completed" if self._completion_path(schedule.season_id, schedule.event).exists() else "in_progress"
-            return self._persist_tick(output_path, schedule, status, force)
+            return self._persist_tick(output_path, schedule, status, force, **scorecard_kwargs)
         try:
             if self._completion_path(schedule.season_id, schedule.event).exists():
-                return self._persist_tick(output_path, schedule, "already_completed", force)
+                return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
             end_gameweek = min(38, schedule.event + self.settings.horizon_gameweeks - 1)
             refresh = self.refresh_job.run(schedule.event, end_gameweek, self.settings.budget)
             hermes_decision_path = None
@@ -160,6 +173,7 @@ class DeadlineScheduler:
                 output_path, schedule, "succeeded", force, refresh_job_path=refresh.output_path,
                 hermes_decision_path=hermes_decision_path,
                 hermes_error=hermes_error,
+                **scorecard_kwargs,
             )
             write_immutable(
                 self._completion_path(schedule.season_id, schedule.event),
@@ -176,6 +190,7 @@ class DeadlineScheduler:
             result = self._persist_tick(
                 output_path, schedule, "failed", force,
                 refresh_job_path=refresh_path, error=redact_secrets(f"{type(exc).__name__}: {exc}"),
+                **scorecard_kwargs,
             )
             raise SchedulerTickError(result) from exc
         finally:
@@ -189,6 +204,7 @@ class DeadlineScheduler:
                     f"[{result.checked_at.isoformat()}] tick={result.status} "
                     f"event={result.event} deadline={result.deadline} "
                     f"refresh_at={result.refresh_at} forced={result.forced} "
+                    f"scorecards={len(result.scored_decision_paths)} "
                     f"hermes={result.hermes_decision_path or result.hermes_error or 'skipped'}",
                     flush=True,
                 )
@@ -238,6 +254,8 @@ class DeadlineScheduler:
         forced: bool, refresh_job_path: str | None = None, error: str | None = None,
         hermes_decision_path: str | None = None,
         hermes_error: str | None = None,
+        scored_decision_paths: list[str] | None = None,
+        scoring_error: str | None = None,
     ) -> SchedulerTickResult:
         result = SchedulerTickResult(
             status=status, checked_at=schedule.checked_at, event=schedule.event,
@@ -246,6 +264,8 @@ class DeadlineScheduler:
             refresh_job_path=refresh_job_path, error=error, output_path=str(path),
             hermes_decision_path=hermes_decision_path,
             hermes_error=hermes_error,
+            scored_decision_paths=scored_decision_paths or [],
+            scoring_error=scoring_error,
         )
         write_immutable(path, json_bytes(result.model_dump(mode="json"), pretty=True))
         return result
@@ -302,6 +322,12 @@ class DeadlineScheduler:
     def _tick_path(self, checked_at: datetime) -> Path:
         stamp = checked_at.strftime("%Y%m%dT%H%M%S%fZ")
         return self.root / "scheduler" / "ticks" / f"{stamp}-{uuid4().hex}.json"
+
+    def _score_completed_decisions(self, season_id: str) -> tuple[list[str], str | None]:
+        try:
+            return self.completed_scorer.score_pending(season_id), None
+        except Exception as exc:
+            return [], redact_secrets(f"{type(exc).__name__}: {exc}")
 
     def _refresh_at(self, deadline: datetime) -> datetime:
         release_timezone = ZoneInfo(self.settings.timezone)

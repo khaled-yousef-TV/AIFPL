@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
+from aifpl.fpl import FplClient
 from aifpl.hermes import HermesDecision
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.snapshots import SnapshotStore
@@ -126,6 +128,20 @@ class DecisionScorer:
         files = sorted(directory.glob("*.json")) if directory.exists() else []
         return [DecisionScore.model_validate_json(path.read_text(encoding="utf-8")) for path in reversed(files[-limit:])]
 
+    def is_scored(self, decision_path: Path | str, event: int) -> bool:
+        directory = self.root / "scoring" / "decisions"
+        if not directory.exists():
+            return False
+        decision_path = str(decision_path)
+        for path in directory.glob("*.json"):
+            try:
+                record = DecisionScore.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if record.gameweek == event and record.decision_path == decision_path:
+                return True
+        return False
+
     def _catalog_for_gameweek(self, gameweek: int) -> Path:
         directory = self.root / "normalized" / "current" / "odds_projections"
         candidates: list[tuple[datetime, Path]] = []
@@ -155,3 +171,46 @@ class DecisionScorer:
                 stats = element.get("stats") or {}
                 actuals[int(element["id"])] = float(stats.get("total_points", 0))
         return actuals
+
+
+class CompletedDecisionScorer:
+    """Persist final FPL results and score each completed, committed gameweek once."""
+
+    def __init__(self, root: Path, fpl_client: FplClient | None = None) -> None:
+        self.root = root
+        self.fpl_client = fpl_client or FplClient()
+
+    def score_pending(self, season_id: str) -> list[str]:
+        from aifpl.hermes import HermesManager
+
+        scorer = DecisionScorer(self.root)
+        latest_by_gameweek: dict[int, HermesDecision] = {}
+        for decision in HermesManager(self.root).decisions():
+            if decision.season_id == season_id:
+                latest_by_gameweek.setdefault(decision.gameweek, decision)
+        pending = [
+            decision for decision in latest_by_gameweek.values()
+            if not scorer.is_scored(decision.decision_path, decision.gameweek)
+        ]
+        if not pending:
+            return []
+
+        bootstrap = asyncio.run(self.fpl_client.fetch_bootstrap())
+        finished_events = {
+            event["id"] for event in bootstrap.get("events", [])
+            if isinstance(event, dict) and isinstance(event.get("id"), int) and event.get("finished") is True
+        }
+        completed = [decision for decision in pending if decision.gameweek in finished_events]
+        if not completed:
+            return []
+
+        snapshots = SnapshotStore(self.root)
+        snapshots.save_bootstrap(bootstrap)
+        score_paths: list[str] = []
+        for decision in completed:
+            snapshots.save_event_live(
+                decision.gameweek,
+                asyncio.run(self.fpl_client.fetch_event_live(decision.gameweek)),
+            )
+            score_paths.append(scorer.score(decision.decision_path, decision.gameweek).output_path)
+        return score_paths

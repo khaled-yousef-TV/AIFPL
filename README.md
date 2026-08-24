@@ -231,8 +231,11 @@ that release; the lead-time setting is only a fallback for unusually early
 deadlines. `run-scheduler-tick` is a safe one-shot operation;
 `run-deadline-scheduler` polls continuously for use under a service manager. A
 successful event is marked complete so later polls cannot spend odds quota or
-create duplicate recommendations. Scheduler timing, horizon, polling, and
-budget use the `AIFPL_SCHEDULER_*` variables in `.env.example`.
+create duplicate recommendations. While polling, it also checks unscored
+committed teams: once FPL marks their gameweek complete, it stores final
+event-live points, produces one scorecard, and supplies that history to Hermes
+before the next decision. Scheduler timing, horizon, polling, and budget use
+the `AIFPL_SCHEDULER_*` variables in `.env.example`.
 
 ## Delivery plan
 
