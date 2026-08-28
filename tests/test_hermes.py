@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 import aifpl.hermes as hermes_module
@@ -159,6 +162,41 @@ def test_hermes_returns_the_existing_decision_for_a_duplicate_current_gameweek(t
     assert manager.latest_state().version == 1
     assert len(manager.decisions()) == 1
     assert model.step == 3
+
+
+def test_hermes_supersedes_gw2_from_a_valid_gw1_state(tmp_path) -> None:
+    backend = FakeHorizonBackend(tmp_path)
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=backend)
+    gw1 = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    base_state = manager.latest_state()
+    manager._strategy = base_state.strategy
+    manager._horizon, manager._catalog_id = backend.horizon_plan(base_state.squad, base_state.strategy, 2)
+    manager._hold = backend.hold_week(base_state.squad, base_state.strategy.planning_horizon, 2)
+    manager._expected_gameweek = 2
+    manager._expected_season_id = "2026-27"
+    bad = manager._commit(
+        {"action": "execute_horizon", "explanation": "Invalid full-squad recommendation."},
+        base_state,
+    )
+    bad_bytes = Path(bad.decision.decision_path).read_bytes()
+
+    corrected = manager.supersede_decision(
+        Path(gw1.state_path).name,
+        Path(bad.decision.decision_path).name,
+        "Normal-week transfer limit was missing.",
+        expected_gameweek=2,
+        expected_season_id="2026-27",
+    )
+
+    assert corrected.decision.gameweek == 2
+    assert corrected.decision.base_state_path == gw1.state_path
+    assert corrected.decision.supersedes_decision_path == bad.decision.decision_path
+    assert corrected.decision.correction_reason == "Normal-week transfer limit was missing."
+    assert manager.latest_decision() == corrected.decision
+    assert manager.latest_state().version == 3
+    assert Path(bad.decision.decision_path).read_bytes() == bad_bytes
+    receipt = json.loads(Path(corrected.correction_path).read_text(encoding="utf-8"))
+    assert receipt["replacement_decision_path"] == corrected.decision.decision_path
 
 
 def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:

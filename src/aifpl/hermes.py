@@ -11,7 +11,7 @@ from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 import httpx
 from pydantic import BaseModel, Field
 
-from aifpl.artifacts import json_bytes, write_immutable
+from aifpl.artifacts import json_bytes, sha256_path, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonSquadState, HorizonTransferPlan, PLANNER_VERSION, plan_horizon_transfers
@@ -59,6 +59,7 @@ class HermesState(BaseModel):
     decision_path: str = ""
     season_id: str = ""
     initialization_method: str = ""
+    supersedes_state_path: str | None = None
 
 
 class HermesDecision(BaseModel):
@@ -78,12 +79,21 @@ class HermesDecision(BaseModel):
     state_path: str = ""
     season_id: str = ""
     horizon_plan: HorizonPlanSnapshot | None = None
+    base_state_path: str | None = None
+    supersedes_decision_path: str | None = None
+    correction_reason: str | None = None
 
 
 class HermesRunResult(BaseModel):
     decision: HermesDecision
     state_path: str
     tool_steps: int
+
+
+class HermesSupersessionResult(BaseModel):
+    decision: HermesDecision
+    state_path: str
+    correction_path: str
 
 
 class HermesRunTranscript(BaseModel):
@@ -328,6 +338,116 @@ class HermesManager:
         schedule = DeadlineScheduler(self.root).status()
         return self.run(expected_gameweek=schedule.event, expected_season_id=schedule.season_id)
 
+    def supersede_decision(
+        self,
+        base_state_id: str,
+        supersedes_decision_id: str,
+        reason: str,
+        expected_gameweek: int,
+        expected_season_id: str,
+    ) -> HermesSupersessionResult:
+        """Append a corrected decision from a known-valid prior state.
+
+        This is intentionally explicit: a bad decision remains immutable while the
+        replacement is linked to both its valid base state and the bad decision.
+        """
+        self._expected_gameweek = expected_gameweek
+        self._expected_season_id = expected_season_id
+        lock_path = self.root / "hermes" / "run.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                flock(descriptor, LOCK_EX | LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError("Another Hermes run is already in progress") from exc
+            return self._supersede_decision_unlocked(base_state_id, supersedes_decision_id, reason)
+        finally:
+            flock(descriptor, LOCK_UN)
+            os.close(descriptor)
+
+    def _supersede_decision_unlocked(
+        self, base_state_id: str, supersedes_decision_id: str, reason: str,
+    ) -> HermesSupersessionResult:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("Correction reason must not be empty")
+        base_state_path = self._hermes_artifact_path("states", base_state_id)
+        superseded_decision_path = self._hermes_artifact_path("decisions", supersedes_decision_id)
+        base_state = HermesState.model_validate_json(base_state_path.read_text(encoding="utf-8"))
+        superseded = HermesDecision.model_validate_json(superseded_decision_path.read_text(encoding="utf-8"))
+        base_decision_path = self._hermes_artifact_path("decisions", Path(base_state.decision_path).name)
+        base_decision = HermesDecision.model_validate_json(base_decision_path.read_text(encoding="utf-8"))
+        superseded_state_path = self._hermes_artifact_path("states", Path(superseded.state_path).name)
+        superseded_state = HermesState.model_validate_json(superseded_state_path.read_text(encoding="utf-8"))
+        latest_decision = self.latest_decision()
+        latest_state = self.latest_state()
+
+        if Path(base_decision.state_path).name != base_state_path.name:
+            raise ValueError("Base decision does not reference the supplied state")
+        if Path(superseded_state.decision_path).name != superseded_decision_path.name:
+            raise ValueError("Superseded decision does not reference its state")
+        if Path(latest_decision.decision_path).name != superseded_decision_path.name:
+            raise ValueError("Only the latest Hermes decision can be superseded")
+        if Path(latest_state.decision_path).name != superseded_decision_path.name:
+            raise ValueError("Latest Hermes state does not match the decision to supersede")
+        if (
+            base_state.season_id != self._expected_season_id
+            or base_decision.season_id != self._expected_season_id
+            or superseded.season_id != self._expected_season_id
+            or superseded_state.season_id != self._expected_season_id
+        ):
+            raise ValueError("Correction artifacts must belong to the expected season")
+        if base_decision.gameweek != base_state.gameweek:
+            raise ValueError("Base decision and state gameweeks do not match")
+        if self._expected_gameweek != base_state.gameweek + 1 or superseded.gameweek != self._expected_gameweek:
+            raise ValueError("Correction must advance exactly one gameweek from its base state")
+
+        self._strategy = base_state.strategy
+        self._horizon, self._catalog_id = self.backend.horizon_plan(
+            base_state.squad, self._strategy, self._expected_gameweek,
+        )
+        self._hold = self.backend.hold_week(
+            base_state.squad, self._strategy.planning_horizon, self._expected_gameweek,
+        )
+        action = "execute_horizon" if self._horizon.gameweeks[0].transfers_made else "hold"
+        result = self._commit(
+            {
+                "action": action,
+                "explanation": (
+                    f"Corrected GW{self._expected_gameweek} recommendation from the committed "
+                    f"GW{base_state.gameweek} squad: {reason}"
+                ),
+            },
+            base_state,
+            model_name="deterministic_correction",
+            state_version=latest_state.version + 1,
+            base_state_path=str(base_state_path),
+            supersedes_decision_path=str(superseded_decision_path),
+            supersedes_state_path=str(superseded_state_path),
+            correction_reason=reason,
+        )
+        correction_path = self.root / "hermes" / "corrections" / f"{Path(result.decision.decision_path).stem}.json"
+        write_immutable(correction_path, json_bytes({
+            "created_at": result.decision.created_at,
+            "reason": reason,
+            "base_state_path": str(base_state_path),
+            "base_state_sha256": sha256_path(base_state_path),
+            "superseded_decision_path": str(superseded_decision_path),
+            "superseded_decision_sha256": sha256_path(superseded_decision_path),
+            "superseded_state_path": str(superseded_state_path),
+            "superseded_state_sha256": sha256_path(superseded_state_path),
+            "replacement_decision_path": result.decision.decision_path,
+            "replacement_decision_sha256": sha256_path(Path(result.decision.decision_path)),
+            "replacement_state_path": result.state_path,
+            "replacement_state_sha256": sha256_path(Path(result.state_path)),
+        }, pretty=True))
+        return HermesSupersessionResult(
+            decision=result.decision,
+            state_path=result.state_path,
+            correction_path=str(correction_path),
+        )
+
     def reinitialize_current(self, force: bool = False) -> HermesRunResult | None:
         from aifpl.scheduler import DeadlineScheduler
 
@@ -552,6 +672,15 @@ class HermesManager:
         write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
         return HermesRunResult(decision=decision, state_path=str(state_path), tool_steps=0)
 
+    def _hermes_artifact_path(self, directory: str, artifact_id: str) -> Path:
+        candidate = Path(artifact_id)
+        if candidate.name != artifact_id or candidate.suffix != ".json":
+            raise ValueError(f"Invalid Hermes {directory} artifact ID")
+        path = self.root / "hermes" / directory / candidate
+        if not path.is_file():
+            raise FileNotFoundError(f"Hermes {directory} artifact does not exist: {artifact_id}")
+        return path
+
     def _call_tool(self, name: str, arguments: dict[str, Any], previous: HermesState | None) -> Any:
         if name == "set_strategy":
             self._strategy = HermesStrategy.model_validate(arguments)
@@ -581,7 +710,15 @@ class HermesManager:
         raise ValueError(f"Unknown Hermes tool: {name}")
 
     def _commit(
-        self, arguments: dict[str, Any], previous: HermesState | None, model_name: str | None = None,
+        self,
+        arguments: dict[str, Any],
+        previous: HermesState | None,
+        model_name: str | None = None,
+        state_version: int | None = None,
+        base_state_path: str | None = None,
+        supersedes_decision_path: str | None = None,
+        supersedes_state_path: str | None = None,
+        correction_reason: str | None = None,
     ) -> HermesRunResult:
         if self._strategy is None:
             raise ValueError("Hermes must set a strategy before committing")
@@ -640,12 +777,17 @@ class HermesManager:
             state_path=str(state_path),
             season_id=season_id,
             horizon_plan=plan_snapshot,
+            base_state_path=base_state_path,
+            supersedes_decision_path=supersedes_decision_path,
+            correction_reason=correction_reason,
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
-            model=decision_model, updated_at=now, version=(previous.version + 1 if previous else 1),
+            model=decision_model, updated_at=now,
+            version=state_version if state_version is not None else (previous.version + 1 if previous else 1),
             gameweek=gameweek, decision_path=str(decision_path),
             season_id=season_id,
+            supersedes_state_path=supersedes_state_path,
             initialization_method="horizon_v1" if action == "adopt_initial" else (
                 previous.initialization_method if previous else ""
             ),

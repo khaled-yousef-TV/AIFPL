@@ -24,7 +24,10 @@ from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCa
 from aifpl.fpl import FplClient, FplSourceError
 from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError, SeasonImportSummary
 from aifpl.health import SourceHealthChecker, SourceHealthReport
-from aifpl.hermes import HermesDecision, HermesManager, HermesRunResult, HermesRunTranscript, HermesState
+from aifpl.hermes import (
+    HermesDecision, HermesManager, HermesRunResult, HermesRunTranscript,
+    HermesState, HermesSupersessionResult,
+)
 from aifpl.horizon_transfers import HorizonSquadState, HorizonTransferPlan, plan_horizon_transfers
 from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.optimizer import OptimizedSquad, SquadOptimizationError, optimize_squad
@@ -138,6 +141,12 @@ class HermesMigrationRequest(BaseModel):
     season_id: str
 
 
+class HermesSupersedeRequest(BaseModel):
+    base_state_id: str = Field(min_length=1, max_length=255)
+    supersedes_decision_id: str = Field(min_length=1, max_length=255)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -208,6 +217,26 @@ def migrate_hermes_state(request: HermesMigrationRequest) -> HermesRunResult:
     try:
         return HermesManager(data_dir()).migrate_legacy_state(
             request.purchase_prices, request.gameweek, request.season_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/hermes/decisions/supersede", response_model=HermesSupersessionResult, status_code=201)
+def supersede_hermes_decision(request: HermesSupersedeRequest) -> HermesSupersessionResult:
+    try:
+        root = data_dir()
+        schedule = DeadlineScheduler(root).status()
+        if schedule.missed:
+            raise ValueError(f"GW{schedule.event} has already passed its deadline")
+        return HermesManager(root).supersede_decision(
+            request.base_state_id,
+            request.supersedes_decision_id,
+            request.reason,
+            schedule.event,
+            schedule.season_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

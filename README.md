@@ -571,6 +571,11 @@ expected minutes, bench strength, bank flexibility, rotation risk, and planned
 transfers. As with the single-week planner, unauthenticated inputs use current
 prices as selling values until account integration is added.
 
+Outside the unlimited GW1 opening-squad window, the horizon planner caps each
+gameweek at two transfers. The second transfer remains optional and must beat
+the model's hit and churn penalties; wildcard and Free Hit chips are never
+assumed or spent automatically.
+
 ## Fixture-aware projections
 
 `normalize-current-fixtures` preserves the official current-season fixture

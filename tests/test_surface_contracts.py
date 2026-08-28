@@ -26,7 +26,7 @@ def test_api_exposes_every_pipeline_stage() -> None:
         ("/evidence/players/build", "POST"), ("/evidence/players", "GET"),
         ("/odds/epl/event-markets", "POST"), ("/odds/epl/market-signals", "POST"),
         ("/hermes/run", "POST"), ("/hermes/state", "GET"), ("/hermes/decisions/latest", "GET"),
-        ("/hermes/migrate", "POST"),
+        ("/hermes/migrate", "POST"), ("/hermes/decisions/supersede", "POST"),
     }
     assert expected <= routes
 

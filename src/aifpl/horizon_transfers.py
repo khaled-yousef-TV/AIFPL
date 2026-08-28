@@ -24,7 +24,8 @@ from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_k
 # Bump when plan-generation semantics change (accounting, objective, captain
 # selection, robustness, ...). Committed plans record their version so stale
 # opening squads can be regenerated deterministically.
-PLANNER_VERSION = "v3"
+PLANNER_VERSION = "v4"
+NORMAL_WEEK_TRANSFER_LIMIT = 2
 
 
 class HorizonSquadState(BaseModel):
@@ -212,7 +213,10 @@ def plan_horizon_transfers(
             model.add(count >= minimum)
             model.add(count <= maximum)
 
-        transfers = model.new_int_var(0, 15, f"transfers_{gameweek}")
+        # Normal weeks are capped at two moves; a second move is only worthwhile
+        # when it overcomes the hit and churn penalties. Chips are not automated.
+        transfer_limit = 15 if pre_season and week_index == 0 else NORMAL_WEEK_TRANSFER_LIMIT
+        transfers = model.new_int_var(0, transfer_limit, f"transfers_{gameweek}")
         model.add(transfers == sum(incoming[player_id, week_index] for player_id in player_ids))
         if current_ids or week_index > 0:
             model.add(transfers == sum(outgoing[player_id, week_index] for player_id in player_ids))
@@ -221,7 +225,7 @@ def plan_horizon_transfers(
         free_transfers.append(free)
         if week_index == 0:
             model.add(free == (5 if pre_season else state.free_transfers))
-        excess = model.new_int_var(0, 15, f"excess_transfers_{gameweek}")
+        excess = model.new_int_var(0, transfer_limit, f"excess_transfers_{gameweek}")
         model.add_max_equality(excess, [transfers - free, 0])
         excess_transfers.append(excess)
         if week_index + 1 < len(gameweeks):

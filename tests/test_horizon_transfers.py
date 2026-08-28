@@ -83,6 +83,40 @@ def test_horizon_planner_executes_and_rolls_over_a_free_upgrade() -> None:
     assert [week.free_transfers_before for week in plan.gameweeks] == [1, 1, 2]
 
 
+def test_normal_week_caps_even_a_high_value_rebuild_at_two_transfers() -> None:
+    rows = pool((2,))
+    upgrades = [
+        (16, "GK", "I"),
+        (17, "DEF", "J"), (18, "DEF", "K"), (19, "DEF", "L"), (20, "DEF", "M"), (21, "DEF", "N"),
+        (22, "MID", "O"), (23, "MID", "P"), (24, "MID", "Q"), (25, "MID", "R"), (26, "MID", "S"),
+        (27, "FWD", "T"), (28, "FWD", "U"), (29, "FWD", "V"),
+    ]
+    rows.extend(row(identifier, position, club, 2, 40.0) for identifier, position, club in upgrades)
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        churn_penalty=0.0,
+    )
+
+    assert plan.gameweeks[0].transfers_made == 2
+    assert plan.gameweeks[0].hit_cost == 4
+
+
+def test_normal_week_skips_a_marginal_second_transfer_hit() -> None:
+    rows = pool((2,)) + [
+        row(16, "MID", "I", 2, 20.0),
+        row(17, "MID", "J", 2, 5.1),
+    ]
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        churn_penalty=0.0,
+    )
+
+    assert plan.gameweeks[0].transfers_made == 1
+    assert plan.gameweeks[0].hit_cost == 0
+
+
 def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
@@ -144,6 +178,7 @@ def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None
         row(17, "DEF", "F", 1, 0), row(17, "DEF", "F", 2, 0), row(17, "DEF", "F", 3, 0), row(17, "DEF", "F", 4, 30),
         row(18, "MID", "G", 1, 0), row(18, "MID", "G", 2, 0), row(18, "MID", "G", 3, 0), row(18, "MID", "G", 4, 30),
         row(19, "FWD", "I", 1, 0), row(19, "FWD", "I", 2, 0), row(19, "FWD", "I", 3, 0), row(19, "FWD", "I", 4, 30),
+        row(20, "DEF", "J", 1, 0), row(20, "DEF", "J", 2, 0), row(20, "DEF", "J", 3, 30), row(20, "DEF", "J", 4, 30),
     ])
 
     plan = plan_horizon_transfers(
@@ -151,8 +186,8 @@ def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None
         pre_season=True,
     )
 
-    assert [week.transfers_made for week in plan.gameweeks] == [0, 0, 1, 3]
-    assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2, 2]
+    assert [week.transfers_made for week in plan.gameweeks] == [0, 0, 2, 2]
+    assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2, 1]
     assert [week.hit_cost for week in plan.gameweeks] == [0, 0, 0, 4]
     assert plan.total_hit_cost == 4
 

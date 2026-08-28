@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from threading import Event
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -227,3 +228,64 @@ def test_hermes_run_transcript_endpoint_returns_payload(monkeypatch, tmp_path) -
     assert response.status_code == 200
     assert response.json()["outcome"] == "succeeded"
     assert response.json()["tool_steps"] == 2
+
+
+def test_hermes_supersede_endpoint_uses_the_current_gameweek(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeScheduler:
+        def __init__(self, root) -> None:
+            assert root == tmp_path
+
+        def status(self):
+            return SimpleNamespace(event=2, season_id="2026-27", missed=False)
+
+    class FakeManager:
+        def __init__(self, root) -> None:
+            assert root == tmp_path
+
+        def supersede_decision(self, *args):
+            captured["args"] = args
+            return {
+                "decision": {
+                    "action": "hold", "gameweek": 2,
+                    "squad": {
+                        "player_ids": list(range(1, 16)), "bank": 0, "free_transfers": 2,
+                        "purchase_prices": {str(player_id): 50 for player_id in range(1, 16)},
+                    },
+                    "captain_id": 1, "starting_xi_ids": list(range(1, 12)),
+                    "transfers_out": [], "transfers_in": [], "explanation": "Corrected plan.",
+                    "strategy": {
+                        "risk_tolerance": 0.5, "hit_aversion": 0.7, "differential_appetite": 0.4,
+                        "planning_horizon": 4, "preferred_players": [], "rationale": "Test strategy.",
+                    },
+                    "model": "deterministic_correction", "created_at": "2026-08-28T08:30:00Z",
+                    "backend_methodology": "test", "decision_path": "/tmp/replacement.json",
+                    "state_path": "/tmp/replacement-state.json", "season_id": "2026-27",
+                },
+                "state_path": "/tmp/replacement-state.json", "correction_path": "/tmp/correction.json",
+            }
+
+    monkeypatch.setattr(api, "DeadlineScheduler", FakeScheduler)
+    monkeypatch.setattr(api, "HermesManager", FakeManager)
+
+    response = TestClient(api.app).post(
+        "/hermes/decisions/supersede",
+        json={
+            "base_state_id": "20260815T215213855640Z.json",
+            "supersedes_decision_id": "20260828T080815145156Z.json",
+            "reason": "Normal-week transfer limit was missing.",
+        },
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert response.status_code == 201
+    assert captured["args"] == (
+        "20260815T215213855640Z.json",
+        "20260828T080815145156Z.json",
+        "Normal-week transfer limit was missing.",
+        2,
+        "2026-27",
+    )
