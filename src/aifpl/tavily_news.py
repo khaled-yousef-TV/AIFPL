@@ -175,11 +175,19 @@ class TavilyNewsStore:
         paths = sorted(directory.glob("*.jsonl")) if directory.exists() else []
         if not paths:
             raise FileNotFoundError("No Tavily news research exists")
-        path = paths[-1]
-        verify_artifact(self.root, path, require_manifest=True)
+        latest_by_kind: dict[str, Path] = {}
+        for path in paths:
+            if not path.with_suffix(".manifest.json").exists():
+                continue
+            kind = path.name.split(".")[-2]
+            latest_by_kind[kind] = path
+        assessments: list[dict[str, object]] = []
+        for path in sorted(latest_by_kind.values()):
+            verify_artifact(self.root, path, require_manifest=True)
+            assessments.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
         return {
-            "output_path": str(path),
-            "assessments": [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()],
+            "output_paths": [str(path) for path in sorted(latest_by_kind.values())],
+            "assessments": assessments,
         }
 
     def _search(self, player: CurrentPlayer, query: str, now: datetime) -> tuple[dict[str, object], Path]:

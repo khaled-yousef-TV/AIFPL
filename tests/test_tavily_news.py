@@ -251,6 +251,21 @@ def test_research_caches_immutable_searches(monkeypatch, tmp_path) -> None:
     ]) == 1
 
 
+def test_latest_payload_merges_owned_and_candidate_catalogs(tmp_path) -> None:
+    class FakeClient:
+        def search(self, query: str, max_results: int) -> dict:
+            return {"results": []}
+
+    store = TavilyNewsStore(tmp_path, client=FakeClient(), settings=settings())
+    store.research([player(1, "One", "Club A")], [1], 2, "2026-27", query_kind="owned")
+    store.research([player(2, "Two", "Club B")], [2], 2, "2026-27", query_kind="candidate")
+
+    payload = store.latest_payload()
+
+    assert len(payload["output_paths"]) == 2
+    assert {assessment["player_id"] for assessment in payload["assessments"]} == {1, 2}
+
+
 def test_research_records_errors_without_failing(monkeypatch, tmp_path) -> None:
     class FailingClient:
         def search(self, query: str, max_results: int) -> dict:
