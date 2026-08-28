@@ -94,6 +94,7 @@
     min-width: 0;
     max-width: none;
     height: 100%;
+    max-height: 640px;
     aspect-ratio: auto;
     overflow: hidden;
     border: 2px solid rgba(75, 126, 91, .56);
@@ -107,7 +108,7 @@
   .box.top { top: 0; border-top: 0; } .box.bottom { bottom: 0; border-bottom: 0; }
   .player { position: absolute; z-index: 2; width: 104px; padding: 7px 6px 6px; border: 2px solid #fffdf9; border-radius: 11px; color: var(--ink); text-align: center; background: var(--green); box-shadow: 0 4px 8px rgba(78, 105, 84, .2); transition: transform .2s ease, box-shadow .2s ease; opacity: 0; animation: pill-appear .7s ease forwards; animation-delay: var(--delay, 0s); }
   .player:hover { z-index: 5; box-shadow: 0 9px 17px rgba(78, 105, 84, .28); transform: translate(-50%, -50%) scale(1.08) rotate(-2deg); }
-  .player.best-performer { animation: best-flash 1.6s ease 3; }
+  .player.best-performer { animation: pill-appear .7s ease forwards, best-flash 1.6s ease 3; animation-delay: var(--delay, 0s), calc(var(--delay, 0s) + .7s); }
   @keyframes best-flash {
     0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, .9); }
     50% { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
