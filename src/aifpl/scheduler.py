@@ -330,6 +330,8 @@ class DeadlineScheduler:
             return [], redact_secrets(f"{type(exc).__name__}: {exc}")
 
     def _refresh_at(self, deadline: datetime) -> datetime:
+        if self.settings.release_time is None:
+            return deadline - timedelta(minutes=self.settings.lead_minutes)
         release_timezone = ZoneInfo(self.settings.timezone)
         local_deadline = deadline.astimezone(release_timezone)
         local_release = datetime.combine(local_deadline.date(), self.settings.release_time, tzinfo=release_timezone)

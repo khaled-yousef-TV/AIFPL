@@ -124,17 +124,20 @@ class SchedulerSettings:
     horizon_gameweeks: int
     poll_seconds: float
     budget: int
-    release_time: time = time(9)
+    release_time: time | None = None
     timezone: str = "Europe/London"
 
 
 def scheduler_settings() -> SchedulerSettings:
-    try:
-        release_time = time.fromisoformat(os.environ.get("AIFPL_SCHEDULER_RELEASE_TIME", "16:30"))
-    except ValueError as exc:
-        raise ValueError("AIFPL_SCHEDULER_RELEASE_TIME must be an HH:MM time") from exc
+    configured_release = os.environ.get("AIFPL_SCHEDULER_RELEASE_TIME")
+    release_time: time | None = None
+    if configured_release:
+        try:
+            release_time = time.fromisoformat(configured_release)
+        except ValueError as exc:
+            raise ValueError("AIFPL_SCHEDULER_RELEASE_TIME must be an HH:MM time") from exc
     settings = SchedulerSettings(
-        lead_minutes=int(os.environ.get("AIFPL_SCHEDULER_LEAD_MINUTES", "90")),
+        lead_minutes=int(os.environ.get("AIFPL_SCHEDULER_LEAD_MINUTES", "150")),
         horizon_gameweeks=int(os.environ.get("AIFPL_SCHEDULER_HORIZON_GAMEWEEKS", "6")),
         poll_seconds=float(os.environ.get("AIFPL_SCHEDULER_POLL_SECONDS", "300")),
         budget=int(os.environ.get("AIFPL_SCHEDULER_BUDGET", "1000")),
@@ -149,7 +152,7 @@ def scheduler_settings() -> SchedulerSettings:
         raise ValueError("AIFPL_SCHEDULER_POLL_SECONDS must be positive")
     if settings.budget < 0:
         raise ValueError("AIFPL_SCHEDULER_BUDGET must not be negative")
-    if settings.release_time.tzinfo is not None:
+    if settings.release_time is not None and settings.release_time.tzinfo is not None:
         raise ValueError("AIFPL_SCHEDULER_RELEASE_TIME must not include a timezone")
     try:
         ZoneInfo(settings.timezone)

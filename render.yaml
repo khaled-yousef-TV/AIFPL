@@ -34,8 +34,8 @@ services:
         value: deepseek-v4-flash
       - key: AIFPL_HERMES_AUTO_RUN
         value: "true"
-      - key: AIFPL_SCHEDULER_RELEASE_TIME
-        value: "16:30"
+      - key: AIFPL_SCHEDULER_LEAD_MINUTES
+        value: "150"
       - key: AIFPL_SCHEDULER_TIMEZONE
         value: Europe/London
       - key: AIFPL_RENDER_BOOTSTRAP
