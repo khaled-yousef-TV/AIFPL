@@ -46,6 +46,7 @@ from aifpl.transfers import CurrentSquadState, TransferPlan, plan_transfers
 from aifpl.xg_projections import XgXaProjection, XgXaProjectionCatalog, XgXaProjectionStore, elapsed_gameweeks
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 from aifpl.security import valid_admin_key
+from aifpl.tavily_news import TavilyNewsStore
 from aifpl.teams import CurrentTeam, CurrentTeamCatalogStore, team_logo_path
 
 
@@ -343,6 +344,14 @@ def build_player_evidence() -> PlayerEvidenceCatalog:
 def latest_player_evidence(limit: int = Query(100, ge=1, le=5000)) -> list[PlayerEvidence]:
     try:
         return PlayerEvidenceStore(data_dir()).latest()[:limit]
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/news/tavily/latest")
+def latest_tavily_news() -> dict[str, object]:
+    try:
+        return TavilyNewsStore(data_dir()).latest_payload()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

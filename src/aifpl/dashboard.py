@@ -103,6 +103,7 @@ class DashboardConfidence(BaseModel):
     evidence_cutoff: datetime | None = None
     max_evidence_age_hours: float | None = None
     projection_catalog: str | None = None
+    news_status: str = "disabled"
 
 
 class CurrentDashboard(BaseModel):
@@ -317,7 +318,25 @@ def _dashboard_confidence(root: Path) -> DashboardConfidence:
         evidence_cutoff=parameters.get("evidence_cutoff"),
         max_evidence_age_hours=parameters.get("max_evidence_age_hours"),
         projection_catalog=path.name,
+        news_status=_news_status(root),
     )
+
+
+def _news_status(root: Path) -> str:
+    try:
+        from aifpl.tavily_news import TavilyNewsStore
+
+        catalog = TavilyNewsStore(root).latest_payload()
+    except FileNotFoundError:
+        return "disabled"
+    assessments = catalog.get("assessments", [])
+    if not assessments:
+        return "disabled"
+    if any(assessment.get("start_probability_cap") is not None for assessment in assessments):
+        return "adjusted"
+    if any(assessment.get("status") == "watch" for assessment in assessments):
+        return "watch"
+    return "clear"
 
 
 def _dashboard_moves(

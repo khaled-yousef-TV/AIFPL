@@ -31,6 +31,7 @@ from aifpl.odds import OddsSnapshotStore, OddsSourceError, TheOddsApiClient
 from aifpl.odds_matching import FixtureOddsConsensusStore, load_team_aliases
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.rules import SquadRequest, select_best_lineup, validate_squad as validate_fpl_squad
+from aifpl.tavily_news import TavilyNewsStore
 from aifpl.transfers import CurrentSquadState, plan_transfers as build_transfer_plan
 from aifpl.xg_projections import XgXaProjectionStore
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
@@ -144,6 +145,16 @@ def player_evidence(limit: int = typer.Option(100, min=1, max=5000)) -> None:
     except (FileNotFoundError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(rows[:limit]))
+
+
+@app.command()
+def tavily_news_preview() -> None:
+    """Show the latest Tavily player-news assessments without changing decisions."""
+    try:
+        payload = TavilyNewsStore(data_dir()).latest_payload()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(payload))
 
 
 @app.command()

@@ -27,6 +27,7 @@ def test_api_exposes_every_pipeline_stage() -> None:
         ("/odds/epl/event-markets", "POST"), ("/odds/epl/market-signals", "POST"),
         ("/hermes/run", "POST"), ("/hermes/state", "GET"), ("/hermes/decisions/latest", "GET"),
         ("/hermes/migrate", "POST"), ("/hermes/decisions/supersede", "POST"),
+        ("/news/tavily/latest", "GET"),
     }
     assert expected <= routes
 
@@ -64,6 +65,6 @@ def test_cli_exposes_documented_commands() -> None:
         "build-player-evidence", "player-evidence",
         "fetch-event-markets", "build-market-signals",
         "hermes-run", "hermes-reinitialize-opening-squad", "hermes-state", "hermes-decision",
-        "hermes-migrate-state",
+        "hermes-migrate-state", "tavily-news-preview",
     ):
         assert command in result.stdout

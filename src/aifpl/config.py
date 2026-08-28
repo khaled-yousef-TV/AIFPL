@@ -159,6 +159,40 @@ def scheduler_settings() -> SchedulerSettings:
 
 
 @dataclass(frozen=True)
+class TavilyNewsSettings:
+    api_key: str | None
+    enabled: bool
+    max_results: int
+    cache_hours: float
+    max_candidate_players: int
+    start_probability_threshold: float
+
+
+def tavily_news_settings() -> TavilyNewsSettings:
+    api_key = os.environ.get("TAVILY_API_KEY")
+    enabled = os.environ.get("AIFPL_TAVILY_ENABLED", "false").lower() in ("1", "true", "yes")
+    settings = TavilyNewsSettings(
+        api_key=api_key,
+        enabled=enabled,
+        max_results=int(os.environ.get("AIFPL_TAVILY_MAX_RESULTS", "5")),
+        cache_hours=float(os.environ.get("AIFPL_TAVILY_CACHE_HOURS", "6")),
+        max_candidate_players=int(os.environ.get("AIFPL_TAVILY_MAX_CANDIDATE_PLAYERS", "5")),
+        start_probability_threshold=float(os.environ.get("AIFPL_TAVILY_START_PROBABILITY_THRESHOLD", "0.7")),
+    )
+    if settings.enabled and not settings.api_key:
+        raise ValueError("TAVILY_API_KEY is required when AIFPL_TAVILY_ENABLED is enabled")
+    if not 1 <= settings.max_results <= 5:
+        raise ValueError("AIFPL_TAVILY_MAX_RESULTS must be within 1..5")
+    if settings.cache_hours < 0:
+        raise ValueError("AIFPL_TAVILY_CACHE_HOURS must not be negative")
+    if not 1 <= settings.max_candidate_players <= 5:
+        raise ValueError("AIFPL_TAVILY_MAX_CANDIDATE_PLAYERS must be within 1..5")
+    if not 0 <= settings.start_probability_threshold <= 1:
+        raise ValueError("AIFPL_TAVILY_START_PROBABILITY_THRESHOLD must be within 0..1")
+    return settings
+
+
+@dataclass(frozen=True)
 class LiveCalibrationSettings:
     window_gameweeks: int
     min_gameweeks: int

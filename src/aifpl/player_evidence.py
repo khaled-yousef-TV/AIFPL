@@ -51,7 +51,12 @@ class PlayerEvidenceStore:
     def __init__(self, root: Path) -> None:
         self.root = root
 
-    def build(self, player_catalog_path: Path | None = None) -> PlayerEvidenceCatalog:
+    def build(
+        self,
+        player_catalog_path: Path | None = None,
+        additional_records: list[PlayerEvidence] | None = None,
+        additional_sources: dict[str, Path] | None = None,
+    ) -> PlayerEvidenceCatalog:
         player_store = CurrentPlayerCatalogStore(self.root)
         player_path = player_catalog_path or player_store.latest_path()
         players = player_store.load(player_path)
@@ -83,10 +88,19 @@ class PlayerEvidenceStore:
                     evidence_type="official_news", categorical_value=player.news, provider_probability=None,
                     published_at=player.news_added, fetched_at=fetched_at, source_url=None, source_class="official_fpl",
                 ))
+        player_ids = {player.id for player in players}
+        for record in additional_records or []:
+            if record.player_id not in player_ids:
+                raise ValueError(f"Additional evidence references unknown player {record.player_id}")
+            records.append(record)
         sources = {"player_catalog": player_path}
         for path, payload, source_url in self._configured_payloads(created_at):
             sources[f"external_evidence_{len(sources)}"] = path
             records.extend(_parse_external(payload, fetched_at, source_url, {player.id for player in players}))
+        for role, path in (additional_sources or {}).items():
+            if role in sources:
+                raise ValueError(f"Duplicate additional evidence source role: {role}")
+            sources[role] = path
         output_path = self.root / "normalized" / "current" / "player_evidence" / f"{created_at.strftime('%Y%m%dT%H%M%S%fZ')}.jsonl"
         write_immutable(output_path, jsonl_bytes(records))
         manifest_path = write_manifest(

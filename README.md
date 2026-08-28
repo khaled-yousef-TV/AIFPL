@@ -517,6 +517,23 @@ source classes, and explicit provider probabilities. `config/player_evidence.exa
 documents the schema. Unscored text and ambiguous names never become projection
 probabilities.
 
+When `AIFPL_TAVILY_ENABLED=true` and `TAVILY_API_KEY` is set, refresh also
+searches recent Tavily news for every owned player and for a bounded set of
+legal transfer-in candidates. Each article is classified into
+`out`/`unlikely`/`doubt`/`watch`/`clear` with a source-tier confidence
+(official club > named reporter > aggregator), and every raw response plus the
+resulting assessment catalog is stored immutably with provenance manifests.
+Only downside adjustments are ever applied: a single rumor or transfer link can
+create a `watch` item, never a projection change. Projections are capped only
+when official club confirmation exists, or two independent credible reports
+agree, or a high-confidence named-reporter expected-lineup report exists.
+Assessments become `rotation_assessment` and optional `predicted_start` records
+in the evidence catalog before the odds-projection catalog is built, so the
+final pinned catalog reflects any confirmed availability risk. Searches are
+cached for `AIFPL_TAVILY_CACHE_HOURS` (default 6) to bound cost. The latest
+assessments are exposed at `GET /news/tavily/latest`, `aifpl tavily-news-preview`,
+and as the dashboard confidence `news_status`.
+
 `fetch-event-markets` requests EPL `team_totals`, anytime-scorer, and assist
 markets one event at a time. Complete over/under pairs are de-vigged; one-sided
 scorer prices remain evidence only. Opponent under-0.5 team totals contribute a

@@ -28,6 +28,8 @@ from aifpl.optimizer import optimize_squad
 from aifpl.projection_catalogs import ProjectionSource, load_projection_candidates
 from aifpl.snapshots import SnapshotStore
 from aifpl.security import redact_secrets
+from aifpl.tavily_news import TavilyNewsCatalog, TavilyNewsStore
+from aifpl.transfers import CurrentSquadState, plan_transfers
 from aifpl.xg_projections import XgXaProjectionStore
 
 
@@ -110,12 +112,26 @@ class CurrentDataRefreshJob:
             artifacts["player_catalog"] = players.output_path
             artifacts["fixture_catalog"] = fixtures.output_path
             steps.append("normalize_catalogs")
-            evidence = PlayerEvidenceStore(self.root).build(Path(players.output_path))
+            player_catalog_path = Path(players.output_path)
+            fixture_catalog_path = Path(fixtures.output_path)
+            current_players = CurrentPlayerCatalogStore(self.root).load(player_catalog_path)
+            hermes_state = _current_hermes_state(self.root, current_players)
+            owned_news = _research_owned_players(
+                self.root, current_players, hermes_state, start_gameweek,
+            )
+            evidence_sources = {}
+            if owned_news is not None and owned_news.output_path is not None:
+                artifacts["tavily_owned_news"] = owned_news.output_path
+                evidence_sources["tavily_owned_news"] = Path(owned_news.output_path)
+                steps.append("research_owned_player_news")
+            evidence = PlayerEvidenceStore(self.root).build(
+                player_catalog_path,
+                additional_records=owned_news.evidence_records if owned_news is not None else None,
+                additional_sources=evidence_sources,
+            )
             artifacts["player_evidence"] = evidence.output_path
             steps.append("build_player_evidence")
 
-            player_catalog_path = Path(players.output_path)
-            fixture_catalog_path = Path(fixtures.output_path)
             current = CurrentProjectionStore(self.root).build(player_catalog_path)
             xg = XgXaProjectionStore(self.root).build(player_catalog_path)
             fixture_projection = FixtureProjectionStore(self.root).build(
@@ -150,6 +166,31 @@ class CurrentDataRefreshJob:
                 Path(evidence.output_path),
                 signal_path,
             )
+            candidate_news = _research_transfer_candidates(
+                self.root,
+                current_players,
+                hermes_state,
+                owned_news,
+                Path(odds_projection.output_path).name,
+                start_gameweek,
+            )
+            if candidate_news is not None and candidate_news.output_path is not None:
+                artifacts["tavily_candidate_news"] = candidate_news.output_path
+                steps.append("research_transfer_candidate_news")
+                all_records = (owned_news.evidence_records if owned_news is not None else []) + candidate_news.evidence_records
+                all_sources = dict(evidence_sources)
+                all_sources["tavily_candidate_news"] = Path(candidate_news.output_path)
+                evidence = PlayerEvidenceStore(self.root).build(
+                    player_catalog_path,
+                    additional_records=all_records,
+                    additional_sources=all_sources,
+                )
+                artifacts["player_evidence"] = evidence.output_path
+                odds_projection = OddsProjectionStore(self.root).build(
+                    start_gameweek, end_gameweek, player_catalog_path, fixture_catalog_path, Path(consensus.output_path),
+                    Path(evidence.output_path),
+                    signal_path,
+                )
             artifacts["fixture_odds_consensus"] = consensus.output_path
             artifacts["odds_projections"] = odds_projection.output_path
             steps.append("build_odds_projections")
@@ -219,3 +260,94 @@ class CurrentDataRefreshJob:
         if not files:
             raise FileNotFoundError("No current-data refresh job has run yet")
         return RefreshJobResult.model_validate_json(files[-1].read_text(encoding="utf-8"))
+
+
+def _current_hermes_state(root: Path, players: list) -> "object | None":
+    """Return the current-season Hermes squad state if it is fully valid."""
+    from aifpl.hermes import HermesManager
+
+    try:
+        state = HermesManager(root).latest_state(optional=True)
+    except (FileNotFoundError, ValueError):
+        return None
+    if state is None or not state.player_ids:
+        return None
+    if state.season_id and state.season_id != _season_id_from_fixtures(root):
+        return None
+    squad_ids = set(state.player_ids)
+    if len(squad_ids) != 15:
+        return None
+    catalog_ids = {player.id for player in players}
+    if not squad_ids <= catalog_ids:
+        return None
+    return state
+
+
+def _season_id_from_fixtures(root: Path) -> str:
+    try:
+        _, summary = SnapshotStore(root).latest_bootstrap()
+    except FileNotFoundError:
+        return ""
+    deadlines = []
+    for event in summary.get("events", []):
+        if isinstance(event, dict) and isinstance(event.get("deadline_time"), str) and isinstance(event.get("id"), int):
+            deadlines.append((datetime.fromisoformat(event["deadline_time"].replace("Z", "+00:00")), event["id"]))
+    if not deadlines:
+        return ""
+    now = datetime.now(timezone.utc)
+    future = [(deadline, event) for deadline, event in deadlines if deadline > now]
+    deadline, _ = min(future) if future else max(deadlines)
+    start_year = deadline.year if deadline.month >= 7 else deadline.year - 1
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _research_owned_players(
+    root: Path,
+    players: list,
+    state: "object | None",
+    start_gameweek: int,
+) -> TavilyNewsCatalog | None:
+    if state is None:
+        return None
+    season_id = state.season_id or _season_id_from_fixtures(root)
+    return TavilyNewsStore(root).research(
+        players,
+        state.player_ids,
+        start_gameweek,
+        season_id,
+        query_kind="owned",
+    )
+
+
+def _research_transfer_candidates(
+    root: Path,
+    players: list,
+    state: "object | None",
+    owned_news: TavilyNewsCatalog | None,
+    catalog_id: str,
+    start_gameweek: int,
+) -> TavilyNewsCatalog | None:
+    if state is None or owned_news is None or not owned_news.actionable_player_ids:
+        return None
+    candidates = load_projection_candidates(root, ProjectionSource.ODDS, catalog_id)
+    squad_state = CurrentSquadState(
+        player_ids=list(state.player_ids),
+        bank=state.squad.bank,
+        free_transfers=state.squad.free_transfers,
+        max_transfers=2,
+    )
+    try:
+        transfer_plan = plan_transfers(candidates, squad_state)
+    except Exception:
+        return None
+    incoming_ids = [player.player_id for player in transfer_plan.incoming]
+    if not incoming_ids:
+        return None
+    season_id = state.season_id or _season_id_from_fixtures(root)
+    return TavilyNewsStore(root).research(
+        players,
+        incoming_ids,
+        start_gameweek,
+        season_id,
+        query_kind="candidate",
+    )

@@ -24,6 +24,8 @@ services:
         generateValue: true
       - key: ODDS_API_KEY
         sync: false
+      - key: TAVILY_API_KEY
+        sync: false
       - key: HERMES_API_KEY
         sync: false
       - key: HERMES_BASE_URL
