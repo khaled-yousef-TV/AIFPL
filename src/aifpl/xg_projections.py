@@ -55,7 +55,9 @@ def xg_xa_blend(
         raise ValueError("minutes_multiplier_override must be within 0..1.5")
     availability = (
         (player.chance_of_playing_next_round / 100)
-        if apply_next_round_availability and player.chance_of_playing_next_round is not None else 1.0
+        if apply_next_round_availability and player.chance_of_playing_next_round is not None
+        else (0.0 if apply_next_round_availability and player.status in ("i", "u")
+              else (0.5 if apply_next_round_availability and player.status == "d" else 1.0))
     )
     expected_minutes = min(90.0, (player.minutes / player.starts) if player.starts else 0.0)
     # Starts measure availability only relative to opportunities already elapsed.

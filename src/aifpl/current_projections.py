@@ -37,10 +37,7 @@ class ProjectionCatalog:
 
 def fpl_source_baseline(player: CurrentPlayer, apply_next_round_availability: bool = True) -> CurrentPlayerProjection:
     """A transparent temporary baseline using only fields supplied by FPL."""
-    availability = (
-        (player.chance_of_playing_next_round / 100)
-        if apply_next_round_availability and player.chance_of_playing_next_round is not None else 1.0
-    )
+    availability = _availability_multiplier(player, apply_next_round_availability)
     base = (0.7 * player.points_per_game + 0.3 * player.form) if player.form > 0 else player.points_per_game
     return CurrentPlayerProjection(
         player_id=player.id,
@@ -52,6 +49,18 @@ def fpl_source_baseline(player: CurrentPlayer, apply_next_round_availability: bo
         availability_multiplier=availability,
         selected_by_percent=player.selected_by_percent,
     )
+
+
+def _availability_multiplier(player: CurrentPlayer, apply_next_round_availability: bool) -> float:
+    """Official FPL availability is authoritative for injuries and doubts."""
+    if apply_next_round_availability:
+        if player.chance_of_playing_next_round is not None:
+            return player.chance_of_playing_next_round / 100
+        if player.status in ("i", "u"):
+            return 0.0
+        if player.status == "d":
+            return 0.5
+    return 1.0
 
 
 class CurrentProjectionStore:

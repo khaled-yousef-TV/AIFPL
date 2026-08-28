@@ -35,7 +35,7 @@ services:
       - key: AIFPL_HERMES_AUTO_RUN
         value: "true"
       - key: AIFPL_SCHEDULER_RELEASE_TIME
-        value: "09:00"
+        value: "16:30"
       - key: AIFPL_SCHEDULER_TIMEZONE
         value: Europe/London
       - key: AIFPL_RENDER_BOOTSTRAP

@@ -318,12 +318,19 @@ def _article(player: CurrentPlayer, item: dict[str, object]) -> TavilyNewsArticl
     impact: NewsImpact = "clear"
     if relevant and _contains(context, ("ruled out", "will miss", "suspended", "not available", "out injured")):
         impact = "out"
-    elif relevant and _contains(context, ("unlikely to start", "expected to be benched", "set to be dropped", "will not start", "not expected to start")):
+    elif relevant and _contains(
+        context,
+        ("unlikely to start", "expected to be benched", "set to be dropped", "will not start",
+         "not expected to start", "set for a spell", "spell on the sidelines", "sidelined",
+         "training injury", "injury in training", "sustained an injury", "expected to miss"),
+    ):
         impact = "unlikely"
     elif relevant and _contains(
         context,
         ("doubt", "fitness concern", "late test", "may not start", "could be rested",
-         "cannot guarantee", "no guarantee", "not guaranteed", "future uncertain"),
+         "cannot guarantee", "no guarantee", "not guaranteed", "future uncertain",
+         "day by day", "no clear schedule", "cannot give a clear schedule",
+         "can't give a clear schedule", "small issue", "will be assessed", "fitness test"),
     ):
         impact = "doubt"
     elif relevant and _contains(

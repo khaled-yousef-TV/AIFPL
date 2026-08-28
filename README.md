@@ -225,10 +225,12 @@ including a failed run, is persisted under `data/jobs/refresh/` with completed
 steps, artifact paths, health state, recommendation, and error details.
 
 The deadline scheduler reads the next official FPL `deadline_time` and runs the
-same audited refresh job at 09:00 on the deadline date in `Europe/London` by
-default. `AIFPL_SCHEDULER_RELEASE_TIME` and `AIFPL_SCHEDULER_TIMEZONE` configure
-that release; the lead-time setting is only a fallback for unusually early
-deadlines. `run-scheduler-tick` is a safe one-shot operation;
+same audited refresh job at 16:30 on the deadline date in `Europe/London` by
+default, so late team news and official FPL availability updates are captured
+close to the deadline. `AIFPL_SCHEDULER_RELEASE_TIME` and
+`AIFPL_SCHEDULER_TIMEZONE` configure that release; deadlines earlier than the
+release time fall back to the lead-time offset (default 90 minutes).
+`run-scheduler-tick` is a safe one-shot operation;
 `run-deadline-scheduler` polls continuously for use under a service manager. A
 successful event is marked complete so later polls cannot spend odds quota or
 create duplicate recommendations. While polling, it also checks unscored

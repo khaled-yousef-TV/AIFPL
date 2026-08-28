@@ -267,7 +267,37 @@ def test_research_records_errors_without_failing(monkeypatch, tmp_path) -> None:
 def test_configuration_validates_settings(monkeypatch) -> None:
     monkeypatch.setenv("TAVILY_API_KEY", "k")
     monkeypatch.setenv("AIFPL_TAVILY_ENABLED", "true")
-    monkeypatch.setenv("AIFPL_TAVILY_MAX_RESULTS", "9")
+    monkeypatch.setenv("AIFPL_TAVILY_MAX_RESULTS", "11")
 
     with pytest.raises(ValueError, match="MAX_RESULTS"):
         tavily_news_settings()
+
+
+def test_configuration_accepts_up_to_ten_results(monkeypatch) -> None:
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    monkeypatch.setenv("AIFPL_TAVILY_ENABLED", "true")
+    monkeypatch.setenv("AIFPL_TAVILY_MAX_RESULTS", "10")
+
+    assert tavily_news_settings().max_results == 10
+
+
+def test_assessment_caps_injured_player_from_training_injury_report() -> None:
+    hinshelwood = CurrentPlayer(
+        id=123, name="Hinshelwood", position="MID", club_id=21, club="Brighton", cost=60,
+        status="a", chance_of_playing_next_round=100, form=10.0, points_per_game=10.0,
+        total_points=10, minutes=64, starts=1, expected_goals=0.4, expected_assists=0.1,
+        expected_goal_involvements=0.5, expected_goals_conceded=1.0,
+        first_name="Jack", second_name="Hinshelwood",
+    )
+    payload = {"results": [result(
+        "Brighton's Jack Hinshelwood set for spell on sidelines after training injury",
+        "https://www.nytimes.com/athletic/7543944/2026/08/27/brighton-jack-hinshelwood-injury-latest/",
+        "Jack Hinshelwood is set for a spell on the sidelines after sustaining an injury in training. "
+        "He had a small issue in training yesterday, we have to go with him day by day. "
+        "I can't give a clear schedule of when he will be back.",
+        0.8,
+    )]}
+    assessment = _assess_player(hinshelwood, '"Jack Hinshelwood" Brighton', payload, datetime.now(timezone.utc), settings())
+
+    assert assessment.status == "adjusted"
+    assert assessment.start_probability_cap == 0.45

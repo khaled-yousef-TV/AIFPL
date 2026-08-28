@@ -130,7 +130,7 @@ class SchedulerSettings:
 
 def scheduler_settings() -> SchedulerSettings:
     try:
-        release_time = time.fromisoformat(os.environ.get("AIFPL_SCHEDULER_RELEASE_TIME", "09:00"))
+        release_time = time.fromisoformat(os.environ.get("AIFPL_SCHEDULER_RELEASE_TIME", "16:30"))
     except ValueError as exc:
         raise ValueError("AIFPL_SCHEDULER_RELEASE_TIME must be an HH:MM time") from exc
     settings = SchedulerSettings(
@@ -174,15 +174,15 @@ def tavily_news_settings() -> TavilyNewsSettings:
     settings = TavilyNewsSettings(
         api_key=api_key,
         enabled=enabled,
-        max_results=int(os.environ.get("AIFPL_TAVILY_MAX_RESULTS", "5")),
+        max_results=int(os.environ.get("AIFPL_TAVILY_MAX_RESULTS", "10")),
         cache_hours=float(os.environ.get("AIFPL_TAVILY_CACHE_HOURS", "6")),
         max_candidate_players=int(os.environ.get("AIFPL_TAVILY_MAX_CANDIDATE_PLAYERS", "5")),
         start_probability_threshold=float(os.environ.get("AIFPL_TAVILY_START_PROBABILITY_THRESHOLD", "0.7")),
     )
     if settings.enabled and not settings.api_key:
         raise ValueError("TAVILY_API_KEY is required when AIFPL_TAVILY_ENABLED is enabled")
-    if not 1 <= settings.max_results <= 5:
-        raise ValueError("AIFPL_TAVILY_MAX_RESULTS must be within 1..5")
+    if not 1 <= settings.max_results <= 10:
+        raise ValueError("AIFPL_TAVILY_MAX_RESULTS must be within 1..10")
     if settings.cache_hours < 0:
         raise ValueError("AIFPL_TAVILY_CACHE_HOURS must not be negative")
     if not 1 <= settings.max_candidate_players <= 5:
