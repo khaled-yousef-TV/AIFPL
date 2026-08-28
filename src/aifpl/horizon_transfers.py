@@ -54,6 +54,7 @@ class HorizonGameweekPlan:
     robustness_score: float = 0.0
     unlimited_transfers: bool = False
     free_transfers_after: int | None = None
+    vice_captain: CurrentPlayerProjection | None = None
 
 
 @dataclass(frozen=True)
@@ -393,6 +394,7 @@ def plan_horizon_transfers(
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=_sort(outgoing_players), incoming=_sort(incoming_players),
             resulting_squad=_sort(squad), starting_xi=_sort(lineup), captain=captain_player,
+            vice_captain=_second_best(lineup, captain_player.player_id),
             transfers_made=solver.value(transfer_counts[week_index]),
             free_transfers_before=solver.value(free_by_week[week_index]), hit_cost=hit,
             bank_after=solver.value(banks[week_index]), projected_points=round(projected, 4),
@@ -479,7 +481,8 @@ def _hold_plans(
         free_after = 1 if unlimited else min(5, free + 1)
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=[], incoming=[], resulting_squad=_sort(squad),
-            starting_xi=_sort(starters), captain=captain, transfers_made=0,
+            starting_xi=_sort(starters), captain=captain, vice_captain=_second_best(starters, captain.player_id),
+            transfers_made=0,
             free_transfers_before=free, hit_cost=0, bank_after=state.bank,
             projected_points=lineup.projected_points, net_projected_points=lineup.projected_points,
             objective_net_points=round(objective_net, 4),
@@ -539,3 +542,8 @@ def _squad_player(player: CurrentPlayerProjection) -> SquadPlayer:
 
 def _sort(players: list[CurrentPlayerProjection]) -> list[CurrentPlayerProjection]:
     return sorted(players, key=lambda player: (("GK", "DEF", "MID", "FWD").index(player.position), player.player_id))
+
+
+def _second_best(lineup: list[CurrentPlayerProjection], captain_id: int) -> CurrentPlayerProjection | None:
+    others = [player for player in lineup if player.player_id != captain_id]
+    return max(others, key=lambda player: player.projected_points, default=None)

@@ -60,6 +60,7 @@ class HermesState(BaseModel):
     season_id: str = ""
     initialization_method: str = ""
     supersedes_state_path: str | None = None
+    vice_captain_id: int | None = None
 
 
 class HermesDecision(BaseModel):
@@ -82,6 +83,7 @@ class HermesDecision(BaseModel):
     base_state_path: str | None = None
     supersedes_decision_path: str | None = None
     correction_reason: str | None = None
+    vice_captain_id: int | None = None
 
 
 class HermesRunResult(BaseModel):
@@ -122,6 +124,7 @@ class HorizonPlanWeekSnapshot(BaseModel):
     outgoing_ids: list[int] = Field(default_factory=list)
     incoming_ids: list[int] = Field(default_factory=list)
     captain_id: int | None = None
+    vice_captain_id: int | None = None
     starting_xi_ids: list[int] = Field(default_factory=list)
     squad_ids: list[int] = Field(default_factory=list)
 
@@ -264,7 +267,14 @@ class HermesDecisionBackend:
         by_id = {row.player_id: row for row in rows if row.gameweek == gameweek and row.player_id in state.player_ids}
         players = [CurrentPlayerProjection(row.player_id, row.player_name, row.position, row.club, row.cost, row.projected_points, 1.0, row.methodology) for row in by_id.values()]
         lineup = select_best_lineup(SquadRequest(players=[SquadPlayer(id=p.player_id, name=p.player_name, position=p.position, club=p.club, cost=p.cost, projected_points=p.projected_points) for p in players], budget=sum(p.cost for p in players) + state.bank))
+        starters = [player for player in players if player.player_id in {p.id for p in lineup.starters}]
+        vice_captain = max(
+            (player for player in starters if player.player_id != lineup.captain.id),
+            key=lambda player: player.projected_points,
+            default=None,
+        )
         return {"gameweek": gameweek, "starting_ids": [p.id for p in lineup.starters], "captain_id": lineup.captain.id,
+                "vice_captain_id": vice_captain.player_id if vice_captain is not None else None,
                 "projected_points": lineup.projected_points, "methodology": players[0].methodology,
                 "formation": f"{sum(p.position == 'DEF' for p in lineup.starters)}-{sum(p.position == 'MID' for p in lineup.starters)}-{sum(p.position == 'FWD' for p in lineup.starters)}"}
 
@@ -725,6 +735,7 @@ class HermesManager:
         action = arguments["action"]
         explanation = str(arguments["explanation"])
         plan_snapshot: HorizonPlanSnapshot | None = None
+        vice_captain_id: int | None = None
         if action == "adopt_initial":
             if self._initial is None:
                 raise ValueError("Hermes must inspect the initial squad before adopting it")
@@ -736,6 +747,13 @@ class HermesManager:
             purchase_prices = {player.player_id: player.cost for player in self._initial.players}
             methodology = self._initial.methodology
             plan_snapshot = self._initial_snapshot
+            vice_captain = max(
+                (player for player in self._initial.starting_xi if player.player_id != captain_id),
+                key=lambda player: player.projected_points,
+                default=None,
+            )
+            if vice_captain is not None:
+                vice_captain_id = vice_captain.player_id
         elif action in ("execute_horizon", "hold"):
             if previous is None or self._horizon is None:
                 raise ValueError("Hermes must inspect a horizon plan before committing")
@@ -743,12 +761,14 @@ class HermesManager:
                 assert self._hold is not None
                 squad_ids, starting_ids = previous.squad.player_ids, self._hold["starting_ids"]
                 captain_id, bank, outgoing, incoming, gameweek = self._hold["captain_id"], previous.squad.bank, [], [], self._hold["gameweek"]
+                vice_captain_id = self._hold.get("vice_captain_id")
                 free, methodology, purchase_prices = min(5, previous.squad.free_transfers + 1), self._hold["methodology"], previous.squad.purchase_prices
             else:
                 week = self._horizon.gameweeks[0]
                 squad_ids = [player.player_id for player in week.resulting_squad]
                 starting_ids = [player.player_id for player in week.starting_xi]
                 captain_id, bank, outgoing, incoming, gameweek = week.captain.player_id, week.bank_after, [p.player_id for p in week.outgoing], [p.player_id for p in week.incoming], week.gameweek
+                vice_captain_id = week.vice_captain.player_id if week.vice_captain is not None else None
                 free = min(5, max(0, previous.squad.free_transfers - week.transfers_made) + 1)
                 methodology = self._horizon.methodology
                 costs = {player.player_id: player.cost for player in week.resulting_squad}
@@ -780,6 +800,7 @@ class HermesManager:
             base_state_path=base_state_path,
             supersedes_decision_path=supersedes_decision_path,
             correction_reason=correction_reason,
+            vice_captain_id=vice_captain_id,
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
@@ -788,6 +809,7 @@ class HermesManager:
             gameweek=gameweek, decision_path=str(decision_path),
             season_id=season_id,
             supersedes_state_path=supersedes_state_path,
+            vice_captain_id=vice_captain_id,
             initialization_method="horizon_v1" if action == "adopt_initial" else (
                 previous.initialization_method if previous else ""
             ),
@@ -861,6 +883,7 @@ def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
         outgoing_ids=[player.player_id for player in week.outgoing],
         incoming_ids=[player.player_id for player in week.incoming],
         captain_id=week.captain.player_id,
+        vice_captain_id=week.vice_captain.player_id if week.vice_captain is not None else None,
         starting_xi_ids=[player.player_id for player in week.starting_xi],
         squad_ids=[player.player_id for player in week.resulting_squad],
     )

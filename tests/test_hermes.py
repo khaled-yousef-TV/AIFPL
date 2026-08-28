@@ -217,9 +217,21 @@ def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:
     assert len(snapshot.weeks[0].squad_ids) == 15
     assert len(snapshot.weeks[0].starting_xi_ids) == 11
     assert snapshot.weeks[0].captain_id is not None
+    assert snapshot.weeks[0].vice_captain_id is not None
+    assert snapshot.weeks[0].vice_captain_id != snapshot.weeks[0].captain_id
     assert snapshot.weeks[0].robustness_score >= 0
     assert snapshot.robustness_score >= 0
     assert snapshot.total_net_projected_points > 0
+
+
+def test_hermes_decision_records_the_vice_captain(tmp_path) -> None:
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeHorizonBackend(tmp_path))
+
+    result = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    assert result.decision.vice_captain_id is not None
+    assert result.decision.vice_captain_id != result.decision.captain_id
+    assert manager.latest_state().vice_captain_id == result.decision.vice_captain_id
 
 
 def test_strategy_churn_penalty_scales_with_risk_tolerance(monkeypatch) -> None:

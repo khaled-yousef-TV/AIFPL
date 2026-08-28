@@ -118,6 +118,7 @@ class CurrentDashboard(BaseModel):
     bank: int
     free_transfers: int
     captain_id: int
+    vice_captain_id: int | None = None
     formation: str
     projected_points: float
     projection_available: bool
@@ -273,6 +274,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         bank=decision.squad.bank,
         free_transfers=decision.squad.free_transfers,
         captain_id=decision.captain_id,
+        vice_captain_id=decision.vice_captain_id,
         formation=formation,
         projected_points=round(projected_points, 4),
         projection_available=any(row is not None for row in current_projection_rows.values()),

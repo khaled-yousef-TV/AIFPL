@@ -134,6 +134,7 @@
   .player.gk { background: #efd49a; } .player.def { background: #b7d7c1; } .player.mid { background: #b9d2e2; } .player.fwd { background: #e9b9a5; }
   .player.captain { background: #f4e6a1; border-color: #fffdf9; outline: 3px solid rgba(228, 194, 107, .6); }
   .badge { position: absolute; top: -10px; right: -10px; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 12px; font-weight: 900; }
+  .badge.vice { top: auto; bottom: -10px; width: 28px; height: 20px; border-radius: 999px; color: #fffdf9; background: var(--green); font-size: 9px; letter-spacing: .02em; }
   .pill-inner { display: flex; flex-direction: column; align-items: center; width: 100%; }
   .player .club-badge, .player .player-name,
   .bench-top .club-badge, .bench-top strong, .bench-player small {
@@ -518,7 +519,7 @@
     tip.style.transform = "none";
   }
 
-  function createPlayerPill(player, teams, left, top, delays, pitch) {
+  function createPlayerPill(player, teams, left, top, delays, pitch, viceCaptainId) {
     const pill = document.createElement("div");
     pill.className = `player ${player.position.toLowerCase()}${player.is_captain ? " captain" : ""}`;
     pill.dataset.pid = player.id;
@@ -535,6 +536,11 @@
       captain.className = "badge";
       captain.textContent = "C";
       pill.append(captain);
+    } else if (viceCaptainId != null && player.id === viceCaptainId) {
+      const vice = document.createElement("span");
+      vice.className = "badge vice";
+      vice.textContent = "VC";
+      pill.append(vice);
     }
     inner.append(createClubBadge(player, teams));
     const name = document.createElement("span");
@@ -568,7 +574,7 @@
         container.append(createPlayerPill(player, teams, slot[0], slot[1], {
           badge: lineDelay,
           name: lineDelay,
-        }, pitch));
+        }, pitch, dashboard.vice_captain_id));
       });
       lineDelay += 1.2;
     });
@@ -733,8 +739,9 @@
     const fill = confidence.status === "full" ? 100 : confidence.status === "partial" ? 55 : 0;
     document.getElementById("projection-fill").style.width = `${fill}%`;
     const captain = dashboard.players.find(player => player.is_captain);
+    const vice = dashboard.players.find(player => player.id === dashboard.vice_captain_id);
     document.getElementById("captain-name").textContent = `Captain: ${captain ? captain.name : "not set"}`;
-    document.getElementById("captain-detail").textContent = captain ? `${captain.projected_points.toFixed(1)} projected points \u00b7 ${captain.club}` : "No captain returned by backend";
+    document.getElementById("captain-detail").textContent = (captain ? `${captain.projected_points.toFixed(1)} projected points \u00b7 ${captain.club}` : "No captain returned by backend") + (vice ? ` \u00b7 VC: ${vice.name}` : "");
     const captainOptions = (dashboard.captain_options || []).map(option => {
       const minutes = option.expected_minutes != null ? ` ${Math.round(option.expected_minutes)}m` : "";
       const safety = option.start_probability != null ? ` (${Math.round(option.start_probability * 100)}%)` : "";
