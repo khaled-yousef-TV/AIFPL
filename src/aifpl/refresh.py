@@ -270,11 +270,11 @@ def _current_hermes_state(root: Path, players: list) -> "object | None":
         state = HermesManager(root).latest_state(optional=True)
     except (FileNotFoundError, ValueError):
         return None
-    if state is None or not state.player_ids:
+    if state is None or not state.squad.player_ids:
         return None
     if state.season_id and state.season_id != _season_id_from_fixtures(root):
         return None
-    squad_ids = set(state.player_ids)
+    squad_ids = set(state.squad.player_ids)
     if len(squad_ids) != 15:
         return None
     catalog_ids = {player.id for player in players}
@@ -312,7 +312,7 @@ def _research_owned_players(
     season_id = state.season_id or _season_id_from_fixtures(root)
     return TavilyNewsStore(root).research(
         players,
-        state.player_ids,
+        state.squad.player_ids,
         start_gameweek,
         season_id,
         query_kind="owned",
@@ -331,7 +331,7 @@ def _research_transfer_candidates(
         return None
     candidates = load_projection_candidates(root, ProjectionSource.ODDS, catalog_id)
     squad_state = CurrentSquadState(
-        player_ids=list(state.player_ids),
+        player_ids=list(state.squad.player_ids),
         bank=state.squad.bank,
         free_transfers=state.squad.free_transfers,
         max_transfers=2,

@@ -5,7 +5,7 @@ from fcntl import LOCK_EX, LOCK_UN, flock
 import pytest
 
 from aifpl.fpl import FplSourceError
-from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
+from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError, _current_hermes_state
 
 
 class FailingFplClient:
@@ -81,3 +81,25 @@ def test_partial_coverage_is_flagged_not_fatal(tmp_path) -> None:
 
     assert catalog.odds_coverage_status == "partial"
     assert catalog.odds_coverage_by_gameweek[1] < partial_odds_fixture_coverage()
+
+
+def test_current_hermes_state_reads_the_nested_squad_player_ids(tmp_path, monkeypatch) -> None:
+    import aifpl.hermes as hermes_module
+
+    fake_state = type(
+        "FakeState", (), {"squad": type("Squad", (), {"player_ids": list(range(1, 16))})(), "season_id": ""}
+    )()
+
+    class FakeManager:
+        def __init__(self, root) -> None:
+            pass
+
+        def latest_state(self, optional=False):
+            return fake_state
+
+    monkeypatch.setattr(hermes_module, "HermesManager", FakeManager)
+    fake_players = [type("Player", (), {"id": player_id})() for player_id in range(1, 16)]
+
+    state = _current_hermes_state(tmp_path, fake_players)
+    assert state is not None
+    assert state.squad.player_ids == list(range(1, 16))
