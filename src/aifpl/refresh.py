@@ -18,6 +18,7 @@ from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient
 from aifpl.health import SourceHealthChecker
+from aifpl.live_calibration import current_season_id
 from aifpl.odds import OddsSnapshotStore, TheOddsApiClient
 from aifpl.odds_matching import FixtureOddsConsensusStore
 from aifpl.odds_projections import OddsProjectionStore
@@ -272,7 +273,7 @@ def _current_hermes_state(root: Path, players: list) -> "object | None":
         return None
     if state is None or not state.squad.player_ids:
         return None
-    if state.season_id and state.season_id != _season_id_from_fixtures(root):
+    if state.season_id and state.season_id != current_season_id(root):
         return None
     squad_ids = set(state.squad.player_ids)
     if len(squad_ids) != 15:
@@ -283,24 +284,6 @@ def _current_hermes_state(root: Path, players: list) -> "object | None":
     return state
 
 
-def _season_id_from_fixtures(root: Path) -> str:
-    try:
-        _, summary = SnapshotStore(root).latest_bootstrap()
-    except FileNotFoundError:
-        return ""
-    deadlines = []
-    for event in summary.get("events", []):
-        if isinstance(event, dict) and isinstance(event.get("deadline_time"), str) and isinstance(event.get("id"), int):
-            deadlines.append((datetime.fromisoformat(event["deadline_time"].replace("Z", "+00:00")), event["id"]))
-    if not deadlines:
-        return ""
-    now = datetime.now(timezone.utc)
-    future = [(deadline, event) for deadline, event in deadlines if deadline > now]
-    deadline, _ = min(future) if future else max(deadlines)
-    start_year = deadline.year if deadline.month >= 7 else deadline.year - 1
-    return f"{start_year}-{str(start_year + 1)[-2:]}"
-
-
 def _research_owned_players(
     root: Path,
     players: list,
@@ -309,7 +292,7 @@ def _research_owned_players(
 ) -> TavilyNewsCatalog | None:
     if state is None:
         return None
-    season_id = state.season_id or _season_id_from_fixtures(root)
+    season_id = state.season_id or current_season_id(root) or ""
     return TavilyNewsStore(root).research(
         players,
         state.squad.player_ids,
@@ -343,7 +326,7 @@ def _research_transfer_candidates(
     incoming_ids = [player.player_id for player in transfer_plan.incoming]
     if not incoming_ids:
         return None
-    season_id = state.season_id or _season_id_from_fixtures(root)
+    season_id = state.season_id or current_season_id(root) or ""
     return TavilyNewsStore(root).research(
         players,
         incoming_ids,

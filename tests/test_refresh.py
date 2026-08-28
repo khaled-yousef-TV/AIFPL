@@ -103,3 +103,41 @@ def test_current_hermes_state_reads_the_nested_squad_player_ids(tmp_path, monkey
     state = _current_hermes_state(tmp_path, fake_players)
     assert state is not None
     assert state.squad.player_ids == list(range(1, 16))
+
+
+def test_research_owned_players_derives_season_from_bootstrap(tmp_path, monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from aifpl.snapshots import SnapshotStore
+    from aifpl.tavily_news import TavilyNewsStore
+    from aifpl.refresh import _research_owned_players
+
+    bootstrap_payload = {
+        "teams": [], "elements": [], "events": [
+            {"id": 1, "deadline_time": "2026-08-28T17:30:00Z"},
+            {"id": 2, "deadline_time": "2026-09-11T17:30:00Z"},
+        ],
+    }
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap_payload)
+    captured = {}
+
+    class FakeStore:
+        def __init__(self, root) -> None:
+            pass
+
+        def research(self, players, player_ids, gameweek, season_id, query_kind):
+            captured["season_id"] = season_id
+            captured["player_ids"] = player_ids
+            return type("Catalog", (), {"output_path": None, "evidence_records": []})()
+
+    monkeypatch.setattr(TavilyNewsStore, "__init__", lambda self, root: None)
+    monkeypatch.setattr(TavilyNewsStore, "research", FakeStore.research)
+    fake_state = type("State", (), {
+        "squad": type("Squad", (), {"player_ids": list(range(1, 16))})(),
+        "season_id": "",
+    })()
+
+    _research_owned_players(tmp_path, [], fake_state, 2)
+
+    assert captured["season_id"] == "2026-27"
+    assert captured["player_ids"] == list(range(1, 16))
