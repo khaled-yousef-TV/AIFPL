@@ -55,14 +55,14 @@ def test_article_marks_ruled_out_as_out_impact() -> None:
     assert article.confidence >= 0.8
 
 
-def test_article_marks_rotation_mention_as_watch_not_adjusted() -> None:
+def test_article_marks_playing_time_competition_as_rotation() -> None:
     article = _article(player(), result(
         "Barcola signing could shake up Liverpool attack", "https://www.skysports.com/football/2",
         "The arrival of Bradley Barcola increases competition for places and could threaten Cody Gakpo's minutes.",
     ))
 
     assert article.relevant is True
-    assert article.impact == "watch"
+    assert article.impact == "rotation"
     assert article.confidence <= 0.65
 
 
@@ -118,6 +118,67 @@ def test_assessment_uses_official_club_confirmation() -> None:
 
     assert assessment.status == "adjusted"
     assert assessment.start_probability_cap == 0.0
+
+
+def test_assessment_applies_rotation_cap_from_two_credible_sources() -> None:
+    payload = {"results": [
+        result(
+            "Barcola deal threatens Gakpo's starting role", "https://www.theathletic.com/football/11",
+            "The signing of Bradley Barcola could displace Cody Gakpo and limit his minutes for Liverpool.",
+            0.81,
+        ),
+        result(
+            "Gakpo faces more competition for places", "https://www.skysports.com/football/12",
+            "Cody Gakpo could lose his place in the starting eleven after Liverpool's new signing.",
+            0.8,
+        ),
+    ]}
+    assessment = _assess_player(player(), '"Cody Gakpo" Liverpool', payload, datetime.now(timezone.utc), settings())
+
+    assert assessment.status == "adjusted"
+    assert assessment.start_probability_cap == 0.75
+
+
+def test_assessment_treats_manager_uncertainty_as_doubt_cap() -> None:
+    payload = {"results": [result(
+        "Iraola cannot guarantee Gakpo future", "https://www.theathletic.com/football/13",
+        "Andoni Iraola says he cannot guarantee anything regarding the future of Cody Gakpo as Liverpool close in on Barcola.",
+        0.8,
+    )]}
+    assessment = _assess_player(player(), '"Cody Gakpo" Liverpool', payload, datetime.now(timezone.utc), settings())
+
+    assert assessment.status == "adjusted"
+    assert assessment.start_probability_cap == 0.7
+
+
+def test_assessment_keeps_single_rotation_rumor_as_watch_only() -> None:
+    payload = {"results": [result(
+        "Blog: Gakpo faces rotation risk", "https://www.example-blog.com/football/14",
+        "Some fans believe Cody Gakpo faces rotation risk after Liverpool's new signing.",
+        0.6,
+    )]}
+    assessment = _assess_player(player(), '"Cody Gakpo" Liverpool', payload, datetime.now(timezone.utc), settings())
+
+    assert assessment.status == "watch"
+    assert assessment.start_probability_cap is None
+
+
+def test_article_marks_playing_time_competition_as_rotation() -> None:
+    article = _article(player(), result(
+        "Barcola arrival threatens Gakpo", "https://www.theathletic.com/football/15",
+        "Bradley Barcola's arrival could displace Cody Gakpo and reduce his starting role.",
+    ))
+
+    assert article.impact == "rotation"
+
+
+def test_article_marks_manager_uncertainty_as_doubt() -> None:
+    article = _article(player(), result(
+        "Iraola on Gakpo future", "https://www.theathletic.com/football/16",
+        "Iraola cannot guarantee anything regarding Cody Gakpo's future.",
+    ))
+
+    assert article.impact == "doubt"
 
 
 def test_assessment_evidence_contains_rotation_and_start_records() -> None:

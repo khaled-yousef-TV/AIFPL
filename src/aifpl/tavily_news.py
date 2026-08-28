@@ -22,7 +22,7 @@ from aifpl.security import redact_secrets
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 TAVILY_NEWS_METHOD = "tavily_player_news_v1"
-NewsImpact = Literal["clear", "watch", "doubt", "unlikely", "out"]
+NewsImpact = Literal["clear", "watch", "rotation", "doubt", "unlikely", "out"]
 
 
 @dataclass(frozen=True)
@@ -263,20 +263,31 @@ def _assess_player(
     articles = [_article(player, item) for item in payload.get("results", []) if isinstance(item, dict)]
     relevant = [article for article in articles if article.relevant]
     direct = [article for article in relevant if article.impact in ("out", "unlikely", "doubt")]
+    rotation = [article for article in relevant if article.impact == "rotation"]
     domains = {article.domain for article in direct}
     official = [article for article in direct if article.source_class == "official_club"]
     reporters = [article for article in direct if article.source_class == "named_reporter"]
+    rotation_credible = [
+        article for article in rotation
+        if article.source_class in ("official_club", "named_reporter")
+    ]
     cap: float | None = None
-    confidence = max((article.confidence for article in direct), default=0.0)
+    confidence = max((article.confidence for article in direct + rotation), default=0.0)
     rationale = "No recent playing-time concern found."
     status: Literal["clear", "watch", "adjusted"] = "clear"
     if any(article.impact == "out" for article in direct) and (official or len(domains) >= 2):
         cap, status, rationale = 0.0, "adjusted", "Multiple credible reports indicate unavailability."
     elif any(article.impact == "unlikely" for article in direct) and (official or len(domains) >= 2 or reporters):
         cap, status, rationale = 0.45, "adjusted", "Credible reporting indicates a low likelihood of starting."
-    elif sum(article.impact == "doubt" for article in direct) >= 2 and len(domains) >= 2:
-        cap, status, rationale = 0.7, "adjusted", "Independent reports indicate meaningful start uncertainty."
-    elif any(article.impact in ("out", "unlikely", "doubt", "watch") for article in relevant):
+    elif any(article.impact == "doubt" for article in direct) and (official or reporters):
+        cap, status, rationale = 0.7, "adjusted", "Credible reporting, including manager-level uncertainty, indicates meaningful start risk."
+    elif rotation and (
+        any(article.source_class == "official_club" for article in rotation)
+        or len({article.domain for article in rotation}) >= 2
+        or len(rotation_credible) >= 2
+    ):
+        cap, status, rationale = 0.75, "adjusted", "Credible reporting links new competition to reduced playing time."
+    elif any(article.impact in ("out", "unlikely", "doubt", "rotation", "watch") for article in relevant):
         status = "watch"
         confidence = max((article.confidence for article in relevant), default=0.0)
         rationale = "Recent news creates a watch item but does not meet the projection-adjustment threshold."
@@ -309,15 +320,26 @@ def _article(player: CurrentPlayer, item: dict[str, object]) -> TavilyNewsArticl
         impact = "out"
     elif relevant and _contains(context, ("unlikely to start", "expected to be benched", "set to be dropped", "will not start", "not expected to start")):
         impact = "unlikely"
-    elif relevant and _contains(context, ("doubt", "fitness concern", "late test", "may not start", "could be rested")):
+    elif relevant and _contains(
+        context,
+        ("doubt", "fitness concern", "late test", "may not start", "could be rested",
+         "cannot guarantee", "no guarantee", "not guaranteed", "future uncertain"),
+    ):
         impact = "doubt"
     elif relevant and _contains(
+        context,
+        ("competition for places", "threat to his", "could displace", "may lose his place",
+         "knock on effects", "knock-on effects", "starting role", "starting place",
+         "minutes could be limited", "fewer minutes", "more competition"),
+    ):
+        impact = "rotation"
+    elif relevant and _contains(
         f"{title}. {content}".casefold(),
-        ("rotation", "competition for places", "replacement", "new signing", "transfer", "future cannot",
+        ("rotation", "replacement", "new signing", "transfer", "future cannot",
          "monitoring", "interested", "linked with", "target"),
     ):
         impact = "watch"
-    confidence = base_confidence if impact != "watch" else min(base_confidence, 0.65)
+    confidence = base_confidence if impact not in ("watch", "rotation") else min(base_confidence, 0.65)
     if score >= 0.8:
         confidence = min(1.0, confidence + 0.05)
     return TavilyNewsArticle(
