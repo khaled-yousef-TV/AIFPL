@@ -143,6 +143,22 @@ def test_horizon_planner_captains_the_highest_projected_starter() -> None:
         assert week.captain.player_id == top.player_id
 
 
+def test_normal_horizon_lineup_is_the_best_legal_xi_from_its_selected_squad() -> None:
+    rows = pool()
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    for week in plan.gameweeks:
+        points_by_id = {
+            projection.player_id: projection.projected_points
+            for projection in rows
+            if projection.gameweek == week.gameweek
+        }
+        _, expected_ids = max_projected_lineup(week.resulting_squad, points_by_id)
+        assert {player.player_id for player in week.starting_xi} == expected_ids
+
+
 def test_pre_season_planning_resets_to_one_free_transfer_after_gw1() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
