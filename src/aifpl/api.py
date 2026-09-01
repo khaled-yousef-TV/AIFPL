@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.config import cors_origins, data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
+from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
 from aifpl.dashboard import CurrentDashboard, build_current_dashboard
@@ -146,6 +147,13 @@ class HermesSupersedeRequest(BaseModel):
     base_state_id: str = Field(min_length=1, max_length=255)
     supersedes_decision_id: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=1, max_length=1000)
+
+
+class ChipStateRequest(BaseModel):
+    season_id: str
+    chip: str
+    chip_set: int = Field(ge=1, le=2)
+    gameweek: int = Field(ge=1, le=38)
 
 
 @app.get("/health")
@@ -354,6 +362,24 @@ def latest_tavily_news() -> dict[str, object]:
         return TavilyNewsStore(data_dir()).latest_payload()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/chips/advice/latest", response_model=ChipAdvice)
+def latest_chip_advice() -> ChipAdvice:
+    try:
+        return ChipAdviceStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/chips/state", response_model=ChipState, status_code=201)
+def mark_chip_used(request: ChipStateRequest) -> ChipState:
+    try:
+        return ChipStateStore(data_dir()).mark_used(
+            request.season_id, request.chip, request.chip_set, request.gameweek,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/odds/epl/event-markets", response_model=EventMarketCatalog, status_code=201)

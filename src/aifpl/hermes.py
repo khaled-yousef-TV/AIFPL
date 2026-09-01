@@ -183,6 +183,27 @@ class HermesDecisionBackend:
             "player_evidence_records": evidence_count,
             "decision_history": self._decision_history(),
             "odds_projection_coverage": self._odds_coverage(),
+            "chip_advice": self._chip_advice(),
+        }
+
+    def _chip_advice(self) -> dict[str, object] | None:
+        try:
+            from aifpl.chips import ChipAdviceStore
+
+            advice = ChipAdviceStore(self.root).latest()
+        except FileNotFoundError:
+            return None
+        return {
+            "gameweek": advice.gameweek,
+            "recommendations": [
+                {
+                    "chip": item.chip, "set": item.set, "status": item.status,
+                    "gameweek": item.gameweek, "rationale": item.rationale,
+                    "confidence": item.confidence,
+                }
+                for item in advice.recommendations
+            ],
+            "intel_stale": advice.intel.stale,
         }
 
     def _odds_coverage(self) -> dict[str, Any]:

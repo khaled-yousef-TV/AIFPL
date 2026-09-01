@@ -9,6 +9,7 @@ import typer
 
 from aifpl.config import data_dir
 from aifpl.calibration import compare_prediction_runs, fit_walk_forward_calibration
+from aifpl.chips import ChipAdviceStore, ChipStateStore
 from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentProjectionStore
 from aifpl.fixture_projections import FixtureProjectionStore
@@ -155,6 +156,33 @@ def tavily_news_preview() -> None:
     except FileNotFoundError as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(payload))
+
+
+@app.command()
+def chip_advice() -> None:
+    """Show the latest read-only chip recommendations."""
+    try:
+        advice = ChipAdviceStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(advice))
+
+
+@app.command()
+def chip_state(
+    season_id: str = typer.Option(..., help="Season ID, e.g. 2026-27"),
+    chip: str = typer.Option(..., help="wildcard | free_hit | bench_boost | triple_captain"),
+    chip_set: int = typer.Option(1, min=1, max=2, help="1 = GW1-19 set, 2 = GW20-38 set"),
+    gameweek: int = typer.Option(..., min=1, max=38),
+    mark_used: bool = typer.Option(False, "--mark-used", help="Record that this chip slot was played"),
+) -> None:
+    """Show the chip ledger, or record a played chip slot."""
+    store = ChipStateStore(data_dir())
+    if mark_used:
+        state = store.mark_used(season_id, chip, chip_set, gameweek)
+        typer.echo(json_dumps(state))
+        return
+    typer.echo(json_dumps(store.latest(season_id)))
 
 
 @app.command()

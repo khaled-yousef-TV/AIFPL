@@ -28,6 +28,7 @@ def test_api_exposes_every_pipeline_stage() -> None:
         ("/hermes/run", "POST"), ("/hermes/state", "GET"), ("/hermes/decisions/latest", "GET"),
         ("/hermes/migrate", "POST"), ("/hermes/decisions/supersede", "POST"),
         ("/news/tavily/latest", "GET"),
+        ("/chips/advice/latest", "GET"), ("/chips/state", "POST"),
     }
     assert expected <= routes
 
@@ -65,6 +66,6 @@ def test_cli_exposes_documented_commands() -> None:
         "build-player-evidence", "player-evidence",
         "fetch-event-markets", "build-market-signals",
         "hermes-run", "hermes-reinitialize-opening-squad", "hermes-state", "hermes-decision",
-        "hermes-migrate-state", "tavily-news-preview",
+        "hermes-migrate-state", "tavily-news-preview", "chip-advice", "chip-state",
     ):
         assert command in result.stdout

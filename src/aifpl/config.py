@@ -196,12 +196,58 @@ def tavily_news_settings() -> TavilyNewsSettings:
 
 
 @dataclass(frozen=True)
+class ChipSettings:
+    set1_end_gw: int
+    wildcard_points_gap: float
+    bench_boost_bench_points: float
+    tc_captain_points: float
+    tc_margin: float
+    fh_starters_without_fixture: int
+    intel_cache_hours: float
+    intel_max_timing: int
+    reddit_limit: int
+    rules_url: str
+    intel_enabled: bool
+
+
+def chip_settings() -> ChipSettings:
+    settings = ChipSettings(
+        set1_end_gw=int(os.environ.get("AIFPL_CHIP_SET1_END_GW", "19")),
+        wildcard_points_gap=float(os.environ.get("AIFPL_CHIP_WILDCARD_POINTS_GAP", "20")),
+        bench_boost_bench_points=float(os.environ.get("AIFPL_CHIP_BENCH_BOOST_BENCH_POINTS", "24")),
+        tc_captain_points=float(os.environ.get("AIFPL_CHIP_TC_CAPTAIN_POINTS", "13")),
+        tc_margin=float(os.environ.get("AIFPL_CHIP_TC_MARGIN", "3")),
+        fh_starters_without_fixture=int(os.environ.get("AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE", "3")),
+        intel_cache_hours=float(os.environ.get("AIFPL_CHIP_INTEL_CACHE_HOURS", "6")),
+        intel_max_timing=int(os.environ.get("AIFPL_CHIP_INTEL_MAX_TIMING", "12")),
+        reddit_limit=int(os.environ.get("AIFPL_CHIP_REDDIT_LIMIT", "10")),
+        rules_url=os.environ.get(
+            "AIFPL_CHIP_RULES_URL",
+            "https://www.premierleague.com/en/news/4679879/whats-happening-with-fpl-chips-in-202627",
+        ),
+        intel_enabled=os.environ.get("AIFPL_CHIP_INTEL_ENABLED", "true").lower() in ("1", "true", "yes"),
+    )
+    if not 1 <= settings.set1_end_gw <= 37:
+        raise ValueError("AIFPL_CHIP_SET1_END_GW must be within 1..37")
+    if settings.wildcard_points_gap < 0 or settings.bench_boost_bench_points < 0:
+        raise ValueError("chip thresholds must not be negative")
+    if settings.tc_captain_points < 0 or settings.tc_margin < 0:
+        raise ValueError("chip thresholds must not be negative")
+    if not 0 <= settings.fh_starters_without_fixture <= 11:
+        raise ValueError("AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE must be within 0..11")
+    if settings.intel_cache_hours < 0 or settings.intel_max_timing < 0:
+        raise ValueError("chip intel settings must not be negative")
+    if not 1 <= settings.reddit_limit <= 25:
+        raise ValueError("AIFPL_CHIP_REDDIT_LIMIT must be within 1..25")
+    return settings
+
+
+@dataclass(frozen=True)
 class LiveCalibrationSettings:
     window_gameweeks: int
     min_gameweeks: int
     min_observations: int
     recency_decay: float
-
 
 def live_calibration_settings() -> LiveCalibrationSettings:
     settings = LiveCalibrationSettings(

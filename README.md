@@ -544,6 +544,22 @@ until chronological holdout calibration supports a non-zero `AIFPL_PLAYER_PROP_W
 Automatic event-market fetching is quota-sensitive and remains disabled unless
 `AIFPL_FETCH_EVENT_MARKETS=true`.
 
+The chip advisor is a read-only layer that models two sets of every chip per
+season (set 1 expires at `AIFPL_CHIP_SET1_END_GW`, set 2 opens after). Each
+refresh it detects confirmed double/blank gameweeks from the fixture catalog
+plus expected windows gathered from the official FPL rules page and
+r/FantasyPL (`AIFPL_CHIP_INTEL_ENABLED`), then recommends — never spends:
+Wildcard when the best-available squad projects more than
+`AIFPL_CHIP_WILDCARD_POINTS_GAP` ahead of the committed squad, Bench Boost on a
+double gameweek with a bench projecting at least
+`AIFPL_CHIP_BENCH_BOOST_BENCH_POINTS`, Triple Captain on a double gameweek with
+a captain projection of at least `AIFPL_CHIP_TC_CAPTAIN_POINTS` and a
+`AIFPL_CHIP_TC_MARGIN` edge, and Free Hit on a blank gameweek affecting at
+least `AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE` starters. Chip usage is tracked
+in an immutable ledger (`POST /chips/state`, `aifpl chip-state`); advice is
+exposed at `GET /chips/advice/latest`, `aifpl chip-advice`, the dashboard, and
+Hermes context.
+
 External evidence can also carry `late_return` records for players returning
 late from tournaments: a per-gameweek start probability plus an optional
 `minutes_multiplier` (within 0..1.5). These adjustments apply across the whole

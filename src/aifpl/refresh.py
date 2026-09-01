@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 
 from aifpl.artifacts import json_bytes, write_immutable
+from aifpl.chips import ChipAdviceStore, ChipAdvisor, ChipIntelFetcher, ChipStateStore
 from aifpl.current import CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentProjectionStore
 from aifpl.config import minimum_odds_fixture_coverage, partial_odds_fixture_coverage
@@ -230,6 +231,13 @@ class CurrentDataRefreshJob:
                 ), budget,
             )
             steps.append("optimize_squad")
+            chip_advice_path = _build_chip_advice(
+                self.root, current_players, hermes_state, recommendation,
+                Path(odds_projection.output_path).name, start_gameweek,
+            )
+            if chip_advice_path is not None:
+                artifacts["chip_advice"] = str(chip_advice_path)
+                steps.append("build_chip_advice")
             result = RefreshJobResult(
                 status="succeeded", started_at=started_at, completed_at=datetime.now(timezone.utc),
                 start_gameweek=start_gameweek, end_gameweek=end_gameweek, budget=budget,
@@ -334,3 +342,58 @@ def _research_transfer_candidates(
         season_id,
         query_kind="candidate",
     )
+
+
+def _build_chip_advice(
+    root: Path,
+    players: list,
+    state: "object | None",
+    best_squad: object,
+    catalog_id: str,
+    start_gameweek: int,
+) -> Path | None:
+    from aifpl.chips import ChipAdviceStore, ChipAdvisor, ChipIntelFetcher, ChipStateStore
+    from aifpl.config import chip_settings
+    from aifpl.fixtures import CurrentFixtureCatalogStore
+    from aifpl.odds_projections import OddsProjectionStore
+
+    if state is None or not hasattr(best_squad, "players"):
+        return None
+    season_id = state.season_id or current_season_id(root) or ""
+    if not season_id:
+        return None
+    settings = chip_settings()
+    fixtures = CurrentFixtureCatalogStore(root).latest()
+    projections = OddsProjectionStore(root).latest(catalog_id)
+    if settings.intel_enabled:
+        try:
+            intel = ChipIntelFetcher(root).fetch(start_gameweek)
+        except Exception:
+            try:
+                intel = ChipIntelFetcher(root).latest()
+            except FileNotFoundError:
+                from aifpl.chips import ChipIntel
+
+                intel = ChipIntel(fetched_at=datetime.now(timezone.utc), stale=True)
+    else:
+        try:
+            intel = ChipIntelFetcher(root).latest()
+        except FileNotFoundError:
+            from aifpl.chips import ChipIntel
+
+            intel = ChipIntel(fetched_at=datetime.now(timezone.utc), stale=True)
+    state_store = ChipStateStore(root)
+    chip_state = state_store.latest(season_id)
+    advice = ChipAdvisor(settings).evaluate(
+        season_id,
+        start_gameweek,
+        chip_state,
+        fixtures,
+        projections,
+        list(state.squad.player_ids),
+        list(state.starting_xi_ids),
+        [player.player_id for player in best_squad.players],
+        intel,
+    )
+    saved = ChipAdviceStore(root).save(advice)
+    return Path(saved.output_path)

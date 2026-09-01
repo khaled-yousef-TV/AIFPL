@@ -14,6 +14,15 @@ from aifpl.scheduler import DeadlineScheduler
 from aifpl.scoring import DecisionScorer
 
 
+class DashboardChipAdvice(BaseModel):
+    chip: str
+    set: int
+    status: str
+    gameweek: int | None = None
+    rationale: str
+    confidence: float = 0.5
+
+
 class DashboardPlayer(BaseModel):
     id: int
     name: str
@@ -133,6 +142,7 @@ class CurrentDashboard(BaseModel):
     solver_status: str | None = None
     robustness: float | None = None
     confidence: DashboardConfidence = Field(default_factory=DashboardConfidence)
+    chip_advice: list[DashboardChipAdvice] = Field(default_factory=list)
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
@@ -289,7 +299,24 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         solver_status=plan_snapshot.solver_status if plan_snapshot is not None else None,
         robustness=robustness,
         confidence=_dashboard_confidence(root),
+        chip_advice=_dashboard_chip_advice(root),
     )
+
+
+def _dashboard_chip_advice(root: Path) -> list[DashboardChipAdvice]:
+    try:
+        from aifpl.chips import ChipAdviceStore
+
+        advice = ChipAdviceStore(root).latest()
+    except FileNotFoundError:
+        return []
+    return [
+        DashboardChipAdvice(
+            chip=item.chip, set=item.set, status=item.status, gameweek=item.gameweek,
+            rationale=item.rationale, confidence=item.confidence,
+        )
+        for item in advice.recommendations
+    ]
 
 
 def _dashboard_confidence(root: Path) -> DashboardConfidence:
