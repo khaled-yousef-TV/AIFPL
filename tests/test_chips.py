@@ -25,6 +25,11 @@ def settings(**overrides) -> ChipSettings:
         "tc_captain_points": 13.0,
         "tc_margin": 3.0,
         "fh_starters_without_fixture": 3,
+        "use_window_gws": 4,
+        "wildcard_gap_floor": 8.0,
+        "bench_boost_floor_points": 12.0,
+        "tc_captain_floor_points": 9.0,
+        "tc_margin_floor": 1.0,
         "intel_cache_hours": 6.0,
         "intel_max_timing": 12,
         "reddit_limit": 10,
@@ -185,6 +190,53 @@ def test_advisor_saves_triple_captain_without_margin() -> None:
     tc = next(item for item in advice.recommendations if item.chip == "triple_captain" and item.set == 1)
 
     assert tc.status == "save"
+
+
+def test_advisor_uses_set_one_chips_before_expiry_without_double_gameweek() -> None:
+    advisor = ChipAdvisor(settings())
+    rows = projections_for(list(range(1, 16)), [17, 18], points=5.0)
+    rows += [projection(1, 17, 12.0), projection(2, 17, 5.0), projection(3, 17, 5.0), projection(4, 17, 5.0)]
+    advice = advisor.evaluate(
+        "2026-27", 17, fresh_state(), fixtures(), rows,
+        list(range(1, 16)), list(range(1, 12)), list(range(1, 16)),
+        ChipIntel(fetched_at=datetime.now(timezone.utc)),
+    )
+    by_key = {(item.chip, item.set): item for item in advice.recommendations}
+
+    assert by_key[("bench_boost", 1)].status == "recommend"
+    assert "forfeited" in by_key[("bench_boost", 1)].rationale
+    assert by_key[("free_hit", 1)].status == "recommend"
+    assert by_key[("triple_captain", 1)].status == "recommend"
+
+
+def test_advisor_saves_in_expiry_window_when_bench_is_too_weak() -> None:
+    advisor = ChipAdvisor(settings(bench_boost_floor_points=12.0))
+    rows = projections_for(list(range(1, 16)), [17, 18], points=5.0)
+    rows += [projection(pid, 17, 2.0) for pid in range(12, 16)]
+    advice = advisor.evaluate(
+        "2026-27", 17, fresh_state(), fixtures(), rows,
+        list(range(1, 16)), list(range(1, 12)), list(range(1, 16)),
+        ChipIntel(fetched_at=datetime.now(timezone.utc)),
+    )
+    bb = next(item for item in advice.recommendations if item.chip == "bench_boost" and item.set == 1)
+
+    assert bb.status == "save"
+
+
+def test_advisor_relaxes_wildcard_threshold_in_use_it_window() -> None:
+    advisor = ChipAdvisor(settings())
+    rows = projections_for(list(range(1, 16)), [17, 18, 19], points=5.0) + projections_for(
+        list(range(21, 36)), [17, 18, 19], points=5.4,
+    )
+    advice = advisor.evaluate(
+        "2026-27", 17, fresh_state(), fixtures(), rows,
+        list(range(1, 16)), list(range(1, 12)), list(range(21, 36)),
+        ChipIntel(fetched_at=datetime.now(timezone.utc)),
+    )
+    wildcard = next(item for item in advice.recommendations if item.chip == "wildcard" and item.set == 1)
+
+    assert wildcard.status == "recommend"
+    assert wildcard.conditions["threshold"] < 20
 
 
 def test_state_store_marks_used_immutably(tmp_path) -> None:

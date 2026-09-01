@@ -353,6 +353,9 @@ class ChipAdvisor:
         starting_xi_ids: list[int],
         best_squad_ids: list[int],
     ) -> ChipRecommendation:
+        set_deadline = self.settings.set1_end_gw if slot.set == 1 else 38
+        remaining = set_deadline - gameweek
+        pressure = max(0.0, min(1.0, (self.settings.use_window_gws - remaining) / max(1, self.settings.use_window_gws)))
         horizon = [gw for gw in available_gws if gw >= gameweek][:4]
         if slot.chip == "wildcard":
             committed = sum(
@@ -366,12 +369,19 @@ class ChipAdvisor:
                 if (player_id, gw) in by_player_gw
             )
             gap = best - committed
-            if gap >= self.settings.wildcard_points_gap:
+            threshold = self.settings.wildcard_points_gap - pressure * (
+                self.settings.wildcard_points_gap - self.settings.wildcard_gap_floor
+            )
+            if gap >= threshold:
+                expiry_note = " Set-1 wildcard otherwise expires at the GW19 deadline." if slot.set == 1 else ""
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
-                    rationale=f"Best-available squad projects {gap:.1f} points better over {len(horizon)} GWs.",
-                    confidence=min(1.0, gap / (self.settings.wildcard_points_gap * 2)),
-                    conditions={"projected_gap": round(gap, 4), "horizon_gws": horizon},
+                    rationale=(
+                        f"Best-available squad projects {gap:.1f} points better over {len(horizon)} GWs"
+                        f"{' (use-it window: threshold relaxed to %.1f)' % threshold}.{expiry_note}"
+                    ),
+                    confidence=min(1.0, gap / max(1.0, threshold * 2)),
+                    conditions={"projected_gap": round(gap, 4), "horizon_gws": horizon, "threshold": round(threshold, 4)},
                 )
             return ChipRecommendation(
                 chip=slot.chip, set=slot.set, status="save",
@@ -382,6 +392,30 @@ class ChipAdvisor:
         next_dgw = next((gw for gw in sorted(schedule) if gw >= gameweek and schedule[gw].get("double")), None)
         if slot.chip == "bench_boost":
             if next_dgw is None:
+                if pressure > 0.0:
+                    bench_ids = [player_id for player_id in committed_player_ids if player_id not in set(starting_xi_ids)]
+                    bench_points = sum(
+                        by_player_gw[(player_id, gameweek)].projected_points
+                        for player_id in bench_ids if (player_id, gameweek) in by_player_gw
+                    )
+                    floor = self.settings.bench_boost_floor_points
+                    if bench_points >= floor:
+                        return ChipRecommendation(
+                            chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
+                            rationale=(
+                                f"No double gameweek before expiry; bench projects {bench_points:.1f} "
+                                f"this GW (use-it floor {floor:.1f}) — otherwise the chip is forfeited "
+                                "at the GW19 deadline."
+                            ),
+                            confidence=min(1.0, bench_points / (floor * 1.5)),
+                            conditions={"bench_projected_points": round(bench_points, 4), "use_it_window": True},
+                        )
+                    return ChipRecommendation(
+                        chip=slot.chip, set=slot.set, status="save", gameweek=gameweek,
+                        rationale=f"Expiry window open but the bench only projects {bench_points:.1f} this GW.",
+                        confidence=0.5,
+                        conditions={"bench_projected_points": round(bench_points, 4)},
+                    )
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="save",
                     rationale="No double gameweek detected; Bench Boost is worth saving for one.",
@@ -407,6 +441,31 @@ class ChipAdvisor:
             )
         if slot.chip == "triple_captain":
             if next_dgw is None:
+                if pressure > 0.0:
+                    captain_candidates = sorted(
+                        (by_player_gw[(player_id, gameweek)].projected_points for player_id in starting_xi_ids if (player_id, gameweek) in by_player_gw),
+                        reverse=True,
+                    )
+                    if len(captain_candidates) >= 2:
+                        top, second = captain_candidates[0], captain_candidates[1]
+                        floor = self.settings.tc_captain_floor_points
+                        margin_floor = self.settings.tc_margin_floor
+                        if top >= floor and (top - second) >= margin_floor:
+                            return ChipRecommendation(
+                                chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
+                                rationale=(
+                                    f"No double gameweek before expiry; top starter projects {top:.1f} "
+                                    f"this GW (use-it floor {floor:.1f}) — otherwise the chip is forfeited "
+                                    "at the GW19 deadline."
+                                ),
+                                confidence=min(1.0, (top - second) / max(1.0, margin_floor * 2)),
+                                conditions={"captain_projected_points": round(top, 4), "use_it_window": True},
+                            )
+                    return ChipRecommendation(
+                        chip=slot.chip, set=slot.set, status="save", gameweek=gameweek,
+                        rationale="Expiry window open but no starter clears the use-it captain floor.",
+                        confidence=0.5,
+                    )
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="save",
                     rationale="No double gameweek detected; Triple Captain is worth saving for one.",
@@ -439,6 +498,16 @@ class ChipAdvisor:
         if slot.chip == "free_hit":
             next_bgw = next((gw for gw in sorted(schedule) if gw >= gameweek and schedule[gw].get("blank")), None)
             if next_bgw is None:
+                if pressure > 0.0:
+                    return ChipRecommendation(
+                        chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
+                        rationale=(
+                            "No blank gameweek before expiry; use the Free Hit this GW so it is not "
+                            "forfeited at the GW19 deadline."
+                        ),
+                        confidence=0.6,
+                        conditions={"use_it_window": True},
+                    )
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="save",
                     rationale="No blank gameweek detected; Free Hit is worth saving for one.",

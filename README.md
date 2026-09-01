@@ -555,10 +555,13 @@ double gameweek with a bench projecting at least
 `AIFPL_CHIP_BENCH_BOOST_BENCH_POINTS`, Triple Captain on a double gameweek with
 a captain projection of at least `AIFPL_CHIP_TC_CAPTAIN_POINTS` and a
 `AIFPL_CHIP_TC_MARGIN` edge, and Free Hit on a blank gameweek affecting at
-least `AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE` starters. Chip usage is tracked
-in an immutable ledger (`POST /chips/state`, `aifpl chip-state`); advice is
-exposed at `GET /chips/advice/latest`, `aifpl chip-advice`, the dashboard, and
-Hermes context.
+least `AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE` starters. During the final
+`AIFPL_CHIP_USE_WINDOW_GAMEWEEKS` before a set's deadline, thresholds relax
+toward use-it floors (`AIFPL_CHIP_*_FLOOR`) so an otherwise-unused chip is
+spent before it is forfeited. Chip usage is tracked in an immutable ledger
+(`POST /chips/state`, `aifpl chip-state`); advice is exposed at
+`GET /chips/advice/latest`, `aifpl chip-advice`, the dashboard, and Hermes
+context.
 
 External evidence can also carry `late_return` records for players returning
 late from tournaments: a per-gameweek start probability plus an optional

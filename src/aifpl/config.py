@@ -203,6 +203,11 @@ class ChipSettings:
     tc_captain_points: float
     tc_margin: float
     fh_starters_without_fixture: int
+    use_window_gws: int
+    wildcard_gap_floor: float
+    bench_boost_floor_points: float
+    tc_captain_floor_points: float
+    tc_margin_floor: float
     intel_cache_hours: float
     intel_max_timing: int
     reddit_limit: int
@@ -218,6 +223,11 @@ def chip_settings() -> ChipSettings:
         tc_captain_points=float(os.environ.get("AIFPL_CHIP_TC_CAPTAIN_POINTS", "13")),
         tc_margin=float(os.environ.get("AIFPL_CHIP_TC_MARGIN", "3")),
         fh_starters_without_fixture=int(os.environ.get("AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE", "3")),
+        use_window_gws=int(os.environ.get("AIFPL_CHIP_USE_WINDOW_GAMEWEEKS", "4")),
+        wildcard_gap_floor=float(os.environ.get("AIFPL_CHIP_WILDCARD_GAP_FLOOR", "8")),
+        bench_boost_floor_points=float(os.environ.get("AIFPL_CHIP_BENCH_BOOST_FLOOR_POINTS", "12")),
+        tc_captain_floor_points=float(os.environ.get("AIFPL_CHIP_TC_CAPTAIN_FLOOR_POINTS", "9")),
+        tc_margin_floor=float(os.environ.get("AIFPL_CHIP_TC_MARGIN_FLOOR", "1")),
         intel_cache_hours=float(os.environ.get("AIFPL_CHIP_INTEL_CACHE_HOURS", "6")),
         intel_max_timing=int(os.environ.get("AIFPL_CHIP_INTEL_MAX_TIMING", "12")),
         reddit_limit=int(os.environ.get("AIFPL_CHIP_REDDIT_LIMIT", "10")),
@@ -235,6 +245,12 @@ def chip_settings() -> ChipSettings:
         raise ValueError("chip thresholds must not be negative")
     if not 0 <= settings.fh_starters_without_fixture <= 11:
         raise ValueError("AIFPL_CHIP_FH_STARTERS_WITHOUT_FIXTURE must be within 0..11")
+    if not 0 <= settings.use_window_gws <= 18:
+        raise ValueError("AIFPL_CHIP_USE_WINDOW_GAMEWEEKS must be within 0..18")
+    if settings.wildcard_gap_floor < 0 or settings.bench_boost_floor_points < 0:
+        raise ValueError("chip use-it floors must not be negative")
+    if settings.tc_captain_floor_points < 0 or settings.tc_margin_floor < 0:
+        raise ValueError("chip use-it floors must not be negative")
     if settings.intel_cache_hours < 0 or settings.intel_max_timing < 0:
         raise ValueError("chip intel settings must not be negative")
     if not 1 <= settings.reddit_limit <= 25:
