@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from fcntl import LOCK_EX, LOCK_UN, flock
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Mapping
 
 import httpx
 from pydantic import BaseModel, Field
@@ -32,6 +34,9 @@ class ChipState(BaseModel):
     season_id: str
     slots: list[ChipSlot]
     updated_at: datetime
+    active_chip: str | None = None
+    active_chip_set: Literal[1, 2] | None = None
+    active_gameweek: int | None = None
 
 
 class ChipTimingSuggestion(BaseModel):
@@ -73,7 +78,7 @@ class ChipAdvice(BaseModel):
     output_path: str = ""
 
 
-class ChipStateError(RuntimeError):
+class ChipStateError(ValueError):
     pass
 
 
@@ -90,41 +95,102 @@ class ChipStateStore:
         files = sorted(directory.glob("*.json")) if directory.exists() else []
         files = [path for path in files if not path.name.endswith(".manifest.json")]
         if not files:
-            return ChipState(
+            state = ChipState(
                 season_id=season_id,
                 slots=[ChipSlot(chip=chip, set=chip_set) for chip in CHIP_NAMES for chip_set in (1, 2)],
                 updated_at=datetime.now(timezone.utc),
             )
-        return ChipState.model_validate_json(files[-1].read_text(encoding="utf-8"))
+            return state
+        verify_artifact(self.root, files[-1])
+        state = ChipState.model_validate_json(files[-1].read_text(encoding="utf-8"))
+        if state.season_id != season_id:
+            raise ChipStateError("Chip state belongs to a different season")
+        _validate_chip_state(state)
+        return state
 
     def mark_used(self, season_id: str, chip: str, chip_set: int, gameweek: int) -> ChipState:
+        lock_path = self.root / "chips" / "state" / season_id / ".lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            flock(descriptor, LOCK_EX)
+            current = self.validate_activation(season_id, chip, chip_set, gameweek)
+            updated = current.model_copy(update={
+                "slots": [
+                    slot.model_copy(update={"used": True, "used_gw": gameweek})
+                    if slot.chip == chip and slot.set == chip_set else slot
+                    for slot in current.slots
+                ],
+                "active_chip": chip,
+                "active_chip_set": chip_set,
+                "active_gameweek": gameweek,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            now = updated.updated_at
+            stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
+            path = self.root / "chips" / "state" / season_id / f"{stamp}.json"
+            write_immutable(path, json_bytes(updated.model_dump(mode="json"), pretty=True))
+            write_manifest(
+                self.root,
+                path,
+                artifact_type="chip_state",
+                created_at=now.isoformat(),
+                record_count=len(updated.slots),
+                sources={},
+                parameters={"chip": chip, "set": chip_set, "gameweek": gameweek},
+            )
+            return updated
+        finally:
+            flock(descriptor, LOCK_UN)
+            os.close(descriptor)
+
+    def validate_activation(self, season_id: str, chip: str, chip_set: int, gameweek: int) -> ChipState:
         if chip not in CHIP_NAMES or chip_set not in (1, 2):
             raise ValueError("chip must be one of wildcard/free_hit/bench_boost/triple_captain with set 1 or 2")
         if gameweek < 1 or gameweek > 38:
             raise ValueError("gameweek must be within 1..38")
+        if chip == "free_hit" and gameweek == 1:
+            raise ChipStateError("Free Hit is unavailable in GW1 under the 2026/27 rules")
         current = self.latest(season_id)
-        updated = current.model_copy(update={
-            "slots": [
-                slot.model_copy(update={"used": True, "used_gw": gameweek})
-                if slot.chip == chip and slot.set == chip_set else slot
-                for slot in current.slots
-            ],
-            "updated_at": datetime.now(timezone.utc),
-        })
-        now = updated.updated_at
-        stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
-        path = self.root / "chips" / "state" / season_id / f"{stamp}.json"
-        write_immutable(path, json_bytes(updated.model_dump(mode="json"), pretty=True))
-        write_manifest(
-            self.root,
-            path,
-            artifact_type="chip_state",
-            created_at=now.isoformat(),
-            record_count=len(updated.slots),
-            sources={},
-            parameters={"chip": chip, "set": chip_set, "gameweek": gameweek},
+        selected = next((slot for slot in current.slots if slot.chip == chip and slot.set == chip_set), None)
+        if selected is None:
+            raise ChipStateError("Chip state does not contain the requested slot")
+        if selected.used:
+            raise ChipStateError(f"{chip} set {chip_set} was already used in GW{selected.used_gw}")
+        settings = chip_settings()
+        if chip_set == 1 and gameweek > settings.set1_end_gw:
+            raise ChipStateError(f"Set-1 chips expired after GW{settings.set1_end_gw}")
+        if chip_set == 2 and gameweek <= settings.set1_end_gw:
+            raise ChipStateError(f"Set-2 chips are unavailable through GW{settings.set1_end_gw}")
+        if any(slot.used and slot.used_gw == gameweek for slot in current.slots):
+            raise ChipStateError(f"Only one chip may be activated in GW{gameweek}")
+        if chip == "free_hit" and any(
+            slot.chip == "free_hit" and slot.used and slot.used_gw == gameweek - 1
+            for slot in current.slots
+        ):
+            raise ChipStateError("Free Hit cannot be activated in consecutive gameweeks")
+        return current
+
+
+def _validate_chip_state(state: ChipState) -> None:
+    keys = [(slot.chip, slot.set) for slot in state.slots]
+    if len(keys) != len(set(keys)):
+        raise ChipStateError("Chip state contains duplicate chip slots")
+    if any(slot.chip not in CHIP_NAMES for slot in state.slots):
+        raise ChipStateError("Chip state contains an unsupported chip")
+    if any(slot.used and slot.used_gw is None for slot in state.slots):
+        raise ChipStateError("Used chip slots must record their gameweek")
+    used_gameweeks = [slot.used_gw for slot in state.slots if slot.used]
+    if len(used_gameweeks) != len(set(used_gameweeks)):
+        raise ChipStateError("Only one chip may be activated in a gameweek")
+    if any(
+        slot.chip == "free_hit" and slot.used and any(
+            other.chip == "free_hit" and other.used and other.used_gw == slot.used_gw - 1
+            for other in state.slots if other is not slot
         )
-        return updated
+        for slot in state.slots
+    ):
+        raise ChipStateError("Chip state contains consecutive Free Hit activations")
 
 
 class ChipIntelFetcher:
@@ -255,31 +321,39 @@ class ChipIntelFetcher:
 
 
 def detect_schedule(
-    fixtures: list[CurrentFixture],
+    fixtures: list[CurrentFixture] | list[Mapping[str, Any]],
     expected_dgw: list[int] | None = None,
     expected_bgw: list[int] | None = None,
 ) -> dict[int, dict[str, object]]:
     """Confirmed double/blank gameweeks from fixtures, merged with expected windows."""
     expected_dgw = expected_dgw or []
     expected_bgw = expected_bgw or []
-    fixtures_by_gw: dict[int, list[CurrentFixture]] = {}
+    fixtures_by_gw: dict[int, list[object]] = {}
     for fixture in fixtures:
-        if fixture.gameweek is not None:
-            fixtures_by_gw.setdefault(fixture.gameweek, []).append(fixture)
+        gameweek = _field(fixture, "gameweek", _field(fixture, "event"))
+        if gameweek is not None:
+            fixtures_by_gw.setdefault(int(gameweek), []).append(fixture)
     schedule: dict[int, dict[str, object]] = {}
     for gameweek, rows in fixtures_by_gw.items():
         team_counts: dict[int, int] = {}
         for fixture in rows:
-            team_counts[fixture.home_team_id] = team_counts.get(fixture.home_team_id, 0) + 1
-            team_counts[fixture.away_team_id] = team_counts.get(fixture.away_team_id, 0) + 1
+            home = _field(fixture, "home_team_id", _field(fixture, "team_h"))
+            away = _field(fixture, "away_team_id", _field(fixture, "team_a"))
+            if home is not None:
+                team_counts[int(home)] = team_counts.get(int(home), 0) + 1
+            if away is not None:
+                team_counts[int(away)] = team_counts.get(int(away), 0) + 1
         double = any(count >= 2 for count in team_counts.values())
-        blank = len(rows) < 10
+        explicit_blank = any(_explicit_blank(fixture) for fixture in rows)
+        blank = explicit_blank or len(rows) < 10
         schedule[gameweek] = {
             "fixtures": len(rows),
             "double": double,
             "blank": blank,
             "teams_with_two_fixtures": sum(1 for count in team_counts.values() if count >= 2),
         }
+        if explicit_blank:
+            schedule[gameweek]["explicit_blank"] = True
     for gameweek in expected_dgw:
         entry = schedule.setdefault(gameweek, {"fixtures": 0, "double": False, "blank": False, "teams_with_two_fixtures": 0})
         entry["double"] = True
@@ -289,6 +363,75 @@ def detect_schedule(
         entry["blank"] = True
         entry["expected"] = True
     return schedule
+
+
+def _merge_projection_schedule(
+    schedule: dict[int, dict[str, object]],
+    projections: list[OddsAdjustedGameweekProjection],
+) -> None:
+    """Use production projection rows to identify blank GWs without row absence."""
+    by_gameweek: dict[int, list[object]] = {}
+    for row in projections:
+        gameweek = _field(row, "gameweek")
+        if gameweek is not None:
+            by_gameweek.setdefault(int(gameweek), []).append(row)
+    for gameweek, rows in by_gameweek.items():
+        explicit_blank = any(_explicit_blank(row) for row in rows)
+        fixture_counts = [_fixture_count(row) for row in rows]
+        had_fixture_schedule = gameweek in schedule and bool(schedule[gameweek].get("fixtures"))
+        entry = schedule.setdefault(gameweek, _empty_schedule_entry())
+        if explicit_blank:
+            entry["blank"] = True
+            entry["explicit_blank"] = True
+        elif not had_fixture_schedule:
+            # A production catalog contains a row for every player and GW;
+            # only an explicit zero fixture count means this GW is blank.
+            known_counts = [count for count in fixture_counts if count is not None]
+            if known_counts and all(count <= 0 for count in known_counts):
+                entry["blank"] = True
+
+
+def _player_has_blank_fixture(row: object | None, schedule_entry: Mapping[str, object] | None) -> bool:
+    if row is not None:
+        if _explicit_blank(row):
+            return True
+        count = _fixture_count(row)
+        if count is not None:
+            return count <= 0
+    # Missing projection rows are deliberately not treated as blanks.  An
+    # explicit schedule marker is still authoritative when the catalog carries
+    # a deliberately sparse player population.
+    return bool(schedule_entry and schedule_entry.get("explicit_blank") and row is not None)
+
+
+def _fixture_count(row: object) -> int | None:
+    value = _field(row, "fixture_count")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _explicit_blank(row: object) -> bool:
+    for name in ("blank", "is_blank", "is_blank_gameweek", "blank_gameweek", "explicit_blank", "blank_flag"):
+        value = _field(row, name)
+        if value is not None:
+            if isinstance(value, str):
+                return value.casefold() in {"1", "true", "yes"}
+            return bool(value)
+    return False
+
+
+def _field(row: object, name: str, default: object | None = None) -> object | None:
+    if isinstance(row, Mapping):
+        return row.get(name, default)
+    return getattr(row, name, default)
+
+
+def _empty_schedule_entry() -> dict[str, object]:
+    return {"fixtures": 0, "double": False, "blank": False, "teams_with_two_fixtures": 0}
 
 
 class ChipAdvisor:
@@ -308,6 +451,7 @@ class ChipAdvisor:
         intel: ChipIntel,
     ) -> ChipAdvice:
         schedule = detect_schedule(fixtures, intel.expected_dgw_gws, intel.expected_bgw_gws)
+        _merge_projection_schedule(schedule, projections)
         by_player_gw: dict[tuple[int, int], OddsAdjustedGameweekProjection] = {
             (row.player_id, row.gameweek): row for row in projections
         }
@@ -329,6 +473,12 @@ class ChipAdvisor:
                 recommendations.append(ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="unavailable",
                     rationale="Set-2 chips open after the GW19 deadline.",
+                ))
+                continue
+            if slot.chip == "free_hit" and gameweek == 1:
+                recommendations.append(ChipRecommendation(
+                    chip=slot.chip, set=slot.set, status="unavailable",
+                    rationale="Free Hit is unavailable in GW1 under the 2026/27 rules.",
                 ))
                 continue
             recommendation = self._evaluate_slot(
@@ -514,7 +664,8 @@ class ChipAdvisor:
                     confidence=0.4,
                 )
             without_fixture = sum(
-                1 for player_id in starting_xi_ids if (player_id, next_bgw) not in by_player_gw
+                1 for player_id in starting_xi_ids
+                if _player_has_blank_fixture(by_player_gw.get((player_id, next_bgw)), schedule.get(next_bgw))
             )
             if without_fixture >= self.settings.fh_starters_without_fixture:
                 return ChipRecommendation(

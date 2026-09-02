@@ -4,6 +4,7 @@ from itertools import combinations
 import pytest
 
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
+from aifpl.objective_accounting import HorizonPlanValidationError, validate_horizon_plan
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 
 
@@ -83,7 +84,7 @@ def test_horizon_planner_executes_and_rolls_over_a_free_upgrade() -> None:
     assert [week.free_transfers_before for week in plan.gameweeks] == [1, 1, 2]
 
 
-def test_normal_week_caps_even_a_high_value_rebuild_at_two_transfers() -> None:
+def test_normal_week_allows_free_transfers_plus_the_paid_safety_cap() -> None:
     rows = pool((2,))
     upgrades = [
         (16, "GK", "I"),
@@ -98,8 +99,46 @@ def test_normal_week_caps_even_a_high_value_rebuild_at_two_transfers() -> None:
         churn_penalty=0.0,
     )
 
-    assert plan.gameweeks[0].transfers_made == 2
-    assert plan.gameweeks[0].hit_cost == 4
+    assert plan.gameweeks[0].transfers_made == 3
+    assert plan.gameweeks[0].hit_cost == 8
+
+
+def test_normal_week_can_use_all_banked_free_transfers(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_PAID_TRANSFER_SAFETY_CAP", "0")
+    rows = pool((2,))
+    upgrades = [
+        (16, "GK", "I"),
+        (17, "DEF", "J"), (18, "DEF", "K"), (19, "DEF", "L"), (20, "DEF", "M"), (21, "DEF", "N"),
+        (22, "MID", "O"), (23, "MID", "P"), (24, "MID", "Q"), (25, "MID", "R"), (26, "MID", "S"),
+        (27, "FWD", "T"), (28, "FWD", "U"), (29, "FWD", "V"),
+    ]
+    rows.extend(row(identifier, position, club, 2, 40.0) for identifier, position, club in upgrades)
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=5),
+        churn_penalty=0.0,
+    )
+
+    assert plan.gameweeks[0].transfers_made == 5
+    assert plan.gameweeks[0].hit_cost == 0
+    assert plan.gameweeks[0].free_transfers_after == 1
+
+
+def test_paid_transfer_safety_cap_is_configurable(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_PAID_TRANSFER_SAFETY_CAP", "1")
+    rows = pool((2,))
+    rows.extend([
+        row(16, "MID", "I", 2, 20.0),
+        row(17, "DEF", "J", 2, 20.0),
+        row(18, "FWD", "K", 2, 20.0),
+    ])
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+        churn_penalty=0.0,
+    )
+
+    assert plan.gameweeks[0].transfers_made <= 2
 
 
 def test_normal_week_skips_a_marginal_second_transfer_hit() -> None:
@@ -194,6 +233,61 @@ def test_normal_planning_reports_free_transfers_after_each_week() -> None:
     assert all(not week.unlimited_transfers for week in plan.gameweeks)
 
 
+def test_horizon_objective_is_reported_as_a_complete_decomposition() -> None:
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    for week in plan.gameweeks:
+        components = week.objective_components
+        component_total = sum(
+            components[key]
+            for key in (
+                "starter_points", "captain_points", "bench_points",
+                "strategy_hit_penalty", "churn_penalty", "bank_shortfall_penalty",
+                "dead_bench_penalty", "preferred_bonus", "differential_bonus",
+            )
+        )
+        assert week.objective_net_points == round(component_total, 4)
+        assert components["total"] == week.objective_net_points
+        assert 0 <= components["information_weight"] <= 1
+        assert 0 < components["forecast_distance_weight"] <= 1
+    assert plan.objective_value == round(sum(week.objective_net_points for week in plan.gameweeks), 4)
+    assert plan.objective_components["total"] == plan.objective_value
+
+
+def test_post_solve_validator_rejects_tampered_bank_accounting() -> None:
+    state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
+    plan = plan_horizon_transfers(pool(), state)
+    tampered = replace(
+        plan,
+        gameweeks=[replace(plan.gameweeks[0], bank_after=plan.gameweeks[0].bank_after + 1)]
+        + plan.gameweeks[1:],
+    )
+
+    with pytest.raises(HorizonPlanValidationError, match="bank"):
+        validate_horizon_plan(tampered, pool(), state)
+
+
+def test_zero_odds_week_has_a_bounded_information_weight(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_HORIZON_MIN_CONFIDENCE_WEIGHT", "0.25")
+    rows = pool()
+    rows = [
+        replace(projection, odds_backed_fixture_count=0)
+        if projection.gameweek == 2 else projection
+        for projection in rows
+    ]
+
+    plan = plan_horizon_transfers(
+        rows, HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    zero_odds = plan.gameweeks[1].objective_components
+    assert zero_odds["odds_coverage"] == 0.0
+    assert zero_odds["information_weight"] == 0.25
+    assert zero_odds["week_weight"] < plan.gameweeks[0].objective_components["week_weight"]
+
+
 def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None:
     monkeypatch.setenv("AIFPL_BENCH_WEIGHT", "1")
     rows = [
@@ -213,10 +307,10 @@ def test_pre_season_charges_hits_after_the_opening_gameweek(monkeypatch) -> None
         pre_season=True,
     )
 
-    assert [week.transfers_made for week in plan.gameweeks] == [0, 0, 2, 2]
+    assert [week.transfers_made for week in plan.gameweeks] == [0, 0, 2, 3]
     assert [week.free_transfers_before for week in plan.gameweeks] == [5, 1, 2, 1]
-    assert [week.hit_cost for week in plan.gameweeks] == [0, 0, 0, 4]
-    assert plan.total_hit_cost == 4
+    assert [week.hit_cost for week in plan.gameweeks] == [0, 0, 0, 8]
+    assert plan.total_hit_cost == 8
 
 
 def test_pre_season_allows_penalty_below_four_for_the_opening_week_only() -> None:

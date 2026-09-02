@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from aifpl.artifacts import json_bytes, jsonl_bytes, write_immutable, write_manifest
+from aifpl.execution import ExecutionConfirmationStore
 from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy, HorizonPlanSnapshot
 from aifpl.notifier import build_scorecard_message
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
@@ -91,8 +93,9 @@ def test_score_decision_compares_projections_to_actuals(tmp_path) -> None:
     record = DecisionScorer(tmp_path).score(decision_path)
 
     assert record.gameweek == 1
-    assert record.total_projected == 121.0
-    assert record.total_actual == 137.0
+    assert record.total_projected == 67.0
+    assert record.total_actual == 79.0
+    assert record.bench_actual == 58.0
     assert record.captain is not None
     assert record.captain.actual == 2.0
     assert len(record.transfers) == 1
@@ -131,7 +134,7 @@ def test_scorecard_message_formats(tmp_path) -> None:
     message = build_scorecard_message(tmp_path)
 
     assert "GW 1 scorecard" in message
-    assert "Projected: 121.0 | Actual: 137.0" in message
+    assert "Projected: 67.0 | Actual: 79.0" in message
     assert "Captain:" in message
     assert "Best performers:" in message
 
@@ -258,3 +261,114 @@ def test_completed_scorer_retries_calibration_after_a_scorecard_exists(tmp_path,
     assert DecisionScorer(tmp_path).is_scored(decision_path, 1)
     assert completed.score_pending("2026-27") == []
     assert RetryingCalibrationStore.attempts == 2
+
+
+def test_score_reconstructs_autosubs_and_promotes_a_playing_vice_captain(tmp_path) -> None:
+    write_catalog(tmp_path)
+    decision_path = tmp_path / "decision_official.json"
+    decision = HermesDecision(
+        action="hold", gameweek=1,
+        squad=HermesSquadState(
+            player_ids=SQUAD_IDS, bank=20, free_transfers=1,
+            purchase_prices={element: 50 for element in SQUAD_IDS},
+        ),
+        captain_id=1,
+        vice_captain_id=3,
+        starting_xi_ids=[1, 3, 4, 5, 6, 8, 9, 10, 11, 13, 14],
+        transfers_out=[5, 6], transfers_in=[16, 17], explanation="test",
+        strategy=strategy(), model="test-model", created_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+        backend_methodology="test", decision_path=str(decision_path),
+        state_path=str(tmp_path / "state.json"), season_id="2026-27",
+    )
+    document = decision.model_dump(mode="json")
+    document.update({"bench_ids": [2, 7, 12, 15], "transfer_hit": 4})
+    write_immutable(decision_path, json_bytes(document, pretty=True))
+    SnapshotStore(tmp_path).save_event_live(
+        1,
+        {"elements": [
+            {"id": identifier, "stats": {"total_points": identifier + 1, "minutes": 0 if identifier in (1, 4) else 90}}
+            for identifier in SQUAD_IDS + [16, 17]
+        ]},
+        datetime(2026, 8, 23, tzinfo=timezone.utc),
+    )
+
+    record = DecisionScorer(tmp_path).score(decision_path)
+
+    assert [(item.out_element, item.in_element) for item in record.autosubs] == [(1, 2), (4, 7)]
+    assert record.effective_xi_ids == [2, 3, 7, 5, 6, 8, 9, 10, 11, 13, 14]
+    assert record.vice_captain_promoted is True
+    assert record.captain_multiplier == 1
+    assert record.vice_captain is not None and record.vice_captain.multiplier == 2
+    assert record.transfer_hit == 4
+    assert record.total_actual == 99.0
+
+
+def test_score_uses_all_bench_points_only_for_bench_boost(tmp_path) -> None:
+    write_catalog(tmp_path)
+    write_event_results(tmp_path)
+
+    record = DecisionScorer(tmp_path).score(
+        write_decision(tmp_path),
+        chip_state={"chip": "bench_boost", "set": 1, "gameweek": 1},
+    )
+
+    assert record.chip == "bench_boost"
+    assert record.bench_boost_actual == 58.0
+    assert record.total_actual == 137.0
+
+
+def test_score_treats_initial_squad_adoption_as_non_transfer(tmp_path) -> None:
+    write_catalog(tmp_path)
+    write_event_results(tmp_path)
+    source = json.loads(write_decision(tmp_path).read_text(encoding="utf-8"))
+    decision_path = tmp_path / "initial_decision.json"
+    source.update({
+        "action": "adopt_initial",
+        "decision_path": str(decision_path),
+        "transfers_out": [],
+        "transfers_in": SQUAD_IDS,
+    })
+    write_immutable(decision_path, json_bytes(source, pretty=True))
+
+    record = DecisionScorer(tmp_path).score(decision_path)
+
+    assert record.transfers == []
+    assert record.transfers_made == 0
+    assert record.transfer_hit == 0
+
+
+def test_score_prefers_matching_confirmed_execution_over_recommendation(tmp_path) -> None:
+    write_catalog(tmp_path)
+    write_event_results(tmp_path)
+    decision_path = write_decision(tmp_path)
+    scorer = DecisionScorer(tmp_path)
+
+    recommendation = scorer.score(decision_path)
+    assert recommendation.evaluation_basis == "recommendation_only"
+    assert scorer.is_scored(decision_path, 1) is True
+
+    ExecutionConfirmationStore(tmp_path).confirm(
+        decision_path,
+        squad_ids=SQUAD_IDS,
+        starting_xi_ids=list(range(2, 13)),
+        bench_ids=[1, 13, 14, 15],
+        captain_id=2,
+        vice_captain_id=3,
+        transfers_out=[],
+        transfers_in=[],
+    )
+
+    assert scorer.is_scored(decision_path, 1) is False
+    confirmed = scorer.score(decision_path)
+
+    assert confirmed.evaluation_basis == "confirmed_execution"
+    assert confirmed.starting_xi_ids == list(range(2, 13))
+    assert confirmed.captain is not None and confirmed.captain.element == 2
+    assert confirmed.execution_confirmation_path
+    assert scorer.is_scored(decision_path, 1) is True
+    assert scorer.score(decision_path).output_path == confirmed.output_path
+
+    from aifpl.hermes import HermesDecisionBackend
+
+    history = HermesDecisionBackend(tmp_path).context()["decision_history"]
+    assert history["summary"]["scored_gameweeks"] == 1

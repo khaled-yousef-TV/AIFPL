@@ -20,6 +20,7 @@ from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
 from aifpl.dashboard import CurrentDashboard, build_current_dashboard
+from aifpl.execution import ExecutionConfirmation, ExecutionConfirmationError, ExecutionConfirmationStore
 from aifpl.fixture_projections import FixtureGameweekProjection, FixtureProjectionCatalog, FixtureProjectionStore, build_fixture_gameweek_projections
 from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCatalog
 from aifpl.fpl import FplClient, FplSourceError
@@ -94,6 +95,16 @@ async def protect_mutating_operations(request: Request, call_next):
     return await call_next(request)
 
 
+def _protect_sensitive_read(request: Request) -> None:
+    """Debug output and model transcripts are private unless explicitly exposed."""
+    if os.environ.get("AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS", "false").lower() in ("1", "true", "yes"):
+        return
+    if not os.environ.get("AIFPL_ADMIN_API_KEY"):
+        raise HTTPException(status_code=503, detail="AIFPL_ADMIN_API_KEY is not configured")
+    if not valid_admin_key(request.headers.get("X-AIFPL-Admin-Key")):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin API key")
+
+
 class LatestSnapshotResponse(BaseModel):
     path: str
     summary: dict[str, object]
@@ -156,6 +167,29 @@ class ChipStateRequest(BaseModel):
     gameweek: int = Field(ge=1, le=38)
 
 
+class ExecutionConfirmationRequest(BaseModel):
+    decision_path: str = Field(min_length=1, max_length=2000)
+    source: str = Field(default="manual", pattern="^(manual|fpl_import)$")
+    squad_ids: list[int] = Field(min_length=15, max_length=15)
+    starting_xi_ids: list[int] = Field(min_length=11, max_length=11)
+    bench_ids: list[int] = Field(min_length=4, max_length=4)
+    captain_id: int
+    vice_captain_id: int
+    transfers_out: list[int] | None = None
+    transfers_in: list[int] | None = None
+    hit_cost: int = Field(default=0, ge=0)
+    free_transfers_before: int | None = Field(default=None, ge=0, le=5)
+    pre_execution_squad_ids: list[int] | None = None
+    active_chip: str | None = None
+    active_chip_set: int | None = Field(default=None, ge=1, le=2)
+    pre_free_hit_squad_ids: list[int] | None = None
+    pre_free_hit_bank: int | None = Field(default=None, ge=0)
+    pre_free_hit_free_transfers: int | None = Field(default=None, ge=0, le=5)
+    pre_free_hit_purchase_prices: dict[int, int] | None = None
+    confirmed_at: datetime | None = None
+    notes: str = Field(default="", max_length=2000)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -198,25 +232,90 @@ def latest_hermes_state() -> HermesState:
 
 
 @app.get("/hermes/decisions/latest", response_model=HermesDecision)
-def latest_hermes_decision() -> HermesDecision:
+def latest_hermes_decision(
+    season_id: str | None = Query(None, min_length=1, max_length=32),
+    gameweek: int | None = Query(None, ge=1, le=38),
+) -> HermesDecision:
     try:
-        return HermesManager(data_dir()).latest_decision()
+        manager = HermesManager(data_dir())
+        if season_id is None and gameweek is None:
+            return manager.latest_decision()
+        return manager.latest_decision(season_id=season_id, gameweek=gameweek)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/hermes/decisions", response_model=list[HermesDecision])
-def hermes_decision_history(limit: int = Query(50, ge=1, le=200)) -> list[HermesDecision]:
+def hermes_decision_history(
+    limit: int = Query(50, ge=1, le=200),
+    season_id: str | None = Query(None, min_length=1, max_length=32),
+    gameweek: int | None = Query(None, ge=1, le=38),
+) -> list[HermesDecision]:
     try:
-        return HermesManager(data_dir()).decisions(limit)
+        manager = HermesManager(data_dir())
+        if season_id is None and gameweek is None:
+            return manager.decisions(limit)
+        return manager.decisions(limit, season_id=season_id, gameweek=gameweek)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get("/hermes/runs/latest", response_model=HermesRunTranscript)
-def latest_hermes_run_transcript() -> HermesRunTranscript:
+@app.post("/execution/confirmations", response_model=ExecutionConfirmation, status_code=201)
+def confirm_execution(request: ExecutionConfirmationRequest) -> ExecutionConfirmation:
     try:
-        return HermesManager(data_dir()).latest_transcript()
+        return ExecutionConfirmationStore(data_dir()).confirm(
+            request.decision_path,
+            source=request.source,
+            squad_ids=request.squad_ids,
+            starting_xi_ids=request.starting_xi_ids,
+            bench_ids=request.bench_ids,
+            captain_id=request.captain_id,
+            vice_captain_id=request.vice_captain_id,
+            transfers_out=request.transfers_out,
+            transfers_in=request.transfers_in,
+            hit_cost=request.hit_cost,
+            free_transfers_before=request.free_transfers_before,
+            pre_execution_squad_ids=request.pre_execution_squad_ids,
+            active_chip=request.active_chip,
+            active_chip_set=request.active_chip_set,
+            pre_free_hit_squad_ids=request.pre_free_hit_squad_ids,
+            pre_free_hit_bank=request.pre_free_hit_bank,
+            pre_free_hit_free_transfers=request.pre_free_hit_free_transfers,
+            pre_free_hit_purchase_prices=request.pre_free_hit_purchase_prices,
+            confirmed_at=request.confirmed_at,
+            notes=request.notes,
+        )
+    except ExecutionConfirmationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/execution/confirmations/latest", response_model=ExecutionConfirmation)
+def latest_execution_confirmation(
+    request: Request,
+    season_id: str = Query(..., min_length=1, max_length=32),
+    gameweek: int = Query(..., ge=1, le=38),
+) -> ExecutionConfirmation:
+    _protect_sensitive_read(request)
+    confirmation = ExecutionConfirmationStore(data_dir()).latest(season_id, gameweek)
+    if confirmation is None:
+        raise HTTPException(status_code=404, detail=f"No execution confirmation exists for {season_id} GW{gameweek}")
+    return confirmation
+
+
+@app.get("/hermes/runs/latest", response_model=HermesRunTranscript)
+def latest_hermes_run_transcript(
+    request: Request,
+    season_id: str | None = Query(None, min_length=1, max_length=32),
+    gameweek: int | None = Query(None, ge=1, le=38),
+) -> HermesRunTranscript:
+    _protect_sensitive_read(request)
+    try:
+        manager = HermesManager(data_dir())
+        if season_id is None and gameweek is None:
+            return manager.latest_transcript()
+        return manager.latest_transcript(season_id=season_id, gameweek=gameweek)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -422,12 +521,21 @@ def scheduler_ticks(limit: int = Query(20, ge=1, le=200)) -> list[SchedulerTickR
     directory = data_dir() / "scheduler" / "ticks"
     files = sorted(directory.glob("*.json"), reverse=True) if directory.exists() else []
     ticks: list[SchedulerTickResult] = []
-    for path in files[:limit]:
+    for path in files:
         try:
             ticks.append(SchedulerTickResult.model_validate_json(path.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             continue
-    return ticks
+    updates = {
+        tick.notification_update_for: tick
+        for tick in ticks
+        if tick.notification_update_for is not None
+    }
+    return [
+        updates.get(tick.output_path, tick)
+        for tick in ticks
+        if tick.notification_update_for is None
+    ][:limit]
 
 
 @app.post("/scheduler/tick", response_model=SchedulerTickResult)
@@ -583,7 +691,8 @@ def current_dashboard() -> CurrentDashboard:
 
 
 @app.get("/debug/bootstrap-log")
-def bootstrap_log() -> dict[str, object]:
+def bootstrap_log(request: Request) -> dict[str, object]:
+    _protect_sensitive_read(request)
     log_path = Path("/tmp/aifpl-bootstrap.log")
     if not log_path.is_file():
         return {"exists": False, "log": ""}
@@ -591,7 +700,8 @@ def bootstrap_log() -> dict[str, object]:
 
 
 @app.get("/debug/scheduler-log")
-def scheduler_log() -> dict[str, object]:
+def scheduler_log(request: Request) -> dict[str, object]:
+    _protect_sensitive_read(request)
     log_path = Path("/tmp/aifpl-scheduler.log")
     if not log_path.is_file():
         return {"exists": False, "log": ""}
@@ -599,7 +709,8 @@ def scheduler_log() -> dict[str, object]:
 
 
 @app.get("/debug/env")
-def debug_env() -> dict[str, object]:
+def debug_env(request: Request) -> dict[str, object]:
+    _protect_sensitive_read(request)
     keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "AIFPL_HERMES_AUTO_RUN", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
     return {
         "present": {key: bool(os.environ.get(key)) for key in keys},

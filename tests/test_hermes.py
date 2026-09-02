@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -7,11 +8,14 @@ import aifpl.hermes as hermes_module
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.hermes import (
     HermesDecisionBackend,
+    HermesDecision,
     HermesManager,
+    HermesSquadState,
+    HermesState,
     HermesStrategy,
     HorizonPlanSnapshot,
 )
-from aifpl.horizon_transfers import PLANNER_VERSION
+from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonTransferPlan, PLANNER_VERSION
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import OptimizedSquad
 
@@ -58,6 +62,51 @@ class FakeHorizonBackend(HermesDecisionBackend):
             for gameweek in range(target_gameweek, target_gameweek + horizon)
             for identifier, position, club, points in players
         ], "fake-catalog.json"
+
+
+def manual_state_and_plan() -> tuple[HermesState, HorizonTransferPlan, dict[str, object]]:
+    players = [
+        CurrentPlayerProjection(
+            i, f"Player {i}",
+            "GK" if i <= 2 else "DEF" if i <= 7 else "MID" if i <= 12 else "FWD",
+            chr(64 + i), 50, float(i), 1.0, "test",
+        )
+        for i in range(1, 16)
+    ]
+    week = HorizonGameweekPlan(
+        gameweek=2, outgoing=[players[0]], incoming=[players[1]], resulting_squad=players,
+        starting_xi=players[:11], captain=players[10], transfers_made=1,
+        free_transfers_before=1, hit_cost=4, bank_after=20, projected_points=120.0,
+        net_projected_points=116.0, odds_coverage=1.0, vice_captain=players[9],
+    )
+    future = HorizonGameweekPlan(
+        gameweek=3, outgoing=[], incoming=[], resulting_squad=players,
+        starting_xi=players[:11], captain=players[10], transfers_made=0,
+        free_transfers_before=2, hit_cost=0, bank_after=20, projected_points=120.0,
+        net_projected_points=120.0, odds_coverage=1.0, vice_captain=players[9],
+    )
+    plan = HorizonTransferPlan(
+        gameweeks=[week, future], total_projected_points=240.0, total_hit_cost=4,
+        total_net_projected_points=236.0, solver_status="OPTIMAL", methodology="test",
+    )
+    strategy = HermesStrategy(
+        risk_tolerance=0.5, hit_aversion=0.5, differential_appetite=0.2,
+        planning_horizon=3, rationale="test",
+    )
+    squad = HermesSquadState(
+        player_ids=list(range(1, 16)), bank=20, free_transfers=1,
+        purchase_prices={player_id: 50 for player_id in range(1, 16)},
+    )
+    state = HermesState(
+        strategy=strategy, squad=squad, captain_id=1, starting_xi_ids=list(range(1, 12)),
+        model="test", updated_at=datetime(2026, 8, 14, tzinfo=timezone.utc), version=1,
+        gameweek=1, season_id="2026-27", vice_captain_id=2,
+    )
+    hold = {
+        "gameweek": 2, "starting_ids": list(range(2, 13)), "captain_id": 12,
+        "vice_captain_id": 11, "projected_points": 99.5, "methodology": "test",
+    }
+    return state, plan, hold
 
 
 def test_hermes_sets_strategy_and_persists_autonomous_decision(tmp_path) -> None:
@@ -148,6 +197,89 @@ def test_hermes_gw1_commit_resets_free_transfers(tmp_path, action) -> None:
     result = manager._commit({"action": action, "explanation": "Opening-gameweek state check."}, previous)
 
     assert result.decision.squad.free_transfers == 1
+
+
+def test_committed_hold_rewrites_the_first_horizon_week(tmp_path) -> None:
+    state, plan, hold = manual_state_and_plan()
+    manager = HermesManager(tmp_path)
+    manager._strategy = state.strategy
+    manager._horizon = plan
+    manager._hold = hold
+    manager._catalog_id = "fake-catalog.json"
+    manager._expected_gameweek = 2
+    manager._expected_season_id = "2026-27"
+
+    result = manager._commit({"action": "hold", "explanation": "Keep the squad."}, state)
+
+    first = result.decision.horizon_plan.weeks[0]
+    assert first.transfers_made == 0
+    assert first.hit_cost == 0
+    assert first.outgoing_ids == []
+    assert first.incoming_ids == []
+    assert first.squad_ids == state.squad.player_ids
+    assert first.starting_xi_ids == hold["starting_ids"]
+    assert first.captain_id == hold["captain_id"]
+    assert result.decision.transfers_out == []
+    assert result.decision.transfers_in == []
+    assert result.decision.squad.player_ids == state.squad.player_ids
+
+
+def test_strategy_change_is_rejected_after_horizon_plan(tmp_path) -> None:
+    state, plan, _ = manual_state_and_plan()
+    manager = HermesManager(tmp_path)
+    manager._strategy = state.strategy
+    manager._horizon = plan
+    changed = state.strategy.model_copy(update={"risk_tolerance": 0.9})
+
+    with pytest.raises(ValueError, match="cannot change after a plan"):
+        manager._call_tool("set_strategy", changed.model_dump(), state)
+
+
+def test_hermes_reads_ignore_orphan_decisions_and_filter_by_scope(tmp_path) -> None:
+    from aifpl.artifacts import json_bytes, write_immutable
+
+    def save_pair(stamp: str, season_id: str, gameweek: int) -> HermesDecision:
+        decision_path = tmp_path / "hermes" / "decisions" / f"{stamp}.json"
+        state_path = tmp_path / "hermes" / "states" / f"{stamp}.json"
+        squad = HermesSquadState(
+            player_ids=list(range(1, 16)), bank=20, free_transfers=1,
+            purchase_prices={player_id: 50 for player_id in range(1, 16)},
+        )
+        record = HermesDecision(
+            action="hold", gameweek=gameweek, squad=squad, captain_id=1,
+            starting_xi_ids=list(range(1, 12)), transfers_out=[], transfers_in=[],
+            explanation="test", strategy=HermesStrategy(
+                risk_tolerance=0.5, hit_aversion=0.5, differential_appetite=0.2,
+                planning_horizon=3, rationale="test",
+            ), model="test", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            backend_methodology="test", decision_path=str(decision_path),
+            state_path=str(state_path), season_id=season_id,
+        )
+        state = HermesState(
+            strategy=record.strategy, squad=squad, captain_id=1,
+            starting_xi_ids=list(range(1, 12)), model="test",
+            updated_at=record.created_at, version=1, gameweek=gameweek,
+            season_id=season_id, decision_path=str(decision_path),
+        )
+        write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
+        write_immutable(decision_path, json_bytes(record.model_dump(mode="json"), pretty=True))
+        return record
+
+    first = save_pair("20260801T000000000001Z", "2026-27", 1)
+    second = save_pair("20260802T000000000002Z", "2026-27", 2)
+    orphan = first.model_copy(update={
+        "decision_path": str(tmp_path / "hermes" / "decisions" / "20260803T000000000003Z.json"),
+        "state_path": str(tmp_path / "hermes" / "states" / "missing.json"),
+    })
+    write_immutable(
+        Path(orphan.decision_path), json_bytes(orphan.model_dump(mode="json"), pretty=True),
+    )
+
+    manager = HermesManager(tmp_path)
+
+    assert manager.latest_decision() == second
+    assert manager.decisions(season_id="2026-27", gameweek=1) == [first]
+    assert manager.decisions(season_id="2025-26") == []
 
 
 def test_hermes_returns_the_existing_decision_for_a_duplicate_current_gameweek(tmp_path) -> None:

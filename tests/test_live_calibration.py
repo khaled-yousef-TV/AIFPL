@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aifpl.artifacts import json_bytes, jsonl_bytes, write_immutable, write_manifest
-from aifpl.live_calibration import LiveCalibrationStore, calibrated_odds_catalog, calibrated_odds_rows
+from aifpl.live_calibration import LiveCalibrationProfile, LiveCalibrationStore, calibrated_odds_catalog, calibrated_odds_rows
 from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
 from aifpl.snapshots import SnapshotStore
 
@@ -162,3 +162,38 @@ def test_live_calibration_keeps_different_projection_configurations_separate(tmp
 
     assert first is not None and second is not None
     assert first.model_signature != second.model_signature
+
+
+def test_materialized_calibration_catalog_keeps_one_methodology_across_history(tmp_path, monkeypatch) -> None:
+    rows = [
+        OddsAdjustedGameweekProjection(
+            player_id=player_id, player_name=f"Player {player_id}", position="MID", club=f"Club {player_id}",
+            cost=50, gameweek=gameweek, fixture_count=1, odds_backed_fixture_count=1,
+            projected_points=float(player_id + gameweek), methodology=METHOD,
+        )
+        for gameweek in (1, 2, 3)
+        for player_id in (1, 2)
+    ]
+    path = tmp_path / "normalized" / "current" / "odds_projections" / "gw1-3.multi.jsonl"
+    write_immutable(path, jsonl_bytes(rows))
+    write_manifest(
+        tmp_path, path, artifact_type="odds_projections", created_at="2026-08-01T00:00:00Z",
+        record_count=len(rows), sources={}, methodology=METHOD,
+        parameters={"odds_coverage_status": "full", "odds_coverage_by_gameweek": {1: 1.0, 2: 1.0, 3: 1.0}},
+    )
+    store = LiveCalibrationStore(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text("{}", encoding="utf-8")
+    profile = LiveCalibrationProfile(
+        season_id="2026-27", methodology=METHOD,
+        model_signature=store._model_signature(path), status="active", policy_version="test",
+        gameweeks=[1], latest_gameweek=1, observations=4, raw_slope=1.0, raw_intercept=0.0,
+        slope=1.1, intercept=0.0, maturity=1.0, output_path=str(profile_path),
+        created_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(store, "latest_profile", lambda season_id, methodology, model_signature: profile)
+
+    materialized = store.materialize_catalog(path.name, "2026-27")
+
+    assert len({row.methodology for row in materialized.rows}) == 1
+    assert all(row.methodology.endswith("rolling_affine_v1") for row in materialized.rows)

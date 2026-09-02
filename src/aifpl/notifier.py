@@ -25,6 +25,82 @@ class TelegramNotifierError(RuntimeError):
     """Raised when the Telegram Bot API rejects or cannot reach a message."""
 
 
+def _resolve_hermes_reference(
+    root: Path, directory: str, reference: str | None, fallback_stem: str | None = None,
+) -> Path | None:
+    candidates: list[Path] = []
+    if reference:
+        candidate = Path(reference)
+        candidates.append(candidate if candidate.is_absolute() else root / candidate)
+        if not candidate.is_absolute():
+            candidates.append(root / "hermes" / directory / candidate)
+    if fallback_stem:
+        candidates.append(root / "hermes" / directory / f"{fallback_stem}.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _reference_matches(root: Path, directory: str, reference: str | None, path: Path) -> bool:
+    resolved = _resolve_hermes_reference(root, directory, reference)
+    return resolved is not None and resolved.resolve() == path.resolve()
+
+
+def _load_committed_decision(
+    root: Path, event: int, season_id: str, decision_path: str | None = None,
+) -> HermesDecision | None:
+    """Return only the exact current decision whose state artifact is present."""
+    manager = HermesManager(root)
+    try:
+        latest = manager.latest_decision(season_id=season_id, gameweek=event)
+    except (FileNotFoundError, ValueError):
+        return None
+
+    latest_path = _resolve_hermes_reference(root, "decisions", latest.decision_path)
+    if latest_path is None:
+        return None
+    if decision_path is None:
+        decision = latest
+        actual_path = latest_path
+    else:
+        actual_path = _resolve_hermes_reference(root, "decisions", decision_path)
+        if actual_path is None or actual_path.resolve() != latest_path.resolve():
+            return None
+        try:
+            decision = HermesDecision.model_validate_json(actual_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    if decision.gameweek != event or decision.season_id != season_id:
+        return None
+    if decision.decision_path and not _reference_matches(root, "decisions", decision.decision_path, actual_path):
+        return None
+    state_path = _resolve_hermes_reference(
+        root, "states", decision.state_path, fallback_stem=actual_path.stem,
+    )
+    if state_path is None:
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if state.get("season_id") not in (None, "", season_id):
+        return None
+    if state.get("gameweek") not in (None, 0, event):
+        return None
+    linked_decision = state.get("decision_path")
+    if linked_decision and not _reference_matches(root, "decisions", linked_decision, actual_path):
+        return None
+    if decision.vice_captain_id is not None and (
+        decision.vice_captain_id == decision.captain_id
+        or decision.vice_captain_id not in decision.squad.player_ids
+        or decision.vice_captain_id not in decision.starting_xi_ids
+    ):
+        return None
+    return decision
+
+
 @dataclass(frozen=True)
 class ChipAdvice:
     chip: str
@@ -83,11 +159,22 @@ def recommend_chip(decision: HermesDecision, bench_projected_points: float) -> C
     return None
 
 
-def build_recommendation_message(root: Path, event: int, season_id: str, deadline: datetime) -> str:
-    manager = HermesManager(root)
+def build_recommendation_message(
+    root: Path, event: int, season_id: str, deadline: datetime, decision_path: str | None = None,
+) -> str:
     try:
-        decision = manager.latest_decision()
-    except FileNotFoundError:
+        if decision_path is not None:
+            decision = _load_committed_decision(
+                root, event, season_id, decision_path=decision_path,
+            )
+            if decision is None:
+                raise FileNotFoundError(decision_path)
+        else:
+            manager = HermesManager(root)
+            decision = manager.latest_decision(season_id=season_id, gameweek=event)
+    except (FileNotFoundError, ValueError) as exc:
+        if decision_path is not None:
+            raise TelegramNotifierError("The requested Hermes decision is no longer current") from exc
         return _no_decision_message(event, season_id, deadline)
     names = _player_names(root)
     deadline_utc = deadline.astimezone(timezone.utc)
@@ -97,6 +184,9 @@ def build_recommendation_message(root: Path, event: int, season_id: str, deadlin
         "-------------------------------------",
         f"Hermes: {decision.action} ({decision.model})",
         f"Captain: {_describe(decision.captain_id, names)} (C)",
+        f"Vice-captain: {_describe(decision.vice_captain_id, names)} (VC)"
+        if decision.vice_captain_id is not None
+        else "Vice-captain: not selected",
     ]
     if decision.action == "adopt_initial":
         lines.append("Transfers: new squad adopted (pre-season unlimited transfers)")
@@ -108,14 +198,27 @@ def build_recommendation_message(root: Path, event: int, season_id: str, deadlin
         lines.append(f"Transfers ({len(decision.transfers_in)}): {transfers}")
     else:
         lines.append("Transfers: none (hold)")
-    bench_ids = [element for element in decision.squad.player_ids if element not in set(decision.starting_xi_ids)]
+    bench_ids = decision.bench_ids or [
+        element for element in decision.squad.player_ids
+        if element not in set(decision.starting_xi_ids)
+    ]
     catalog_id = decision.horizon_plan.projection_catalog if decision.horizon_plan is not None else None
     bench_points = _bench_projected_points(root, event, bench_ids, catalog_id)
-    chip = recommend_chip(decision, bench_points)
+    chip = (
+        ChipAdvice(
+            chip=decision.active_chip,
+            rationale=f"Confirmed for GW{event} (set {decision.active_chip_set}).",
+        )
+        if decision.active_chip is not None
+        else _persisted_chip_recommendation(root, event, season_id)
+    )
+    if chip is None:
+        chip = recommend_chip(decision, bench_points)
     if chip is None:
         lines.append("Chip: none recommended")
     else:
-        lines.append(f"Chip: {chip.chip} - {chip.rationale}")
+        prefix = "Confirmed" if decision.active_chip is not None else "Recommended"
+        lines.append(f"Chip: {prefix} {chip.chip} - {chip.rationale}")
     lines.append(f"Bank: {decision.squad.bank / 10:.1f}m | Free transfers: {decision.squad.free_transfers}")
     plan = decision.horizon_plan
     if plan is not None and plan.weeks:
@@ -152,6 +255,7 @@ def build_scorecard_message(root: Path) -> str:
     lines = [
         f"GW {record.gameweek} scorecard ({record.season_id})",
         "-------------------------------------",
+        f"Basis: {record.evaluation_basis.replace('_', ' ')}",
         f"Projected: {record.total_projected:.1f} | Actual: {record.total_actual:.1f} ({delta:+.1f})",
         f"Starting XI + captain: {record.xi_projected:.1f} projected, {record.xi_actual:.1f} actual",
         f"Bench: {record.bench_projected:.1f} projected, {record.bench_actual:.1f} actual",
@@ -244,3 +348,28 @@ def _bench_projected_points(root: Path, gameweek: int, bench_ids: list[int], cat
             if row.gameweek == gameweek and row.player_id in set(bench_ids)
         ), 2)
     return 0.0
+
+
+def _persisted_chip_recommendation(root: Path, event: int, season_id: str) -> ChipAdvice | None:
+    """Use the immutable advisor output before falling back to legacy heuristics."""
+    try:
+        from aifpl.chips import ChipAdviceStore
+
+        advice = ChipAdviceStore(root).latest()
+    except (FileNotFoundError, ValueError):
+        return None
+    if advice.season_id != season_id or advice.gameweek != event:
+        return None
+    recommendation = next(
+        (
+            item for item in advice.recommendations
+            if item.status == "recommend" and item.gameweek in (None, event)
+        ),
+        None,
+    )
+    if recommendation is None:
+        return None
+    return ChipAdvice(
+        chip=recommendation.chip,
+        rationale=recommendation.rationale,
+    )

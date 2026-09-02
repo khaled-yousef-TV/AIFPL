@@ -199,16 +199,93 @@ def test_hermes_decision_history_is_empty_without_runs(monkeypatch, tmp_path) ->
     assert response.json() == []
 
 
+def test_hermes_decision_history_passes_scope_filters(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeManager:
+        def decisions(self, limit, season_id=None, gameweek=None):
+            captured.update(limit=limit, season_id=season_id, gameweek=gameweek)
+            return []
+
+    monkeypatch.setattr(api, "HermesManager", lambda root: FakeManager())
+
+    response = TestClient(api.app).get(
+        "/hermes/decisions?limit=7&season_id=2026-27&gameweek=3",
+    )
+
+    assert response.status_code == 200
+    assert captured == {"limit": 7, "season_id": "2026-27", "gameweek": 3}
+
+
+def test_execution_confirmation_route_requires_admin_and_persists_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    captured: dict[str, object] = {}
+    record = api.ExecutionConfirmation(
+        decision_path=str(tmp_path / "decision.json"), season_id="2026-27", gameweek=1,
+        source="manual", squad_ids=list(range(1, 16)), starting_xi_ids=list(range(1, 12)),
+        bench_ids=[12, 13, 14, 15], captain_id=1, vice_captain_id=2,
+        confirmed_at=datetime(2026, 8, 14, 17, tzinfo=timezone.utc),
+        output_path=str(tmp_path / "confirmation.json"),
+    )
+
+    class FakeStore:
+        def __init__(self, root) -> None:
+            assert root == tmp_path
+
+        def confirm(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return record
+
+    monkeypatch.setattr(api, "ExecutionConfirmationStore", FakeStore)
+    payload = {
+        "decision_path": "hermes/decisions/decision.json",
+        "squad_ids": list(range(1, 16)),
+        "starting_xi_ids": list(range(1, 12)),
+        "bench_ids": [12, 13, 14, 15],
+        "captain_id": 1,
+        "vice_captain_id": 2,
+    }
+
+    denied = TestClient(api.app).post("/execution/confirmations", json=payload)
+    allowed = TestClient(api.app).post(
+        "/execution/confirmations", json=payload,
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 201
+    assert captured["args"] == ("hermes/decisions/decision.json",)
+    assert captured["kwargs"]["source"] == "manual"
+
+
+def test_execution_confirmation_read_requires_admin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+
+    response = TestClient(api.app).get(
+        "/execution/confirmations/latest?season_id=2026-27&gameweek=1",
+    )
+
+    assert response.status_code == 401
+
+
 def test_hermes_run_transcript_is_not_found_without_runs(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
 
-    response = TestClient(api.app).get("/hermes/runs/latest")
+    response = TestClient(api.app).get(
+        "/hermes/runs/latest", headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
 
     assert response.status_code == 404
 
 
 def test_hermes_run_transcript_endpoint_returns_payload(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
     transcript = api.HermesRunTranscript(
         created_at=datetime(2026, 8, 11, 9, 30, tzinfo=timezone.utc),
         gameweek=1, season_id="2026-27", outcome="succeeded", tool_steps=2,
@@ -223,11 +300,27 @@ def test_hermes_run_transcript_endpoint_returns_payload(monkeypatch, tmp_path) -
 
     monkeypatch.setattr(api, "HermesManager", lambda root: FakeManager())
 
-    response = TestClient(api.app).get("/hermes/runs/latest")
+    response = TestClient(api.app).get(
+        "/hermes/runs/latest", headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
 
     assert response.status_code == 200
     assert response.json()["outcome"] == "succeeded"
     assert response.json()["tool_steps"] == 2
+
+
+def test_sensitive_debug_reads_require_admin_access(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.delenv("AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS", raising=False)
+
+    denied = TestClient(api.app).get("/debug/env")
+    allowed = TestClient(api.app).get(
+        "/debug/env", headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
 
 
 def test_hermes_supersede_endpoint_uses_the_current_gameweek(monkeypatch, tmp_path) -> None:

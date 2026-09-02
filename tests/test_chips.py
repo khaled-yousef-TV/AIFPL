@@ -178,6 +178,43 @@ def test_advisor_recommends_triple_captain_on_double_gameweek() -> None:
     assert tc.gameweek == 6
 
 
+def test_advisor_uses_zero_fixture_rows_for_free_hit_blank_detection() -> None:
+    advisor = ChipAdvisor(settings(fh_starters_without_fixture=3))
+    rows = projections_for(list(range(1, 16)), [3, 4, 5], points=5.0)
+    rows += [
+        OddsAdjustedGameweekProjection(
+            player_id, f"Player {player_id}", "MID", "Club", 50, 6, 0, 0, 0.0,
+        )
+        for player_id in range(1, 16)
+    ]
+
+    advice = advisor.evaluate(
+        "2026-27", 3, fresh_state(), fixtures()[:30], rows,
+        list(range(1, 16)), list(range(1, 12)), list(range(1, 16)),
+        ChipIntel(fetched_at=datetime.now(timezone.utc)),
+    )
+    free_hit = next(item for item in advice.recommendations if item.chip == "free_hit" and item.set == 1)
+
+    assert free_hit.status == "recommend"
+    assert free_hit.gameweek == 6
+    assert free_hit.conditions["starters_without_fixture"] == 11
+
+
+def test_advisor_does_not_infer_free_hit_targets_from_missing_projection_rows() -> None:
+    advisor = ChipAdvisor(settings(fh_starters_without_fixture=3))
+    rows = projections_for(list(range(1, 16)), [3, 4, 5], points=5.0)
+
+    advice = advisor.evaluate(
+        "2026-27", 3, fresh_state(), fixtures()[:30], rows,
+        list(range(1, 16)), list(range(1, 12)), list(range(1, 16)),
+        ChipIntel(fetched_at=datetime.now(timezone.utc), expected_bgw_gws=[6]),
+    )
+    free_hit = next(item for item in advice.recommendations if item.chip == "free_hit" and item.set == 1)
+
+    assert free_hit.status == "save"
+    assert free_hit.conditions["starters_without_fixture"] == 0
+
+
 def test_advisor_saves_triple_captain_without_margin() -> None:
     advisor = ChipAdvisor(settings(tc_captain_points=13.0, tc_margin=3.0))
     rows = projections_for(list(range(1, 16)), [3, 4, 5], points=5.0)
@@ -258,6 +295,11 @@ def test_state_store_marks_used_immutably(tmp_path) -> None:
 def test_state_store_validates_chip_names(tmp_path) -> None:
     with pytest.raises(ValueError, match="chip must be one of"):
         ChipStateStore(tmp_path).mark_used("2026-27", "wildcardd", 1, 5)
+
+
+def test_free_hit_is_unavailable_in_gw1(tmp_path) -> None:
+    with pytest.raises(ValueError, match="unavailable in GW1"):
+        ChipStateStore(tmp_path).mark_used("2026-27", "free_hit", 1, 1)
 
 
 class FakeResponse:

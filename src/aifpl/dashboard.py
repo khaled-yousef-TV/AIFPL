@@ -103,6 +103,7 @@ class DashboardScorecard(BaseModel):
     best_player_id: int | None = None
     best_player_name: str | None = None
     best_player_actual: float | None = None
+    evaluation_basis: str = "recommendation_only"
 
 
 class DashboardConfidence(BaseModel):
@@ -148,18 +149,21 @@ class CurrentDashboard(BaseModel):
 def build_current_dashboard(root: Path) -> CurrentDashboard:
     from datetime import datetime, timezone
 
-    decision = HermesManager(root).latest_decision()
     schedule = DeadlineScheduler(root).status()
+    manager = HermesManager(root)
+    try:
+        decision = manager.latest_decision(season_id=schedule.season_id, gameweek=schedule.event)
+    except FileNotFoundError:
+        decision = manager.latest_decision(season_id=schedule.season_id)
     pre_season = schedule.event == 1 and schedule.deadline > datetime.now(timezone.utc)
     plan_snapshot = decision.horizon_plan
     current_players = CurrentPlayerCatalogStore(root).latest_players()
     players_by_id = {player.id: player for player in current_players}
-    projections = OddsProjectionStore(root).latest()
-    if plan_snapshot is not None and plan_snapshot.projection_catalog:
-        try:
-            projections = OddsProjectionStore(root).latest(plan_snapshot.projection_catalog)
-        except (FileNotFoundError, ValueError):
-            pass
+    projections = (
+        OddsProjectionStore(root).latest(plan_snapshot.projection_catalog)
+        if plan_snapshot is not None and plan_snapshot.projection_catalog
+        else OddsProjectionStore(root).latest()
+    )
     projections_by_key = {(row.player_id, row.gameweek): row for row in projections}
 
     missing_ids = set(decision.squad.player_ids) - set(players_by_id)
@@ -248,7 +252,10 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
 
     scorecard = None
     try:
-        latest_scorecard = DecisionScorer(root).latest()
+        latest_scorecard = next(
+            record for record in DecisionScorer(root).recent(100)
+            if record.season_id == schedule.season_id
+        )
         best = max(latest_scorecard.players, key=lambda player: player.actual, default=None)
         scorecard = DashboardScorecard(
             gameweek=latest_scorecard.gameweek,
@@ -258,6 +265,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             best_player_id=best.element if best else None,
             best_player_name=best.name if best else None,
             best_player_actual=best.actual if best else None,
+            evaluation_basis=latest_scorecard.evaluation_basis,
         )
     except FileNotFoundError:
         pass
@@ -299,16 +307,18 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         solver_status=plan_snapshot.solver_status if plan_snapshot is not None else None,
         robustness=robustness,
         confidence=_dashboard_confidence(root),
-        chip_advice=_dashboard_chip_advice(root),
+        chip_advice=_dashboard_chip_advice(root, decision.season_id),
     )
 
 
-def _dashboard_chip_advice(root: Path) -> list[DashboardChipAdvice]:
+def _dashboard_chip_advice(root: Path, season_id: str | None = None) -> list[DashboardChipAdvice]:
     try:
         from aifpl.chips import ChipAdviceStore
 
         advice = ChipAdviceStore(root).latest()
     except FileNotFoundError:
+        return []
+    if season_id is not None and advice.season_id != season_id:
         return []
     return [
         DashboardChipAdvice(

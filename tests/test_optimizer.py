@@ -1,5 +1,6 @@
 import pytest
 
+from aifpl.config import minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
 
@@ -9,6 +10,12 @@ def candidate(identifier: int, position: str, club: str, cost: int, points: floa
         player_id=identifier, player_name=f"Player {identifier}", position=position, club=club, cost=cost,
         projected_points=points, availability_multiplier=1.0, selected_by_percent=ownership,
     )
+
+
+def test_default_bank_reserve_is_five_tenths(monkeypatch) -> None:
+    monkeypatch.delenv("AIFPL_MIN_BANK_TENTHS", raising=False)
+
+    assert minimum_bank_tenths() == 5
 
 
 def full_pool() -> list[CurrentPlayerProjection]:
@@ -76,7 +83,8 @@ def test_optimizer_enforces_club_cap_with_normalized_names() -> None:
     assert 16 not in {player.player_id for player in result.players}
 
 
-def test_optimizer_never_starts_a_zero_projection_enabler_regardless_of_appetite() -> None:
+def test_optimizer_never_starts_a_zero_projection_enabler_regardless_of_appetite(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MIN_BANK_TENTHS", "50")
     candidates = full_pool()
     candidates.append(candidate(16, "FWD", "F", 45, 0.0, ownership=0.2))
 

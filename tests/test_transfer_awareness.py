@@ -53,6 +53,24 @@ def test_new_signing_detected_when_club_changed(tmp_path) -> None:
     assert profile.prior_goals_per_90 == 0.4
 
 
+def test_previous_season_rows_aggregate_double_gameweeks_and_retain_club_history(tmp_path) -> None:
+    write_previous_season(tmp_path, [
+        gw_row(7, "Brighton", 1, 90, 1, 0, 10),
+        gw_row(7, "Brighton", 2, 90, 0, 1, 8),
+        gw_row(7, "Chelsea", 3, 90, 1, 1, 12),
+        gw_row(7, "Chelsea", 3, 180, 2, 0, 20),
+    ])
+
+    profile = TransferAwarenessStore(tmp_path).latest([make_player(7, "Chelsea")])[7]
+
+    assert profile.is_new_signing is False
+    assert profile.previous_club == "Chelsea"
+    assert profile.club_history == ("Brighton", "Chelsea")
+    assert profile.prior_goals_per_90 == 0.8
+    assert profile.prior_assists_per_90 == 0.4
+    assert profile.prior_points_per_90 == 10.0
+
+
 def test_same_club_is_not_a_new_signing(tmp_path) -> None:
     write_previous_season(tmp_path, [gw_row(7, "Chelsea", 38, 2700, 12, 6, 150)])
     players = [make_player(7, "Chelsea")]

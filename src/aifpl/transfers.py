@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from ortools.sat.python import cp_model
 from pydantic import BaseModel, Field
 
+from aifpl.config import paid_transfer_safety_cap
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.optimizer import SquadOptimizationError
 from aifpl.rules import SquadPlayer, SquadRequest, club_key, validate_squad
@@ -14,7 +15,14 @@ class CurrentSquadState(BaseModel):
     player_ids: list[int] = Field(min_length=15, max_length=15)
     bank: int = Field(ge=0, description="Available funds in FPL tenths of a million")
     free_transfers: int = Field(ge=0, le=5)
-    max_transfers: int = Field(default=2, ge=0, le=15)
+    max_transfers: int | None = Field(
+        default=None, ge=0, le=15,
+        description="Legacy total-transfer cap; omitted means free transfers plus the paid safety cap",
+    )
+    paid_transfer_safety_cap: int | None = Field(
+        default=None, ge=0, le=15,
+        description="Optional paid-transfer cap; units are transfers, not points",
+    )
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,14 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     if missing:
         raise ValueError(f"Current squad contains players absent from the candidate pool: {sorted(missing)}")
     _validate_current_squad([candidate_by_id[player_id] for player_id in current_ids], state.bank)
+    paid_cap = (
+        paid_transfer_safety_cap()
+        if state.paid_transfer_safety_cap is None
+        else state.paid_transfer_safety_cap
+    )
+    transfer_limit = min(15, state.free_transfers + paid_cap)
+    if state.max_transfers is not None:
+        transfer_limit = min(transfer_limit, state.max_transfers)
     model = cp_model.CpModel()
     selected = [model.new_bool_var(f"player_{candidate.player_id}") for candidate in candidates]
     starters = [model.new_bool_var(f"starter_{candidate.player_id}") for candidate in candidates]
@@ -70,7 +86,7 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") <= 3)
     incoming_indexes = [index for index, candidate in enumerate(candidates) if candidate.player_id not in current_ids]
     transfers_made = sum(selected[index] for index in incoming_indexes)
-    model.add(transfers_made <= state.max_transfers)
+    model.add(transfers_made <= transfer_limit)
     outgoing_value = sum(
         candidate.cost * (1 - selected[index])
         for index, candidate in enumerate(candidates)
@@ -79,7 +95,7 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     incoming_cost = sum(selected[index] * candidates[index].cost for index in incoming_indexes)
     model.add(incoming_cost <= state.bank + outgoing_value)
     projection_scale = 10_000
-    excess_transfers = model.new_int_var(0, state.max_transfers, "excess_transfers")
+    excess_transfers = model.new_int_var(0, transfer_limit, "excess_transfers")
     model.add(excess_transfers >= transfers_made - state.free_transfers)
     hit_cost_scaled = excess_transfers * 4 * projection_scale
     model.maximize(

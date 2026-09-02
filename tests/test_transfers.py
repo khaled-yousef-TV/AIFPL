@@ -48,6 +48,22 @@ def test_transfer_planner_can_make_a_non_price_adjacent_upgrade_when_affordable(
     assert plan.net_projected_points == plan.net_objective_points
 
 
+def test_transfer_planner_default_limit_keeps_all_banked_free_transfers() -> None:
+    pool = current_pool() + [
+        candidate(16, "GK", "I", 40, 20),
+        candidate(17, "DEF", "J", 40, 20),
+        candidate(18, "MID", "K", 50, 20),
+    ]
+
+    plan = plan_transfers(
+        pool,
+        CurrentSquadState(player_ids=list(range(1, 16)), bank=0, free_transfers=5),
+    )
+
+    assert plan.transfers_made == 3
+    assert plan.hit_cost == 0
+
+
 def test_transfer_planner_charges_a_hit_when_second_move_still_improves_net_points() -> None:
     pool = current_pool() + [candidate(16, "MID", "F", 50, 20), candidate(17, "DEF", "F", 40, 10)]
 

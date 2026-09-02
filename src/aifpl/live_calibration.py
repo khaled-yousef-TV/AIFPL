@@ -18,6 +18,7 @@ from aifpl.artifacts import (
     write_manifest,
 )
 from aifpl.config import LiveCalibrationSettings, live_calibration_settings
+from aifpl.model_identity import MODEL_SPEC_VERSION, source_hashes
 from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
 from aifpl.snapshots import SnapshotStore
 
@@ -27,6 +28,18 @@ OUTCOME_COVERAGE_FLOOR = 0.95
 MAX_INTERCEPT_PER_FIXTURE = 0.25
 MAX_SLOPE_DELTA = 0.15
 MAX_ADJUSTMENT_PER_FIXTURE = 0.5
+
+
+@dataclass(frozen=True)
+class UncertaintyProfile:
+    """Shared residual contract consumed by decision-support consumers."""
+
+    methodology: str
+    lower_residual: float = 0.0
+    upper_residual: float = 0.0
+    coverage: float | None = None
+    observations: int = 0
+    confidence: str = "uncalibrated"
 
 
 @dataclass(frozen=True)
@@ -212,9 +225,11 @@ class LiveCalibrationStore:
                 return False
             methodology = methodologies.pop()
             output_path = self._outcomes_dir(season_id, methodology, self._model_signature(raw_path)) / f"gw{gameweek}.{sha256_path(raw_path)[:12]}.jsonl"
-            return not output_path.exists() or not output_path.with_suffix(".manifest.json").exists()
-        except (FileNotFoundError, OSError, ValueError):
+            return _artifact_needs_repair(self.root, output_path)
+        except (FileNotFoundError, OSError):
             return False
+        except ValueError:
+            return True
 
     def needs_profile(self, season_id: str, gameweek: int, catalog_id: str) -> bool:
         if Path(catalog_id).name != catalog_id or not catalog_id.endswith(".jsonl"):
@@ -229,12 +244,14 @@ class LiveCalibrationStore:
             methodology = methodologies.pop()
             model_signature = self._model_signature(raw_path)
             outcome_path = self._outcomes_dir(season_id, methodology, model_signature) / f"gw{gameweek}.{sha256_path(raw_path)[:12]}.jsonl"
-            if not outcome_path.exists() or not outcome_path.with_suffix(".manifest.json").exists():
-                return False
+            if _artifact_needs_repair(self.root, outcome_path):
+                return True
             profile = self.latest_profile(season_id, methodology, model_signature)
             return profile is None or profile.latest_gameweek < gameweek
-        except (FileNotFoundError, OSError, ValueError):
+        except (FileNotFoundError, OSError):
             return False
+        except ValueError:
+            return True
 
     def build_profile(self, season_id: str, methodology: str, model_signature: str) -> LiveCalibrationProfile:
         by_gameweek: dict[int, tuple[Path, list[LiveCalibrationOutcome]]] = {}
@@ -331,7 +348,7 @@ class LiveCalibrationStore:
         adjusted: list[OddsAdjustedGameweekProjection] = []
         for row in rows:
             if row.fixture_count <= 0:
-                adjusted.append(replace(row, methodology=f"{row.methodology}.{LIVE_CALIBRATION_METHOD}"))
+                adjusted.append(replace(row, methodology=_calibrated_methodology(row.methodology)))
                 continue
             per_fixture = row.projected_points / row.fixture_count
             candidate = row.fixture_count * max(0.0, profile.intercept + profile.slope * per_fixture)
@@ -343,7 +360,7 @@ class LiveCalibrationStore:
             adjusted.append(replace(
                 row,
                 projected_points=round(max(0.0, row.projected_points + delta), 4),
-                methodology=f"{row.methodology}.{LIVE_CALIBRATION_METHOD}",
+                methodology=_calibrated_methodology(row.methodology),
             ))
         return adjusted
 
@@ -369,7 +386,8 @@ class LiveCalibrationStore:
         profile = self.latest_profile(season_id, methodology, self._model_signature(raw_path))
         if profile is None:
             return CalibratedOddsCatalog(raw_catalog_id, raw_catalog_id, rows, None)
-        if profile.latest_gameweek >= min(row.gameweek for row in rows):
+        future_rows = [row for row in rows if row.gameweek > profile.latest_gameweek]
+        if not future_rows:
             return CalibratedOddsCatalog(raw_catalog_id, raw_catalog_id, rows, None)
         if profile.status != "active":
             return CalibratedOddsCatalog(raw_catalog_id, raw_catalog_id, rows, profile)
@@ -378,7 +396,17 @@ class LiveCalibrationStore:
         profile_hash = sha256_path(profile_path)[:12]
         output_path = raw_path.parent / f"{raw_path.stem}.{profile_hash}.{LIVE_CALIBRATION_METHOD}.jsonl"
         if not output_path.exists():
-            adjusted = self.apply(rows, profile)
+            adjusted_future = self.apply(future_rows, profile)
+            adjusted_by_key = {
+                (row.gameweek, row.player_id): row for row in adjusted_future
+            }
+            adjusted = [
+                adjusted_by_key.get(
+                    (row.gameweek, row.player_id),
+                    replace(row, methodology=_calibrated_methodology(row.methodology)),
+                )
+                for row in rows
+            ]
             write_immutable(output_path, jsonl_bytes(adjusted))
             write_manifest(
                 self.root,
@@ -412,7 +440,11 @@ class LiveCalibrationStore:
         return paths
 
     def _load_outcomes(self, path: Path) -> list[LiveCalibrationOutcome]:
-        return [LiveCalibrationOutcome(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
+        return [
+            LiveCalibrationOutcome(**json.loads(line))
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
     def _outcomes_dir(self, season_id: str, methodology: str, model_signature: str) -> Path:
         return self.root / "calibration" / "live" / "outcomes" / season_id / _signature(f"{methodology}:{model_signature}")
@@ -462,30 +494,44 @@ class LiveCalibrationStore:
             "odds_coverage_by_gameweek",
             "odds_coverage_status",
         }
+        identity = parameters.get("model_identity")
+        if not isinstance(identity, dict):
+            identity = {
+                "model_spec_version": "legacy-catalog-identity",
+                "deployed_commit": "unknown",
+                "source_hashes": {"legacy_catalog_identity": "unversioned"},
+            }
         model = {
+            "model_spec_version": identity.get("model_spec_version", MODEL_SPEC_VERSION),
+            "deployed_commit": identity.get("deployed_commit", "unknown"),
             "methodology": manifest.get("methodology"),
             "parameters": {key: value for key, value in parameters.items() if key not in dynamic_parameters},
+            "source_hashes": identity.get("source_hashes", source_hashes()),
         }
         return _signature(json.dumps(model, sort_keys=True, separators=(",", ":")))
 
     @staticmethod
     def _actual_points(event_path: Path) -> dict[int, float]:
         document = json.loads(event_path.read_text(encoding="utf-8"))
+        payload = document.get("payload", document)
+        elements = payload.get("elements", []) if isinstance(payload, dict) else []
         return {
             int(element["id"]): float((element.get("stats") or {}).get("total_points", 0))
-            for element in document.get("payload", {}).get("elements", [])
+            for element in elements
             if isinstance(element, dict) and element.get("id") is not None
         }
 
     @staticmethod
     def _require_final_gameweek(bootstrap_path: Path, gameweek: int) -> None:
         document = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+        payload = document.get("payload", document)
+        events = payload.get("events", []) if isinstance(payload, dict) else []
         finalized = any(
             isinstance(event, dict)
             and event.get("id") == gameweek
             and event.get("finished") is True
             and event.get("data_checked") is True
-            for event in document.get("payload", {}).get("events", [])
+            for event in events
         )
         if not finalized:
             raise ValueError(f"GW{gameweek} is not marked final by FPL")
@@ -532,6 +578,26 @@ class LiveCalibrationStore:
             return False
 
 
+def _model_source_hashes() -> dict[str, str]:
+    """Bind legacy calibration catalogs to the source implementing the forecast."""
+    return source_hashes()
+
+
+def _artifact_needs_repair(root: Path, path: Path) -> bool:
+    if not path.exists() or not path.with_suffix(".manifest.json").exists():
+        return True
+    try:
+        verify_artifact(root, path, require_manifest=True)
+    except (OSError, ValueError):
+        return True
+    return False
+
+
+def _calibrated_methodology(methodology: str) -> str:
+    suffix = f".{LIVE_CALIBRATION_METHOD}"
+    return methodology if methodology.endswith(suffix) else f"{methodology}{suffix}"
+
+
 def calibrated_odds_rows(
     root: Path,
     catalog_id: str | None = None,
@@ -564,9 +630,11 @@ def current_season_id(root: Path) -> str | None:
     except FileNotFoundError:
         return None
     document = json.loads(path.read_text(encoding="utf-8"))
+    payload = document.get("payload", document)
+    events = payload.get("events", []) if isinstance(payload, dict) else []
     deadlines = [
         datetime.fromisoformat(event["deadline_time"].replace("Z", "+00:00"))
-        for event in document.get("payload", {}).get("events", [])
+        for event in events
         if isinstance(event, dict) and isinstance(event.get("deadline_time"), str)
     ]
     if not deadlines:

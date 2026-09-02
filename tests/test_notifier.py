@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, time, timezone
+from pathlib import Path
 
 import httpx
 import pytest
 
 from aifpl.config import SchedulerSettings
-from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy
+from aifpl.hermes import HermesDecision, HermesSquadState, HermesState, HermesStrategy
 from aifpl.notifier import TelegramNotifier, TelegramNotifierError, build_recommendation_message, recommend_chip
 from aifpl.scheduler import DeadlineScheduler
 from aifpl.snapshots import SnapshotStore
@@ -33,6 +34,29 @@ def decision(*, transfers_in: list[int] = [], transfers_out: list[int] = [],
         created_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
         backend_methodology="test", decision_path="d.json", state_path="s.json", season_id="2026-27",
     )
+
+
+def write_current_decision(tmp_path) -> HermesDecision:
+    from aifpl.artifacts import json_bytes, write_immutable
+
+    stamp = "20260814T100000000000Z"
+    decision_path = tmp_path / "hermes" / "decisions" / f"{stamp}.json"
+    state_path = tmp_path / "hermes" / "states" / f"{stamp}.json"
+    record = decision().model_copy(update={
+        "decision_path": str(decision_path),
+        "state_path": str(state_path),
+        "vice_captain_id": 2,
+    })
+    state = HermesState(
+        strategy=record.strategy, squad=record.squad, captain_id=record.captain_id,
+        starting_xi_ids=record.starting_xi_ids, model=record.model,
+        updated_at=record.created_at, version=1, gameweek=record.gameweek,
+        season_id=record.season_id, decision_path=str(decision_path),
+        vice_captain_id=record.vice_captain_id,
+    )
+    write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
+    write_immutable(decision_path, json_bytes(record.model_dump(mode="json"), pretty=True))
+    return record
 
 
 def test_recommend_chip_suggests_wildcard_for_large_transfer_plan() -> None:
@@ -129,7 +153,7 @@ def test_recommendation_message_includes_the_committed_plan(tmp_path) -> None:
     assert "GW2 | 1 transfer(s) | 1 FT after" in message
 
 
-def test_scheduler_notifies_once_within_lead_time(tmp_path, monkeypatch) -> None:
+def test_scheduler_does_not_notify_not_due_without_a_committed_decision(tmp_path, monkeypatch) -> None:
     from aifpl import notifier as notifier_module
 
     class FakeRefreshJob:
@@ -163,10 +187,10 @@ def test_scheduler_notifies_once_within_lead_time(tmp_path, monkeypatch) -> None
     second = subject.tick(datetime(2026, 8, 14, 15, 30, tzinfo=timezone.utc))
 
     assert first.status == "not_due"
-    assert first.telegram_notified is True
-    assert second.telegram_notified is True
-    assert len(sent) == 1
-    assert (tmp_path / "scheduler" / "telegram_notified" / "2026-27" / "gw1.json").exists()
+    assert first.telegram_notified is None
+    assert second.telegram_notified is None
+    assert sent == []
+    assert not (tmp_path / "scheduler" / "telegram_notified" / "2026-27" / "gw1.json").exists()
 
 
 def test_scheduler_does_not_notify_outside_lead_window(tmp_path, monkeypatch) -> None:
@@ -197,4 +221,118 @@ def test_scheduler_does_not_notify_outside_lead_window(tmp_path, monkeypatch) ->
     result = subject.tick(datetime(2026, 8, 14, 9, tzinfo=timezone.utc))
 
     assert result.status == "not_due"
-    assert result.telegram_notified is False
+    assert result.telegram_notified is None
+
+
+def test_scheduler_notifies_exact_current_decision_and_persists_receipt(tmp_path, monkeypatch) -> None:
+    from aifpl import notifier as notifier_module
+
+    record = write_current_decision(tmp_path)
+    sent: list[str] = []
+
+    class FakeRefreshJob:
+        def run(self, start: int, end: int, budget: int):
+            from aifpl.refresh import RefreshJobResult
+
+            now = datetime(2026, 8, 14, 10, tzinfo=timezone.utc)
+            return RefreshJobResult(
+                status="succeeded", started_at=now, completed_at=now,
+                start_gameweek=start, end_gameweek=end, budget=budget,
+                completed_steps=[], artifacts={}, output_path=str(tmp_path / "refresh.json"),
+            )
+
+    class FakeScorer:
+        def score_pending(self, season_id: str) -> list[str]:
+            return []
+
+    class FakeNotifier:
+        @classmethod
+        def from_environment(cls) -> "FakeNotifier":
+            return cls()
+
+        def send_message(self, text: str) -> None:
+            sent.append(text)
+
+    monkeypatch.setenv("AIFPL_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("AIFPL_TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("AIFPL_TELEGRAM_CHAT_ID", "chat-1")
+    monkeypatch.setattr(notifier_module, "TelegramNotifier", FakeNotifier)
+    SnapshotStore(tmp_path).save_bootstrap(
+        {"elements": [], "teams": [], "events": [{"id": 1, "deadline_time": "2026-08-14T12:00:00Z"}]},
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    subject = DeadlineScheduler(
+        tmp_path, refresh_job=FakeRefreshJob(), completed_scorer=FakeScorer(),
+        settings=SchedulerSettings(90, 6, 300, 1000, time(17)),
+    )
+
+    result = subject.tick(datetime(2026, 8, 14, 10, 30, tzinfo=timezone.utc))
+
+    assert result.status == "succeeded"
+    assert result.telegram_notified is True
+    assert len(sent) == 1
+    assert "Vice-captain:" in sent[0]
+    tick_record = json.loads(Path(result.output_path).read_text(encoding="utf-8"))
+    assert tick_record["telegram_notified"] is True
+    receipt = json.loads(
+        (tmp_path / "scheduler" / "telegram_notified" / "2026-27" / "gw1.json").read_text()
+    )
+    assert receipt["decision_path"] == record.decision_path
+    results = list((tmp_path / "scheduler" / "telegram_results" / "2026-27" / "gw1").glob("*.json"))
+    assert len(results) == 1
+    assert json.loads(results[0].read_text())["status"] == "sent"
+
+
+def test_scheduler_retries_a_failed_notification(tmp_path, monkeypatch) -> None:
+    from aifpl import notifier as notifier_module
+
+    write_current_decision(tmp_path)
+    attempts = 0
+
+    class FakeRefreshJob:
+        def run(self, start: int, end: int, budget: int):
+            from aifpl.refresh import RefreshJobResult
+
+            now = datetime(2026, 8, 14, 10, tzinfo=timezone.utc)
+            return RefreshJobResult(
+                status="succeeded", started_at=now, completed_at=now,
+                start_gameweek=start, end_gameweek=end, budget=budget,
+                completed_steps=[], artifacts={}, output_path=str(tmp_path / "refresh.json"),
+            )
+
+    class FakeScorer:
+        def score_pending(self, season_id: str) -> list[str]:
+            return []
+
+    class FakeNotifier:
+        @classmethod
+        def from_environment(cls) -> "FakeNotifier":
+            return cls()
+
+        def send_message(self, text: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("temporary telegram failure")
+
+    monkeypatch.setenv("AIFPL_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("AIFPL_TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("AIFPL_TELEGRAM_CHAT_ID", "chat-1")
+    monkeypatch.setattr(notifier_module, "TelegramNotifier", FakeNotifier)
+    SnapshotStore(tmp_path).save_bootstrap(
+        {"elements": [], "teams": [], "events": [{"id": 1, "deadline_time": "2026-08-14T12:00:00Z"}]},
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    subject = DeadlineScheduler(
+        tmp_path, refresh_job=FakeRefreshJob(), completed_scorer=FakeScorer(),
+        settings=SchedulerSettings(90, 6, 300, 1000, time(17)),
+    )
+
+    first = subject.tick(datetime(2026, 8, 14, 10, 30, tzinfo=timezone.utc))
+    second = subject.tick(datetime(2026, 8, 14, 10, 45, tzinfo=timezone.utc))
+
+    assert first.telegram_notified is False
+    assert second.telegram_notified is True
+    assert attempts == 2
+    result_files = list((tmp_path / "scheduler" / "telegram_results" / "2026-27" / "gw1").glob("*.json"))
+    assert {json.loads(path.read_text())["status"] for path in result_files} == {"failed", "sent"}

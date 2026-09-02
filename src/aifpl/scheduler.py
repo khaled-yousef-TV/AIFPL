@@ -4,7 +4,8 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from fcntl import LOCK_EX, LOCK_UN, flock
+from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
+from hashlib import sha256
 from pathlib import Path
 from threading import Event
 from typing import Literal
@@ -55,6 +56,7 @@ class SchedulerTickResult(BaseModel):
     scoring_error: str | None = None
     telegram_notified: bool | None = None
     telegram_error: str | None = None
+    notification_update_for: str | None = None
     error: str | None = None
     output_path: str
 
@@ -74,6 +76,8 @@ class DeadlineScheduler:
         self.refresh_job = refresh_job or CurrentDataRefreshJob(root)
         self.settings = settings or scheduler_settings()
         self.completed_scorer = completed_scorer or CompletedDecisionScorer(root)
+        self._hermes_deadline: datetime | None = None
+        self._hermes_deadline_clock: datetime | None = None
 
     def status(self, checked_at: datetime | None = None) -> DeadlineStatus:
         now = checked_at or datetime.now(timezone.utc)
@@ -99,7 +103,7 @@ class DeadlineScheduler:
         return DeadlineStatus(
             checked_at=now, event=event, deadline=deadline, refresh_at=refresh_at,
             due=now >= refresh_at,
-            completed=self._completion_path(season_id, event).exists(),
+            completed=self._completion_exists(season_id, event),
             missed=now >= deadline,
             season_id=season_id,
             source_snapshot=str(source_path),
@@ -107,11 +111,19 @@ class DeadlineScheduler:
 
     def tick(self, checked_at: datetime | None = None, force: bool = False) -> SchedulerTickResult:
         result = self._tick_inner(checked_at, force)
-        if result.event is not None and result.deadline is not None and result.status not in ("missed", "discovery_failed"):
+        if (
+            result.event is not None
+            and result.deadline is not None
+            and result.status in ("succeeded", "already_completed")
+            and result.hermes_error is None
+        ):
             notified, notify_error = self._maybe_notify_telegram(
-                result.event, result.season_id or "", result.deadline, result.checked_at,
+                result.event, result.season_id or "", result.deadline,
+                checked_at if checked_at is not None else datetime.now(timezone.utc),
+                decision_path=result.hermes_decision_path,
             )
             result = result.model_copy(update={"telegram_notified": notified, "telegram_error": notify_error})
+            result = self._persist_notification_update(result)
         return result
 
     def _tick_inner(self, checked_at: datetime | None = None, force: bool = False) -> SchedulerTickResult:
@@ -121,21 +133,33 @@ class DeadlineScheduler:
             now = checked_at if checked_at is not None and checked_at.tzinfo is not None else datetime.now(timezone.utc)
             result = self._persist_discovery_failure(now.astimezone(timezone.utc), force, exc)
             raise SchedulerTickError(result) from exc
+        self._hermes_deadline = schedule.deadline
+        self._hermes_deadline_clock = checked_at
         output_path = self._tick_path(schedule.checked_at)
         scored_decision_paths, scoring_error = self._score_completed_decisions(schedule.season_id)
         scorecard_kwargs = {
             "scored_decision_paths": scored_decision_paths,
             "scoring_error": scoring_error,
         }
+        if not schedule.completed and not schedule.missed and not self._before_deadline(schedule.deadline, checked_at):
+            return self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
         if schedule.completed:
-            if os.environ.get("AIFPL_HERMES_AUTO_RUN", "false").lower() in ("1", "true", "yes") and not self._hermes_completion_path(schedule.season_id, schedule.event).exists():
+            if (
+                not schedule.missed
+                and self._before_deadline(schedule.deadline, checked_at)
+                and os.environ.get("AIFPL_HERMES_AUTO_RUN", "false").lower() in ("1", "true", "yes")
+                and not self._hermes_completion_exists(schedule.season_id, schedule.event)
+            ):
                 try:
                     decision_path = self._run_hermes_for_event(schedule.event, schedule.season_id)
                     result = self._persist_tick(
                         output_path, schedule, "already_completed", force,
                         hermes_decision_path=decision_path, **scorecard_kwargs,
                     )
-                    write_immutable(self._hermes_completion_path(schedule.season_id, schedule.event), json_bytes({"decision_path": decision_path}, pretty=True))
+                    write_immutable(
+                        self._hermes_completion_write_path(schedule.season_id, schedule.event, schedule.checked_at),
+                        json_bytes({"decision_path": decision_path}, pretty=True),
+                    )
                     return result
                 except Exception as exc:
                     return self._persist_tick(
@@ -145,25 +169,28 @@ class DeadlineScheduler:
                     )
             return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
         if schedule.missed:
-            result = self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
-            write_immutable(
-                self._completion_path(schedule.season_id, schedule.event),
-                json_bytes(result.model_dump(mode="json"), pretty=True),
-            )
-            return result
+            return self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
         if not schedule.due and not force:
             return self._persist_tick(output_path, schedule, "not_due", force, **scorecard_kwargs)
         claim = self._claim(schedule)
         if claim is None:
-            status = "already_completed" if self._completion_path(schedule.season_id, schedule.event).exists() else "in_progress"
+            status = "already_completed" if self._completion_exists(schedule.season_id, schedule.event) else "in_progress"
             return self._persist_tick(output_path, schedule, status, force, **scorecard_kwargs)
         try:
-            if self._completion_path(schedule.season_id, schedule.event).exists():
+            if self._completion_exists(schedule.season_id, schedule.event):
                 return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
             end_gameweek = min(38, schedule.event + self.settings.horizon_gameweeks - 1)
             refresh = self.refresh_job.run(schedule.event, end_gameweek, self.settings.budget)
             hermes_decision_path = None
             hermes_error = None
+            if not self._before_deadline(schedule.deadline, checked_at):
+                result = self._persist_tick(
+                    output_path, schedule, "failed", force,
+                    refresh_job_path=refresh.output_path,
+                    error="Refresh completed at or after the official deadline; Hermes was not run.",
+                    **scorecard_kwargs,
+                )
+                raise SchedulerTickError(result)
             if os.environ.get("AIFPL_HERMES_AUTO_RUN", "false").lower() in ("1", "true", "yes"):
                 try:
                     hermes_decision_path = self._run_hermes_for_event(schedule.event, schedule.season_id)
@@ -176,15 +203,17 @@ class DeadlineScheduler:
                 **scorecard_kwargs,
             )
             write_immutable(
-                self._completion_path(schedule.season_id, schedule.event),
+                self._completion_write_path(schedule.season_id, schedule.event, result.checked_at),
                 json_bytes(result.model_dump(mode="json"), pretty=True),
             )
             if hermes_decision_path:
                 write_immutable(
-                    self._hermes_completion_path(schedule.season_id, schedule.event),
+                    self._hermes_completion_write_path(schedule.season_id, schedule.event, result.checked_at),
                     json_bytes({"decision_path": hermes_decision_path}, pretty=True),
                 )
             return result
+        except SchedulerTickError:
+            raise
         except Exception as exc:
             refresh_path = exc.result.output_path if isinstance(exc, RefreshJobError) else None
             result = self._persist_tick(
@@ -220,8 +249,41 @@ class DeadlineScheduler:
     def _telegram_notification_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "telegram_notified" / season_id / f"gw{event}.json"
 
+    def _telegram_decision_receipt_path(self, season_id: str, event: int, decision_path: str) -> Path:
+        digest = sha256(decision_path.encode("utf-8")).hexdigest()[:16]
+        return self.root / "scheduler" / "telegram_notified" / season_id / f"gw{event}" / f"{digest}.json"
+
+    def _telegram_notification_lock_path(self, season_id: str, event: int) -> Path:
+        return self.root / "scheduler" / "telegram_locks" / season_id / f"gw{event}.lock"
+
+    def _telegram_notification_result_path(
+        self, season_id: str, event: int, checked_at: datetime,
+    ) -> Path:
+        stamp = checked_at.strftime("%Y%m%dT%H%M%S%fZ")
+        return self.root / "scheduler" / "telegram_results" / season_id / f"gw{event}" / f"{stamp}-{uuid4().hex}.json"
+
+    def _telegram_result_matches(self, season_id: str, event: int, decision_path: str) -> bool:
+        directory = self.root / "scheduler" / "telegram_results" / season_id / f"gw{event}"
+        if not directory.exists():
+            return False
+        for path in sorted(directory.glob("*.json"), reverse=True):
+            try:
+                result = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(result, dict)
+                and result.get("status") == "sent"
+                and result.get("event") == event
+                and result.get("season_id") == season_id
+                and result.get("decision_path") == decision_path
+            ):
+                return True
+        return False
+
     def _maybe_notify_telegram(
         self, event: int, season_id: str, deadline: datetime, checked_at: datetime,
+        decision_path: str | None = None,
     ) -> tuple[bool, str | None]:
         try:
             from aifpl.config import telegram_settings
@@ -235,19 +297,121 @@ class DeadlineScheduler:
             return False, None
         if checked_at >= deadline:
             return False, None
+
+        try:
+            from aifpl.notifier import (
+                TelegramNotifier, _load_committed_decision, build_recommendation_message,
+            )
+
+            decision = _load_committed_decision(
+                self.root, event, season_id, decision_path=decision_path,
+            )
+        except Exception as exc:
+            error = redact_secrets(f"{type(exc).__name__}: {exc}")
+            self._persist_telegram_result(event, season_id, checked_at, decision_path, "failed", error)
+            return False, error
+        if decision is None:
+            error = "No current committed Hermes decision is available for notification"
+            self._persist_telegram_result(event, season_id, checked_at, decision_path, "skipped", error)
+            return False, error
+
+        if self._telegram_result_matches(season_id, event, decision.decision_path):
+            return True, None
         marker = self._telegram_notification_path(season_id, event)
         if marker.exists():
-            return True, None
-        try:
-            from aifpl.notifier import TelegramNotifier, build_recommendation_message
+            try:
+                receipt = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                receipt = None
+            if (
+                isinstance(receipt, dict)
+                and receipt.get("status") == "sent"
+                and receipt.get("event") == event
+                and receipt.get("season_id") == season_id
+                and receipt.get("decision_path") == decision.decision_path
+            ):
+                return True, None
 
-            message = build_recommendation_message(self.root, event, season_id, deadline)
+        lock_path = self._telegram_notification_lock_path(season_id, event)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        locked = False
+        try:
+            try:
+                flock(descriptor, LOCK_EX | LOCK_NB)
+                locked = True
+            except BlockingIOError:
+                error = "Another Telegram notification is already in progress"
+                self._persist_telegram_result(event, season_id, checked_at, decision.decision_path, "skipped", error)
+                return False, error
+            # Recheck after acquiring the lock so concurrent ticks cannot send twice.
+            if marker.exists():
+                try:
+                    receipt = json.loads(marker.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    receipt = None
+                if (
+                    isinstance(receipt, dict)
+                    and receipt.get("status") == "sent"
+                    and receipt.get("event") == event
+                    and receipt.get("season_id") == season_id
+                    and receipt.get("decision_path") == decision.decision_path
+                ):
+                    return True, None
+            if self._telegram_result_matches(season_id, event, decision.decision_path):
+                return True, None
+            current_decision = _load_committed_decision(
+                self.root, event, season_id, decision_path=decision.decision_path,
+            )
+            if current_decision is None:
+                error = "Hermes decision changed before notification could be sent"
+                self._persist_telegram_result(event, season_id, checked_at, decision.decision_path, "skipped", error)
+                return False, error
+            decision = current_decision
+            message = build_recommendation_message(
+                self.root, event, season_id, deadline, decision_path=decision.decision_path,
+            )
             TelegramNotifier.from_environment().send_message(message)
+
+            result_path = self._persist_telegram_result(
+                event, season_id, checked_at, decision.decision_path, "sent", None,
+            )
+            receipt_path = marker if not marker.exists() else self._telegram_decision_receipt_path(
+                season_id, event, decision.decision_path,
+            )
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            write_immutable(
+                receipt_path,
+                json_bytes({
+                    "status": "sent", "event": event, "season_id": season_id,
+                    "decision_path": decision.decision_path, "sent_at": checked_at.isoformat(),
+                    "result_path": str(result_path),
+                }, pretty=True),
+            )
+            return True, None
         except Exception as exc:
-            return False, redact_secrets(f"{type(exc).__name__}: {exc}")
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        write_immutable(marker, json_bytes({"event": event, "sent_at": checked_at.isoformat()}, pretty=True))
-        return True, None
+            error = redact_secrets(f"{type(exc).__name__}: {exc}")
+            self._persist_telegram_result(event, season_id, checked_at, decision.decision_path, "failed", error)
+            return False, error
+        finally:
+            if locked:
+                flock(descriptor, LOCK_UN)
+            os.close(descriptor)
+
+    def _persist_telegram_result(
+        self, event: int, season_id: str, checked_at: datetime, decision_path: str | None,
+        status: str, error: str | None,
+    ) -> Path:
+        path = self._telegram_notification_result_path(season_id, event, checked_at)
+        write_immutable(
+            path,
+            json_bytes({
+                "status": status, "event": event, "season_id": season_id,
+                "decision_path": decision_path, "attempted_at": checked_at.isoformat(),
+                "error": error,
+            }, pretty=True),
+        )
+        return path
 
     def _persist_tick(        self, path: Path, schedule: DeadlineStatus,
         status: Literal["not_due", "already_completed", "in_progress", "succeeded", "failed", "missed"],
@@ -269,6 +433,16 @@ class DeadlineScheduler:
         )
         write_immutable(path, json_bytes(result.model_dump(mode="json"), pretty=True))
         return result
+
+    def _persist_notification_update(self, result: SchedulerTickResult) -> SchedulerTickResult:
+        stamp = result.checked_at.strftime("%Y%m%dT%H%M%S%fZ")
+        path = self.root / "scheduler" / "ticks" / f"{stamp}-notification-{uuid4().hex}.json"
+        updated = result.model_copy(update={
+            "output_path": str(path),
+            "notification_update_for": result.output_path,
+        })
+        write_immutable(path, json_bytes(updated.model_dump(mode="json"), pretty=True))
+        return updated
 
     def _persist_discovery_failure(
         self, checked_at: datetime, forced: bool, exc: Exception,
@@ -343,11 +517,85 @@ class DeadlineScheduler:
     def _completion_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "completed" / season_id / f"gw{event}.json"
 
+    def _completion_exists(self, season_id: str, event: int) -> bool:
+        for path in self._completion_candidates(season_id, event):
+            if self._completion_valid(path, season_id, event):
+                return True
+        return False
+
+    def _completion_write_path(self, season_id: str, event: int, checked_at: datetime) -> Path:
+        path = self._completion_path(season_id, event)
+        if not path.exists() or not self._completion_valid(path, season_id, event):
+            if not path.exists():
+                return path
+            stamp = checked_at.strftime("%Y%m%dT%H%M%S%fZ")
+            return path.parent / f"gw{event}-{stamp}-{uuid4().hex}.json"
+        return path
+
+    def _completion_candidates(self, season_id: str, event: int) -> list[Path]:
+        path = self._completion_path(season_id, event)
+        siblings = sorted(path.parent.glob(f"gw{event}-*.json"), reverse=True) if path.parent.exists() else []
+        return [path, *siblings]
+
+    def _completion_valid(self, path: Path, season_id: str, event: int) -> bool:
+        try:
+            result = SchedulerTickResult.model_validate_json(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return False
+        except ValueError:
+            return False
+        if result.status not in {"succeeded", "already_completed"}:
+            return False
+        if result.season_id != season_id or result.event != event:
+            return False
+        output = Path(result.output_path)
+        if not output.is_absolute():
+            output = self.root / output
+        return output.is_file()
+
+    @staticmethod
+    def _before_deadline(deadline: datetime, checked_at: datetime | None) -> bool:
+        now = checked_at if checked_at is not None else datetime.now(timezone.utc)
+        return now.astimezone(timezone.utc) < deadline.astimezone(timezone.utc)
+
     def _lock_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "locks" / season_id / f"gw{event}.json"
 
     def _hermes_completion_path(self, season_id: str, event: int) -> Path:
         return self.root / "scheduler" / "hermes_completed" / season_id / f"gw{event}.json"
+
+    def _hermes_completion_exists(self, season_id: str, event: int) -> bool:
+        from aifpl.hermes import HermesDecision
+
+        for path in self._hermes_completion_candidates(season_id, event):
+            try:
+                marker = json.loads(path.read_text(encoding="utf-8"))
+                reference = marker.get("decision_path") if isinstance(marker, dict) else None
+                if not isinstance(reference, str):
+                    continue
+                decision_path = Path(reference)
+                if not decision_path.is_absolute():
+                    decision_path = self.root / decision_path
+                decision = HermesDecision.model_validate_json(decision_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+                continue
+            if decision.season_id == season_id and decision.gameweek == event:
+                return True
+        return False
+
+    def _hermes_completion_candidates(self, season_id: str, event: int) -> list[Path]:
+        path = self._hermes_completion_path(season_id, event)
+        siblings = sorted(path.parent.glob(f"gw{event}-*.json"), reverse=True) if path.parent.exists() else []
+        return [path, *siblings]
+
+    def _hermes_completion_write_path(self, season_id: str, event: int, checked_at: datetime) -> Path:
+        path = self._hermes_completion_path(season_id, event)
+        if not path.exists() or not self._hermes_completion_exists(season_id, event):
+            if not path.exists():
+                return path
+            stamp = checked_at.strftime("%Y%m%dT%H%M%S%fZ")
+            return path.parent / f"gw{event}-{stamp}-{uuid4().hex}.json"
+        return path
 
     def _run_hermes_for_event(self, event: int, season_id: str) -> str:
         from aifpl.hermes import HermesManager
@@ -355,15 +603,23 @@ class DeadlineScheduler:
         manager = HermesManager(self.root)
         try:
             existing = manager.latest_decision()
-            if existing.gameweek == event and existing.season_id in ("", season_id):
+            if existing.gameweek == event and existing.season_id == season_id:
                 return existing.decision_path
-            if existing.season_id in ("", season_id) and existing.gameweek > event:
+            if existing.season_id == season_id and existing.gameweek > event:
                 raise ValueError(f"Hermes has already advanced to gameweek {existing.gameweek}")
         except FileNotFoundError:
             pass
-        result = manager.run(expected_gameweek=event, expected_season_id=season_id)
-        if result.decision.gameweek != event:
-            raise ValueError(f"Hermes returned gameweek {result.decision.gameweek}, expected {event}")
+        result = manager.run(
+            expected_gameweek=event,
+            expected_season_id=season_id,
+            deadline=self._hermes_deadline,
+            deadline_clock=self._hermes_deadline_clock,
+        )
+        if result.decision.gameweek != event or result.decision.season_id != season_id:
+            raise ValueError(
+                f"Hermes returned {result.decision.season_id}/GW{result.decision.gameweek}, "
+                f"expected {season_id}/GW{event}"
+            )
         return result.decision.decision_path
 
     @staticmethod

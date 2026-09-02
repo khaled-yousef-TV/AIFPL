@@ -11,6 +11,15 @@ the public `bootstrap-static`, `fixtures`, and gameweek `event/{id}/live` data,
 validates a small useful subset, and writes the complete raw payload to disk
 with a retrieval timestamp.
 
+Hermes recommendations are not treated as executed teams. Before scoring a
+deadline, an owner can POST the entered squad, ordered bench, captain,
+vice-captain, transfers, hit cost, and chip state to
+`/execution/confirmations`. The confirmation is immutable and manifest-verified;
+Free Hit confirmations also retain the pre-chip squad, bank, free transfers, and
+purchase prices. Scorecards label whether they evaluated the recommendation or
+the confirmed execution. No FPL account credentials or transfer submission are
+required.
+
 ### Setup
 
 Requires Python 3.11+.
@@ -45,6 +54,8 @@ Backend optional:
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
 - `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
+- `AIFPL_DEPLOYED_COMMIT`: optional deployment SHA included in calibration model identity.
+- `AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS`: keep `false` unless transcript and debug reads are intentionally public.
 - `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. Refresh prioritizes the actionable gameweek and caps the request at `AIFPL_EVENT_MARKET_MAX_EVENTS` (default `10`) to stay within the Starter-plan memory limit.
 
 Frontend required:
@@ -70,7 +81,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **121 passing tests**. Commands below assume the
+The current suite contains **300 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests
@@ -177,6 +188,10 @@ curl -X POST 'http://127.0.0.1:8000/transfers/plan/horizon?pre_season=true&decis
   -H 'Content-Type: application/json' --data @examples/current_squad.json
 curl -X POST http://127.0.0.1:8000/hermes/run \
   -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl -X POST http://127.0.0.1:8000/execution/confirmations \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"decision_path":"hermes/decisions/<decision>.json","squad_ids":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],"starting_xi_ids":[1,2,3,4,5,6,7,8,9,10,11],"bench_ids":[12,13,14,15],"captain_id":1,"vice_captain_id":2}'
 curl http://127.0.0.1:8000/hermes/state
 curl http://127.0.0.1:8000/hermes/decisions/latest
 curl -X POST http://127.0.0.1:8000/evidence/players/build \
@@ -307,6 +322,9 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
     pre-deadline odds-projection outcome ledgers. A capped recency-weighted
     affine correction activates only after four gameweeks and 1,000 player-GW
     observations, then applies only to future catalogs.
+25. Execution truth: manual or imported deadline confirmations persist the
+    actual squad, ordered bench, captaincy, transfers, hit cost, and chip state;
+    scorecards prefer a matching confirmation and explicitly label their basis.
 
 ### Next
 
@@ -317,7 +335,8 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
    effective ownership (including captain/TC ownership) needs a data source
    before the differential metrics can be upgraded beyond the documented proxy.
 3. **Authenticated account integration:** exact selling prices and real transfer
-   execution in place of the current unauthenticated price assumptions.
+   execution and automatic deadline-squad import in place of the current manual
+   confirmation workflow.
 
 ## Frontend
 

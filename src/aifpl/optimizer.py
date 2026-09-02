@@ -6,6 +6,14 @@ from ortools.sat.python import cp_model
 
 from aifpl.config import bench_min_projection, bench_weight, minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
+from aifpl.objective_accounting import (
+    DEAD_BENCH_ALLOWANCE,
+    bench_coefficient,
+    captain_coefficient,
+    differential_coefficient,
+    preferred_coefficient,
+    starter_coefficient,
+)
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, validate_squad
 
 
@@ -15,6 +23,8 @@ class SquadOptimizationError(RuntimeError):
 
 @dataclass(frozen=True)
 class OptimizedSquad:
+    """A legal squad; money fields are FPL tenths of a million pounds."""
+
     players: list[CurrentPlayerProjection]
     total_cost: int
     bank: int
@@ -67,7 +77,7 @@ def optimize_squad(
         model.add(selected[index] == starters[index] + benches[index])
         model.add(dead_bench[index] <= benches[index])
         model.add(candidates[index].projected_points >= floor).only_enforce_if(selected[index], benches[index], dead_bench[index].Not())
-    model.add(sum(dead_bench) <= 2)
+    model.add(sum(dead_bench) <= DEAD_BENCH_ALLOWANCE)
     model.add(sum(starters) == 11)
     model.add(sum(captains) == 1)
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "GK") == 1)
@@ -79,13 +89,15 @@ def optimize_squad(
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") <= 3)
     model.add(sum(selected[index] * candidate.cost for index, candidate in enumerate(candidates)) <= budget - min_bank)
     model.maximize(
-        sum(starters[index] * round(candidate.projected_points * 10_000) for index, candidate in enumerate(candidates))
-        + sum(captains[index] * round(candidate.projected_points * 10_000) for index, candidate in enumerate(candidates))
-        + sum(benches[index] * round(candidate.projected_points * bench_bonus * 10_000) for index, candidate in enumerate(candidates))
-        + sum(selected[index] * 100 for index, candidate in enumerate(candidates) if candidate.player_id in (preferred_player_ids or set()))
+        sum(starters[index] * starter_coefficient(candidate.projected_points, 1.0) for index, candidate in enumerate(candidates))
+        + sum(captains[index] * captain_coefficient(candidate.projected_points, 1.0) for index, candidate in enumerate(candidates))
+        + sum(benches[index] * bench_coefficient(candidate.projected_points, 1.0, bench_bonus) for index, candidate in enumerate(candidates))
+        + sum(selected[index] * preferred_coefficient(1.0) for index, candidate in enumerate(candidates) if candidate.player_id in (preferred_player_ids or set()))
         + sum(
             selected[index]
-            * round(candidate.projected_points * differential_appetite * (100 - candidate.selected_by_percent) / 100 * 10_000)
+            * differential_coefficient(
+                candidate.projected_points, candidate.selected_by_percent, differential_appetite, 1.0,
+            )
             for index, candidate in enumerate(candidates)
         )
     )

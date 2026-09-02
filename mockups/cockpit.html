@@ -695,7 +695,8 @@
     score.innerHTML = `<strong>${dashboard.scorecard.actual.toFixed(1)}</strong><span>${dashboard.scorecard.delta >= 0 ? "+" : ""}${dashboard.scorecard.delta.toFixed(1)} vs model</span>`;
     const note = document.createElement("p");
     note.className = "score-note";
-    note.textContent = `GW${dashboard.scorecard.gameweek} scored decision \u00b7 projected ${dashboard.scorecard.projected.toFixed(1)} \u00b7 actual ${dashboard.scorecard.actual.toFixed(1)}`;
+    const basis = String(dashboard.scorecard.evaluation_basis || "recommendation_only").replaceAll("_", " ");
+    note.textContent = `GW${dashboard.scorecard.gameweek} ${basis} \u00b7 projected ${dashboard.scorecard.projected.toFixed(1)} \u00b7 actual ${dashboard.scorecard.actual.toFixed(1)}`;
     container.replaceChildren(score, note);
     if (dashboard.scorecard.best_player_id) {
       setTimeout(() => {

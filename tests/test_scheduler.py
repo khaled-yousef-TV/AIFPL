@@ -161,6 +161,22 @@ def test_scheduler_marks_missed_deadline_without_late_refresh(tmp_path) -> None:
     assert refresh.calls == []
 
 
+def test_scheduler_never_auto_runs_hermes_after_the_deadline(tmp_path, monkeypatch) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    subject = scheduler(tmp_path, FakeRefreshJob(tmp_path))
+    called: list[tuple[int, str]] = []
+    monkeypatch.setenv("AIFPL_HERMES_AUTO_RUN", "true")
+    monkeypatch.setattr(
+        subject, "_run_hermes_for_event",
+        lambda event, season_id: called.append((event, season_id)) or "decision.json",
+    )
+
+    result = subject.tick(datetime(2026, 8, 15, 13, tzinfo=timezone.utc))
+
+    assert result.status == "missed"
+    assert called == []
+
+
 def test_scheduler_completion_is_isolated_by_season(tmp_path) -> None:
     store = SnapshotStore(tmp_path)
     store.save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))

@@ -52,9 +52,30 @@ def event_market_max_events() -> int:
 
 
 def minimum_bank_tenths() -> int:
-    value = int(os.environ.get("AIFPL_MIN_BANK_TENTHS", "50"))
+    """Return the minimum bank in FPL tenths of a million pounds.
+
+    Five tenths is GBP 0.5m.  Keeping the unit in the function name and
+    documentation avoids treating this value as whole millions.
+    """
+    value = int(os.environ.get("AIFPL_MIN_BANK_TENTHS", "5"))
     if value < 0:
         raise ValueError("AIFPL_MIN_BANK_TENTHS must not be negative")
+    return value
+
+
+def paid_transfer_safety_cap() -> int:
+    """Return the maximum number of paid transfers allowed in a normal week."""
+    value = int(os.environ.get("AIFPL_PAID_TRANSFER_SAFETY_CAP", "2"))
+    if not 0 <= value <= 15:
+        raise ValueError("AIFPL_PAID_TRANSFER_SAFETY_CAP must be within 0..15")
+    return value
+
+
+def robustness_bank_scale_tenths() -> int:
+    """Return the bank scale, in FPL tenths, used by robustness scoring."""
+    value = int(os.environ.get("AIFPL_ROBUSTNESS_BANK_SCALE_TENTHS", "50"))
+    if value <= 0:
+        raise ValueError("AIFPL_ROBUSTNESS_BANK_SCALE_TENTHS must be positive")
     return value
 
 
@@ -90,6 +111,22 @@ def transfer_penalty() -> float:
     value = float(os.environ.get("AIFPL_TRANSFER_PENALTY", "1.0"))
     if value < 0:
         raise ValueError("AIFPL_TRANSFER_PENALTY must not be negative")
+    return value
+
+
+def horizon_min_confidence_weight() -> float:
+    """Return the information-weight floor for low-coverage forecast weeks."""
+    value = float(os.environ.get("AIFPL_HORIZON_MIN_CONFIDENCE_WEIGHT", "0.25"))
+    if not 0 <= value <= 1:
+        raise ValueError("AIFPL_HORIZON_MIN_CONFIDENCE_WEIGHT must be within 0..1")
+    return value
+
+
+def horizon_forecast_distance_decay() -> float:
+    """Return the multiplicative time weight applied per forecast week."""
+    value = float(os.environ.get("AIFPL_HORIZON_FORECAST_DISTANCE_DECAY", "0.9"))
+    if not 0 < value <= 1:
+        raise ValueError("AIFPL_HORIZON_FORECAST_DISTANCE_DECAY must be within (0, 1]")
     return value
 
 

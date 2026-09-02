@@ -14,6 +14,7 @@ from aifpl.player_evidence import PlayerEvidenceStore, late_return_adjustments, 
 from aifpl.market_signals import MarketSignalStore, PlayerPropSignal, TeamCleanSheetSignal
 from aifpl.transfer_awareness import TransferProfile, TransferAwarenessStore
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, verify_lineage, write_immutable, write_manifest
+from aifpl.model_identity import model_identity
 
 
 ODDS_PROJECTION_METHOD = "fpl_xg_xa_blend_v2.fixture_difficulty_v1.match_odds_v1.availability_evidence_v1.market_signals_v1"
@@ -258,6 +259,7 @@ class OddsProjectionStore:
                         "gameweeks_elapsed": elapsed_gameweeks(self.root, player_path, players),
                         "odds_win_weight": ODDS_WIN_WEIGHT, "player_prop_weight": prop_weight,
                         "new_signing_count": new_signings,
+                        "model_identity": model_identity(),
                         "evidence_cutoff": evidence_cutoff.isoformat() if evidence_cutoff else None,
                         "max_evidence_age_hours": max_evidence_age,
                         "odds_coverage_by_gameweek": coverage_by_gameweek,

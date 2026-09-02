@@ -20,10 +20,16 @@ class TransferProfile:
     prior_goals_per_90: float
     prior_assists_per_90: float
     prior_points_per_90: float
+    club_history: tuple[str, ...] = ()
 
     @property
     def has_prior_stats(self) -> bool:
         return self.prior_goals_per_90 > 0 or self.prior_assists_per_90 > 0 or self.prior_points_per_90 > 0
+
+    @property
+    def previous_clubs(self) -> tuple[str, ...]:
+        """Compatibility name for consumers that call the history a club list."""
+        return self.club_history
 
 
 class TransferAwarenessStore:
@@ -49,7 +55,7 @@ class TransferAwarenessStore:
                 profiles[player.id] = TransferProfile(
                     player_id=player.id, previous_club=None, is_new_signing=False,
                     minutes_multiplier=1.0, prior_goals_per_90=0.0,
-                    prior_assists_per_90=0.0, prior_points_per_90=0.0,
+                    prior_assists_per_90=0.0, prior_points_per_90=0.0, club_history=(),
                 )
                 continue
             new_signing = normalize_club_name(last.club) != normalize_club_name(player.club)
@@ -62,13 +68,14 @@ class TransferAwarenessStore:
                 prior_goals_per_90=_rate(last.goals_scored, last.minutes),
                 prior_assists_per_90=_rate(last.assists, last.minutes),
                 prior_points_per_90=_rate(last.total_points, last.minutes),
+                club_history=last.club_history,
             )
         return profiles
 
     @staticmethod
     def _lookup(previous: dict[str, _LastSeasonRow], player: CurrentPlayer) -> _LastSeasonRow | None:
         full_name = f"{player.first_name} {player.second_name}".strip() if player.first_name else player.name
-        for key in (normalize_name(full_name), normalize_name(player.name)):
+        for key in (f"id:{player.id}", normalize_name(full_name), normalize_name(player.name)):
             if key in previous:
                 return previous[key]
         return None
@@ -77,17 +84,52 @@ class TransferAwarenessStore:
         latest_path = self._latest_normalized_path()
         if latest_path is None:
             return {}
-        rows: dict[str, _LastSeasonRow] = {}
-        for line in latest_path.read_text(encoding="utf-8").splitlines():
-            record = PlayerGameweekRecord(**json.loads(line))
-            key = normalize_name(record.player_name)
-            current = rows.get(key)
-            if current is None or record.gameweek > current.gameweek:
-                rows[key] = _LastSeasonRow(
-                    gameweek=record.gameweek, club=record.team, minutes=record.minutes,
-                    goals_scored=record.goals_scored, assists=record.assists,
+        records = [
+            PlayerGameweekRecord(**json.loads(line))
+            for line in latest_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        # A player can have multiple rows in one GW (a double gameweek), and
+        # can also change clubs during the imported season.  Aggregate by the
+        # stable source ID while retaining the last chronological club.
+        aggregates: dict[int, _LastSeasonRow] = {}
+        names_by_id: dict[int, set[str]] = {}
+        for record in sorted(records, key=_record_sort_key):
+            names_by_id.setdefault(record.player_id, set()).add(record.player_name)
+            current = aggregates.get(record.player_id)
+            if current is None:
+                aggregates[record.player_id] = _LastSeasonRow(
+                    player_id=record.player_id,
+                    player_name=record.player_name,
+                    gameweek=record.gameweek,
+                    club=record.team,
+                    minutes=record.minutes,
+                    goals_scored=record.goals_scored,
+                    assists=record.assists,
                     total_points=record.total_points,
+                    club_history=(record.team,),
                 )
+                continue
+            history = current.club_history
+            if not any(normalize_club_name(record.team) == normalize_club_name(club) for club in history):
+                history = (*history, record.team)
+            aggregates[record.player_id] = _LastSeasonRow(
+                player_id=current.player_id,
+                player_name=record.player_name or current.player_name,
+                gameweek=record.gameweek,
+                club=record.team,
+                minutes=current.minutes + record.minutes,
+                goals_scored=current.goals_scored + record.goals_scored,
+                assists=current.assists + record.assists,
+                total_points=current.total_points + record.total_points,
+                club_history=history,
+            )
+
+        rows: dict[str, _LastSeasonRow] = {}
+        for aggregate in aggregates.values():
+            rows[f"id:{aggregate.player_id}"] = aggregate
+            for player_name in names_by_id.get(aggregate.player_id, {aggregate.player_name}):
+                rows.setdefault(normalize_name(player_name), aggregate)
         return rows
 
     def _latest_normalized_path(self) -> Path | None:
@@ -117,12 +159,19 @@ class TransferAwarenessStore:
 
 @dataclass(frozen=True)
 class _LastSeasonRow:
+    player_id: int
+    player_name: str
     gameweek: int
     club: str
     minutes: int
     goals_scored: int
     assists: int
     total_points: int
+    club_history: tuple[str, ...]
+
+
+def _record_sort_key(record: PlayerGameweekRecord) -> tuple[int, str, int]:
+    return record.gameweek, str(record.kickoff_time or ""), record.fixture_id
 
 
 def _rate(value: int, minutes: int) -> float:

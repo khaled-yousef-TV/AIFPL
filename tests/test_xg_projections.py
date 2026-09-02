@@ -26,6 +26,20 @@ def test_xg_xa_blend_scales_starts_against_elapsed_opportunities() -> None:
     projection = xg_xa_blend(player(), gameweeks_elapsed=20)
 
     assert projection.expected_minutes == 45
+    assert projection.appearance_probability == 0.5
+    assert projection.start_probability == 0.5
+    assert projection.conditional_minutes == 90
+
+
+def test_xg_xa_blend_does_not_double_discount_substitute_minutes() -> None:
+    substitute_heavy = replace(player(), minutes=900, starts=5)
+
+    projection = xg_xa_blend(substitute_heavy, gameweeks_elapsed=20)
+
+    assert projection.expected_minutes == 45
+    assert projection.appearance_probability == 0.5
+    assert projection.start_probability == 0.25
+    assert projection.conditional_minutes == 90
 
 
 def test_xg_xa_blend_applies_availability() -> None:
