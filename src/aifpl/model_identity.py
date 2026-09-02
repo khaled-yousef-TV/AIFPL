@@ -34,6 +34,8 @@ MODEL_SOURCE_FILES = (
     "optimizer.py",
     "horizon_transfers.py",
     "transfers.py",
+    "account.py",
+    "fpl.py",
 )
 
 

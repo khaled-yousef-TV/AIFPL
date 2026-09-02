@@ -72,6 +72,7 @@ If your existing Render service still uses a custom start command, set **Start C
 ```bash
 aifpl refresh-current-data --start-gameweek 1 --end-gameweek 6
 aifpl hermes-run
+aifpl hermes-run --objective-mode RANK_MODE
 ```
 
 The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_KEY`. Until these commands complete, `/dashboard/current` correctly reports that no committed dashboard state exists.
@@ -82,7 +83,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **311 passing tests**. Commands below assume the
+The current suite contains **317 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests
@@ -127,6 +128,9 @@ aifpl build-odds-projections --start-gameweek 1 --end-gameweek 6
 aifpl odds-projections --limit 10
 aifpl plan-horizon examples/current_squad.json
 aifpl save-game-state /path/to/rank_state.json
+aifpl fetch-account-state 123456 --season-id 2026-27 --target-rank 50000 --free-transfers 2
+aifpl import-account-state /path/to/history.json /path/to/picks.json --entry-id 123456 --season-id 2026-27 --target-rank 50000 --free-transfers 2
+aifpl latest-account-state --entry-id 123456 --season-id 2026-27
 aifpl build-template /path/to/ownership_landscape.json
 aifpl optimize-current-squad --projection-source odds --objective-mode RANK_MODE
 aifpl plan-transfers examples/current_squad.json --projection-source odds --objective-mode RANK_MODE
@@ -151,6 +155,7 @@ aifpl plan-transfers examples/current_squad.json --projection-source odds
 uvicorn aifpl.api:app --reload
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/game-state -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl http://127.0.0.1:8000/account/latest -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl http://127.0.0.1:8000/template/players -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl 'http://127.0.0.1:8000/strategy/policy?objective_mode=RANK_MODE' -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl -X POST http://127.0.0.1:8000/health/sources/check -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
@@ -160,6 +165,8 @@ curl -X POST http://127.0.0.1:8000/jobs/refresh/current \
   -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"start_gameweek":1,"end_gameweek":1,"budget":1000}'
+curl -X POST 'http://127.0.0.1:8000/hermes/run?objective_mode=RANK_MODE' \
+  -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl http://127.0.0.1:8000/jobs/refresh/current/latest
 curl http://127.0.0.1:8000/scheduler/status
 curl -X POST http://127.0.0.1:8000/scheduler/tick -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
@@ -338,6 +345,9 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
      template and effective-ownership inputs, exposure/net-exposure accounting,
      rank-aware transfer/captain/chip signals, dynamic strategy policy, and
      rank objective decomposition in plans and dashboard payloads.
+27. Read-only public FPL account import: entry history and picks can populate
+     rank history, current rank, bank, free transfers, chips, and captaincy
+     without storing credentials or submitting transfers.
 
 ### Next
 
@@ -349,8 +359,8 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
    production-quality rank distributions, rival cohorts, and confidence intervals
    still need a timestamped data source.
 3. **Authenticated account integration:** exact selling prices and real transfer
-   execution and automatic deadline-squad import in place of the current manual
-   confirmation workflow.
+   execution in place of the current manual confirmation workflow; the public
+   read-only rank/account importer is already available.
 
 ## Frontend
 

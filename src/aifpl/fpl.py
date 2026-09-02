@@ -59,6 +59,24 @@ class FplClient:
             raise FplSourceError("FPL event live response is missing player elements")
         return payload
 
+    async def fetch_entry_history(self, entry_id: int) -> dict[str, Any]:
+        if entry_id < 1:
+            raise ValueError("entry_id must be at least 1")
+        payload = await self._fetch_json(f"/entry/{entry_id}/history/")
+        if not isinstance(payload, dict) or not isinstance(payload.get("current"), list):
+            raise FplSourceError("FPL account history response is missing current records")
+        return payload
+
+    async def fetch_entry_picks(self, entry_id: int, event: int) -> dict[str, Any]:
+        if entry_id < 1:
+            raise ValueError("entry_id must be at least 1")
+        if event < 1:
+            raise ValueError("event must be at least 1")
+        payload = await self._fetch_json(f"/entry/{entry_id}/event/{event}/picks/")
+        if not isinstance(payload, dict) or not isinstance(payload.get("picks"), list):
+            raise FplSourceError("FPL account picks response is missing picks")
+        return payload
+
     async def _fetch_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"
 

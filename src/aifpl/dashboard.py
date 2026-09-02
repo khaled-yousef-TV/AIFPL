@@ -94,6 +94,7 @@ class DashboardCaptainOption(BaseModel):
     target_cohort_eo: float | None = None
     net_exposure_if_captained: float | None = None
     strategy_classification: str | None = None
+    rank_swing_potential: float | None = None
 
 
 class DashboardHorizonPoint(BaseModel):
@@ -541,6 +542,7 @@ def _dashboard_captain_options(
                 row, player_id, template_states, decision.active_chip == "triple_captain",
             ),
             strategy_classification=option_by_id[player_id].classification if player_id in option_by_id else None,
+            rank_swing_potential=option_by_id[player_id].rank_swing_potential if player_id in option_by_id else None,
         )
         for player_id, row in candidates[:3]
     ]

@@ -755,9 +755,10 @@
       const safety = option.start_probability != null ? ` (${Math.round(option.start_probability * 100)}%)` : "";
       const exposure = option.net_exposure_if_captained != null ? ` net ${option.net_exposure_if_captained >= 0 ? "+" : ""}${option.net_exposure_if_captained.toFixed(0)}%` : "";
       const classification = option.strategy_classification ? ` ${option.strategy_classification.replaceAll("_", " ")}` : "";
+      const swing = option.rank_swing_potential != null ? ` swing ${option.rank_swing_potential.toFixed(1)}` : "";
       return option.is_captain
-        ? `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${classification} (C)`
-        : `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${classification}`;
+        ? `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${swing}${classification} (C)`
+        : `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${swing}${classification}`;
     }).join(" \u00b7 ");
     document.getElementById("captain-options").textContent = captainOptions ? `Options: ${captainOptions}` : "";
     document.getElementById("bank-value").textContent = `\u00a3${(dashboard.bank / 10).toFixed(1)}m`;

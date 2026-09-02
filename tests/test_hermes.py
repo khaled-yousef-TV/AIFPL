@@ -121,6 +121,30 @@ def test_hermes_sets_strategy_and_persists_autonomous_decision(tmp_path) -> None
     assert manager.latest_decision() == result.decision
 
 
+def test_explicit_objective_mode_allows_a_deliberate_points_to_rank_switch(tmp_path) -> None:
+    previous, _, _ = manual_state_and_plan()
+    manager = HermesManager(tmp_path)
+    manager._requested_objective_mode = "RANK_MODE"
+
+    output = manager._call_tool(
+        "set_strategy",
+        {
+            "risk_tolerance": 0.7,
+            "hit_aversion": 0.5,
+            "differential_appetite": 0.2,
+            "planning_horizon": 3,
+            "preferred_players": [],
+            "objective_mode": "RANK_MODE",
+            "rationale": "Use explicit rank objective for this planning cycle.",
+        },
+        previous,
+    )
+
+    assert output["accepted"] is True
+    assert manager._strategy is not None
+    assert manager._strategy.objective_mode == "RANK_MODE"
+
+
 def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypatch) -> None:
     manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
     result = manager.run()

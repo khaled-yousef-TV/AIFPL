@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.config import cors_origins, data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
+from aifpl.account import AccountSnapshot, AccountSnapshotStore, build_account_snapshot
 from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
 from aifpl.captaincy_strategy import choose_captain
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
@@ -178,6 +179,15 @@ class ChipStateRequest(BaseModel):
     gameweek: int = Field(ge=1, le=38)
 
 
+class AccountStateRequest(BaseModel):
+    entry_id: int = Field(gt=0)
+    season_id: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
+    target_rank: int = Field(gt=0)
+    free_transfers: int = Field(ge=0, le=5)
+    gameweek: int | None = Field(default=None, ge=1, le=38)
+    chips_remaining: dict[str, int] = Field(default_factory=dict)
+
+
 class ExecutionConfirmationRequest(BaseModel):
     decision_path: str = Field(min_length=1, max_length=2000)
     source: str = Field(default="manual", pattern="^(manual|fpl_import)$")
@@ -253,6 +263,49 @@ def latest_game_state(request: Request) -> GameState:
 def save_game_state(state: GameState) -> GameState:
     GameStateStore(data_dir()).save(state)
     return state
+
+
+@app.post("/game-state/account", response_model=GameState, status_code=201)
+def import_account_game_state(request: AccountStateRequest) -> GameState:
+    try:
+        client = FplClient()
+        history = asyncio.run(client.fetch_entry_history(request.entry_id))
+        gameweek = request.gameweek or max(
+            int(record["event"])
+            for record in history.get("current", [])
+            if isinstance(record, dict) and str(record.get("event", "")).isdigit()
+        )
+        picks = asyncio.run(client.fetch_entry_picks(request.entry_id, gameweek))
+        snapshot, state = build_account_snapshot(
+            history,
+            picks,
+            entry_id=request.entry_id,
+            season_id=request.season_id,
+            target_rank=request.target_rank,
+            free_transfers=request.free_transfers,
+            chips_remaining=request.chips_remaining,
+            gameweek=gameweek,
+        )
+        AccountSnapshotStore(data_dir()).save(snapshot)
+        GameStateStore(data_dir()).save(state)
+        return state
+    except FplSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/account/latest", response_model=AccountSnapshot)
+def latest_account_snapshot(
+    request: Request,
+    entry_id: int | None = Query(None, ge=1),
+    season_id: str | None = Query(None, min_length=3, max_length=32),
+) -> AccountSnapshot:
+    _protect_sensitive_read(request)
+    try:
+        return AccountSnapshotStore(data_dir()).latest(entry_id=entry_id, season_id=season_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/template/landscape", response_model=TemplateCatalog)
@@ -362,6 +415,7 @@ def captaincy_plan(
                 "net_exposure": option.net_exposure,
                 "score": option.score,
                 "classification": option.classification,
+                "rank_swing_potential": option.rank_swing_potential,
             }
             for option in choice.options
         ],
@@ -385,9 +439,11 @@ def latest_source_health() -> SourceHealthReport:
 
 
 @app.post("/hermes/run", response_model=HermesRunResult, status_code=201)
-def run_hermes() -> HermesRunResult:
+def run_hermes(
+    objective_mode: ObjectiveMode | None = Query(None),
+) -> HermesRunResult:
     try:
-        return HermesManager(data_dir()).run_current()
+        return HermesManager(data_dir()).run_current(objective_mode=objective_mode)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:

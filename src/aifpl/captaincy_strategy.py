@@ -19,6 +19,7 @@ class CaptaincyOption:
     net_exposure: float | None
     score: float
     classification: str
+    rank_swing_potential: float | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ def choose_captain(
             triple_captain=triple_captain, policy=policy,
         )
         classification = _classification(policy.status, field_eo, net)
+        swing = round(abs(net) * player.projected_points / 100, 4) if net is not None else None
         options.append(CaptaincyOption(
             player_id=player.player_id,
             projected_points=player.projected_points,
@@ -63,6 +65,7 @@ def choose_captain(
             net_exposure=net,
             score=round(score, 4),
             classification=classification,
+            rank_swing_potential=swing,
         ))
     options.sort(key=lambda option: (-option.score, -option.projected_points, option.player_id))
     by_id = {player.player_id: player for player in starters}

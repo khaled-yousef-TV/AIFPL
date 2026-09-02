@@ -198,6 +198,49 @@ def test_game_state_route_round_trips_rank_state(monkeypatch, tmp_path) -> None:
     assert latest.json()["rank_gap_ratio"] == 3.68
 
 
+def test_account_game_state_route_imports_public_account_payloads(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+
+    class FakeFplClient:
+        async def fetch_entry_history(self, entry_id):
+            assert entry_id == 123
+            return {"current": [{"event": 2, "overall_rank": 184000, "bank": 83}]}
+
+        async def fetch_entry_picks(self, entry_id, event):
+            assert (entry_id, event) == (123, 2)
+            return {
+                "active_chip": None,
+                "entry_history": {"event": 2},
+                "picks": [
+                    {
+                        "element": player_id,
+                        "position": player_id,
+                        "is_captain": player_id == 1,
+                        "is_vice_captain": player_id == 2,
+                    }
+                    for player_id in range(1, 16)
+                ],
+            }
+
+    monkeypatch.setattr(api, "FplClient", FakeFplClient)
+    response = TestClient(api.app).post(
+        "/game-state/account",
+        json={
+            "entry_id": 123,
+            "season_id": "2026-27",
+            "target_rank": 50000,
+            "free_transfers": 2,
+            "chips_remaining": {"wildcard": 1},
+        },
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["account_id"] == 123
+    assert (tmp_path / "account" / "2026-27" / "123").is_dir()
+
+
 def test_scheduler_ticks_returns_recent_ticks_newest_first(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)

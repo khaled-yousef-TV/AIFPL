@@ -11,6 +11,7 @@ from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 import httpx
 from pydantic import BaseModel, Field
 
+from aifpl.account import AccountSnapshot, AccountSnapshotStore
 from aifpl.artifacts import json_bytes, sha256_path, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
 from aifpl.game_state import GameState, GameStateStore, ObjectiveMode
@@ -205,6 +206,7 @@ class HermesDecisionBackend:
         except FileNotFoundError:
             evidence_count = 0
         state = self.latest_game_state()
+        account = self.latest_account_snapshot()
         return {
             "source_health": health,
             "player_evidence_records": evidence_count,
@@ -212,12 +214,19 @@ class HermesDecisionBackend:
             "odds_projection_coverage": self._odds_coverage(),
             "chip_advice": self._chip_advice(),
             "game_state": state.model_dump(mode="json") if state else None,
+            "account_snapshot": account.model_dump(mode="json") if account else None,
             "template_summary": self._template_summary(state),
         }
 
     def latest_game_state(self) -> GameState | None:
         try:
             return GameStateStore(self.root).latest()
+        except FileNotFoundError:
+            return None
+
+    def latest_account_snapshot(self) -> AccountSnapshot | None:
+        try:
+            return AccountSnapshotStore(self.root).latest()
         except FileNotFoundError:
             return None
 
@@ -487,6 +496,7 @@ class HermesManager:
         self._expected_season_id: str | None = None
         self._deadline: datetime | None = None
         self._deadline_clock: datetime | None = None
+        self._requested_objective_mode: ObjectiveMode | None = None
 
     def run(
         self,
@@ -494,11 +504,13 @@ class HermesManager:
         expected_season_id: str | None = None,
         deadline: datetime | None = None,
         deadline_clock: datetime | None = None,
+        objective_mode: ObjectiveMode | None = None,
     ) -> HermesRunResult:
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
         self._deadline = deadline
         self._deadline_clock = deadline_clock
+        self._requested_objective_mode = objective_mode
         lock_path = self.root / "hermes" / "run.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -512,7 +524,7 @@ class HermesManager:
             flock(descriptor, LOCK_UN)
             os.close(descriptor)
 
-    def run_current(self) -> HermesRunResult:
+    def run_current(self, objective_mode: ObjectiveMode | None = None) -> HermesRunResult:
         from aifpl.scheduler import DeadlineScheduler
 
         schedule = DeadlineScheduler(self.root).status()
@@ -522,6 +534,7 @@ class HermesManager:
             expected_gameweek=schedule.event,
             expected_season_id=schedule.season_id,
             deadline=schedule.deadline,
+            objective_mode=objective_mode,
         )
 
     def supersede_decision(
@@ -539,6 +552,7 @@ class HermesManager:
         """
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
+        self._requested_objective_mode = None
         lock_path = self.root / "hermes" / "run.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -650,6 +664,7 @@ class HermesManager:
             return None
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
+        self._requested_objective_mode = None
         lock_path = self.root / "hermes" / "run.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -740,6 +755,7 @@ class HermesManager:
             "of an already computed plan; set and finalize strategy before requesting a plan. "
             "POINTS_MODE optimizes expected points. RANK_MODE is only valid when the context contains a current rank, "
             "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
+            " A public account snapshot is read-only evidence; never treat it as transfer execution confirmation or invent purchase prices."
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -950,10 +966,24 @@ class HermesManager:
     def _call_tool(self, name: str, arguments: dict[str, Any], previous: HermesState | None) -> Any:
         if name == "set_strategy":
             strategy = HermesStrategy.model_validate(arguments)
-            if previous is not None and strategy != previous.strategy:
+            if (
+                self._requested_objective_mode is not None
+                and strategy.objective_mode != self._requested_objective_mode
+            ):
                 raise ValueError(
-                    "Hermes strategy cannot change after a plan or initial decision; outcome-driven changes require manual review"
+                    f"This run explicitly requested {self._requested_objective_mode}; "
+                    "set_strategy must use that objective mode"
                 )
+            if previous is not None and strategy != previous.strategy:
+                allowed_mode_switch = (
+                    self._requested_objective_mode is not None
+                    and strategy.objective_mode == self._requested_objective_mode
+                    and strategy.objective_mode != previous.strategy.objective_mode
+                )
+                if not allowed_mode_switch:
+                    raise ValueError(
+                        "Hermes strategy cannot change after a plan or initial decision; outcome-driven changes require manual review"
+                    )
             if (
                 self._initial is not None or self._horizon is not None or self._hold is not None
             ) and strategy != self._strategy:

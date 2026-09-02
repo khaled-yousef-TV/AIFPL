@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from aifpl.account import AccountSnapshotStore, build_account_snapshot
 from aifpl.config import data_dir
 from aifpl.calibration import compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.chips import ChipAdviceStore, ChipStateStore
@@ -93,6 +94,89 @@ def latest_game_state() -> None:
 
 
 @app.command()
+def import_account_state(
+    history_file: Path = typer.Argument(..., exists=True, readable=True),
+    picks_file: Path = typer.Argument(..., exists=True, readable=True),
+    entry_id: int = typer.Option(..., min=1),
+    season_id: str = typer.Option(...),
+    target_rank: int = typer.Option(..., min=1),
+    free_transfers: int = typer.Option(..., min=0, max=5),
+    gameweek: int | None = typer.Option(None, min=1, max=38),
+    chips_file: Path | None = typer.Option(None, exists=True, readable=True),
+) -> None:
+    """Import explicit public FPL account history and picks into rank state."""
+    try:
+        history = json.loads(history_file.read_text(encoding="utf-8"))
+        picks = json.loads(picks_file.read_text(encoding="utf-8"))
+        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else {}
+        snapshot, state = build_account_snapshot(
+            history,
+            picks,
+            entry_id=entry_id,
+            season_id=season_id,
+            target_rank=target_rank,
+            free_transfers=free_transfers,
+            chips_remaining=chips,
+            gameweek=gameweek,
+        )
+        account_path = AccountSnapshotStore(data_dir()).save(snapshot)
+        state_path = GameStateStore(data_dir()).save(state)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"account_path": str(account_path), "state_path": str(state_path), "state": state}))
+
+
+@app.command()
+def fetch_account_state(
+    entry_id: int = typer.Argument(..., min=1),
+    season_id: str = typer.Option(...),
+    target_rank: int = typer.Option(..., min=1),
+    free_transfers: int = typer.Option(..., min=0, max=5),
+    gameweek: int | None = typer.Option(None, min=1, max=38),
+    chips_file: Path | None = typer.Option(None, exists=True, readable=True),
+) -> None:
+    """Fetch public FPL account history and picks, then persist rank state."""
+    try:
+        client = FplClient()
+        history = asyncio.run(client.fetch_entry_history(entry_id))
+        selected_gameweek = gameweek or max(
+            int(record["event"])
+            for record in history.get("current", [])
+            if isinstance(record, dict) and str(record.get("event", "")).isdigit()
+        )
+        picks = asyncio.run(client.fetch_entry_picks(entry_id, selected_gameweek))
+        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else {}
+        snapshot, state = build_account_snapshot(
+            history,
+            picks,
+            entry_id=entry_id,
+            season_id=season_id,
+            target_rank=target_rank,
+            free_transfers=free_transfers,
+            chips_remaining=chips,
+            gameweek=selected_gameweek,
+        )
+        account_path = AccountSnapshotStore(data_dir()).save(snapshot)
+        state_path = GameStateStore(data_dir()).save(state)
+    except (FplSourceError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"account_path": str(account_path), "state_path": str(state_path), "state": state}))
+
+
+@app.command()
+def latest_account_state(
+    entry_id: int | None = typer.Option(None, min=1),
+    season_id: str | None = typer.Option(None),
+) -> None:
+    """Show the latest imported public FPL account snapshot."""
+    try:
+        snapshot = AccountSnapshotStore(data_dir()).latest(entry_id=entry_id, season_id=season_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(snapshot))
+
+
+@app.command()
 def build_template(ownership_file: Path = typer.Argument(..., exists=True, readable=True)) -> None:
     """Build and persist a template catalog from an ownership landscape JSON document."""
     try:
@@ -162,10 +246,15 @@ def build_player_evidence() -> None:
 
 
 @app.command()
-def hermes_run() -> None:
+def hermes_run(
+    objective_mode: ObjectiveMode | None = typer.Option(
+        None,
+        help="Explicitly select POINTS_MODE or RANK_MODE for this planning cycle.",
+    ),
+) -> None:
     """Let Hermes set strategy and commit one autonomous backend-validated decision."""
     try:
-        result = HermesManager(data_dir()).run_current()
+        result = HermesManager(data_dir()).run_current(objective_mode=objective_mode)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(result))

@@ -34,6 +34,7 @@ class GameState(BaseModel):
     """Season-scoped state required to make a rank-aware FPL decision."""
 
     season_id: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
+    account_id: int | None = Field(default=None, gt=0)
     gameweek: int = Field(ge=1, le=38)
     overall_rank: int | None = Field(default=None, gt=0)
     target_rank: int | None = Field(default=None, gt=0)
