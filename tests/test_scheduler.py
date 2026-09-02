@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aifpl.config import SchedulerSettings
+import aifpl.scheduler as scheduler_module
+from aifpl.config import AccountSyncSettings, SchedulerSettings
+from aifpl.game_state import GameStateStore
 from aifpl.refresh import RefreshJobError, RefreshJobResult
 from aifpl.scheduler import CLAIM_LEASE_SECONDS, DeadlineScheduler, SchedulerTickError
 from aifpl.snapshots import SnapshotStore
@@ -76,6 +78,50 @@ def test_scheduler_runs_due_event_once(tmp_path) -> None:
     assert first.status == "succeeded"
     assert second.status == "already_completed"
     assert refresh.calls == [(1, 6, 1000)]
+
+
+def test_scheduler_auto_syncs_configured_account_state(tmp_path, monkeypatch) -> None:
+    class FakeFplClient:
+        async def fetch_entry_history(self, entry_id):
+            assert entry_id == 123
+            return {
+                "current": [
+                    {"event": 1, "overall_rank": 900_000, "bank": 40, "event_transfers": 0},
+                    {"event": 2, "overall_rank": 184_000, "bank": 83, "event_transfers": 2},
+                ],
+                "chips": [{"name": "wildcard"}],
+            }
+
+        async def fetch_entry_picks(self, entry_id, event):
+            assert (entry_id, event) == (123, 2)
+            return {
+                "active_chip": None,
+                "entry_history": {"event": 2},
+                "picks": [
+                    {
+                        "element": player_id,
+                        "position": player_id,
+                        "is_captain": player_id == 1,
+                        "is_vice_captain": player_id == 2,
+                    }
+                    for player_id in range(1, 16)
+                ],
+            }
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "account_sync_settings",
+        lambda: AccountSyncSettings(True, 123, 50_000, 1),
+    )
+    monkeypatch.setattr(scheduler_module, "FplClient", FakeFplClient)
+
+    scheduler_module.DeadlineScheduler(tmp_path)._sync_account_state_if_enabled("2026-27")
+
+    state = GameStateStore(tmp_path).latest()
+    assert state.account_id == 123
+    assert state.objective_mode == "RANK_MODE"
+    assert state.free_transfers == 1
+    assert state.chips_remaining["wildcard"] == 1
 
 
 def test_scheduler_scores_completed_teams_before_hermes_runs(tmp_path, monkeypatch) -> None:

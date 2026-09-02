@@ -31,6 +31,47 @@ def data_dir() -> Path:
     return Path(os.environ.get("AIFPL_DATA_DIR", "data")).expanduser()
 
 
+@dataclass(frozen=True)
+class AccountSyncSettings:
+    enabled: bool
+    entry_id: int | None
+    target_rank: int | None
+    initial_free_transfers: int
+
+
+def account_sync_settings() -> AccountSyncSettings:
+    enabled = os.environ.get("AIFPL_ACCOUNT_AUTO_SYNC", "false").lower() in ("1", "true", "yes")
+    raw_entry_id = os.environ.get("AIFPL_ACCOUNT_ENTRY_ID")
+    raw_target_rank = os.environ.get("AIFPL_ACCOUNT_TARGET_RANK")
+    entry_id = _optional_positive_int(raw_entry_id, "AIFPL_ACCOUNT_ENTRY_ID")
+    target_rank = _optional_positive_int(raw_target_rank, "AIFPL_ACCOUNT_TARGET_RANK")
+    initial_free_transfers = int(os.environ.get("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS", "1"))
+    if not 1 <= initial_free_transfers <= 5:
+        raise ValueError("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS must be within 1..5")
+    if enabled and (entry_id is None or target_rank is None):
+        raise ValueError(
+            "AIFPL_ACCOUNT_ENTRY_ID and AIFPL_ACCOUNT_TARGET_RANK are required when account auto-sync is enabled",
+        )
+    return AccountSyncSettings(
+        enabled=enabled,
+        entry_id=entry_id,
+        target_rank=target_rank,
+        initial_free_transfers=initial_free_transfers,
+    )
+
+
+def _optional_positive_int(value: str | None, name: str) -> int | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if number <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return number
+
+
 def freshness_hours(source: str) -> float:
     defaults = {"bootstrap": 24.0, "fixtures": 24.0, "event_live": 24.0, "odds": 6.0,
                 "event_markets": 6.0, "player_evidence": 24.0}

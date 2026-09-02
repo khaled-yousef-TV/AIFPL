@@ -75,6 +75,9 @@ run_command aifpl refresh-current-data \
   --start-gameweek "${AIFPL_RENDER_BOOTSTRAP_START_GAMEWEEK:-1}" \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
+if [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "true" ] || [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "1" ] || [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "yes" ]; then
+  run_command aifpl sync-account-state
+fi
 # Reinitialization is backend-gated: it rebuilds the pre-season opening squad
 # automatically whenever the committed plan's planner_version is stale, and is
 # a no-op afterwards and after GW1.

@@ -18,6 +18,7 @@ from aifpl.hermes import (
 from aifpl.horizon_transfers import HorizonGameweekPlan, HorizonTransferPlan, PLANNER_VERSION
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
 from aifpl.optimizer import OptimizedSquad
+from aifpl.game_state import GameState
 
 
 class FakeModel:
@@ -35,6 +36,17 @@ class FakeModel:
         return {"role": "assistant", "content": None, "tool_calls": [{"id": "3", "type": "function", "function": {"name": "commit_decision", "arguments": '{"action":"adopt_initial","explanation":"Best backend validated opening squad."}'}}]}
 
 
+class RankFakeModel(FakeModel):
+    def complete(self, messages, tools):
+        message = super().complete(messages, tools)
+        if self.step == 1:
+            call = message["tool_calls"][0]
+            arguments = json.loads(call["function"]["arguments"])
+            arguments["objective_mode"] = "RANK_MODE"
+            call["function"]["arguments"] = json.dumps(arguments)
+        return message
+
+
 class FakeBackend:
     def context(self):
         return {"source_health": {"overall_status": "healthy"}}
@@ -45,6 +57,14 @@ class FakeBackend:
             projection_catalog="fake-catalog.json", pre_season=True, solver_status="OPTIMAL",
             methodology="test", planner_version=PLANNER_VERSION,
         )
+
+
+class RankAwareFakeBackend(FakeBackend):
+    def __init__(self, state: GameState) -> None:
+        self.state = state
+
+    def latest_game_state(self):
+        return self.state
 
 
 class FakeHorizonBackend(HermesDecisionBackend):
@@ -143,6 +163,27 @@ def test_explicit_objective_mode_allows_a_deliberate_points_to_rank_switch(tmp_p
     assert output["accepted"] is True
     assert manager._strategy is not None
     assert manager._strategy.objective_mode == "RANK_MODE"
+
+
+def test_hermes_automatically_uses_rank_mode_from_account_state(tmp_path) -> None:
+    state = GameState(
+        season_id="2026-27",
+        gameweek=1,
+        overall_rank=100_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+    manager = HermesManager(
+        tmp_path,
+        model=RankFakeModel(),
+        backend=RankAwareFakeBackend(state),
+    )
+
+    result = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+
+    assert result.decision.strategy.objective_mode == "RANK_MODE"
 
 
 def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypatch) -> None:

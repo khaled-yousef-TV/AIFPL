@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -36,6 +36,39 @@ class AccountSnapshot(BaseModel):
     output_path: str = ""
 
 
+class AccountClient(Protocol):
+    async def fetch_entry_history(self, entry_id: int) -> dict[str, Any]: ...
+
+    async def fetch_entry_picks(self, entry_id: int, event: int) -> dict[str, Any]: ...
+
+
+async def fetch_and_build_account_state(
+    client: AccountClient,
+    *,
+    entry_id: int,
+    season_id: str,
+    target_rank: int,
+    free_transfers: int | None = None,
+    initial_free_transfers: int = 1,
+    chips_remaining: Mapping[str, int] | None = None,
+    gameweek: int | None = None,
+) -> tuple[AccountSnapshot, GameState]:
+    history_payload = await client.fetch_entry_history(entry_id)
+    selected_gameweek = gameweek or _latest_gameweek(history_payload)
+    picks_payload = await client.fetch_entry_picks(entry_id, selected_gameweek)
+    return build_account_snapshot(
+        history_payload,
+        picks_payload,
+        entry_id=entry_id,
+        season_id=season_id,
+        target_rank=target_rank,
+        free_transfers=free_transfers,
+        initial_free_transfers=initial_free_transfers,
+        chips_remaining=chips_remaining,
+        gameweek=selected_gameweek,
+    )
+
+
 def build_account_snapshot(
     history_payload: Mapping[str, Any],
     picks_payload: Mapping[str, Any],
@@ -43,7 +76,8 @@ def build_account_snapshot(
     entry_id: int,
     season_id: str,
     target_rank: int,
-    free_transfers: int,
+    free_transfers: int | None = None,
+    initial_free_transfers: int = 1,
     chips_remaining: Mapping[str, int] | None = None,
     gameweek: int | None = None,
     fetched_at: datetime | None = None,
@@ -56,8 +90,10 @@ def build_account_snapshot(
         raise ValueError("entry_id must be positive")
     if target_rank <= 0:
         raise ValueError("target_rank must be positive")
-    if not 0 <= free_transfers <= 5:
+    if free_transfers is not None and not 0 <= free_transfers <= 5:
         raise ValueError("free_transfers must be within 0..5")
+    if not 1 <= initial_free_transfers <= 5:
+        raise ValueError("initial_free_transfers must be within 1..5")
     current = history_payload.get("current")
     if not isinstance(current, list) or not current:
         raise ValueError("FPL account history must contain a non-empty current collection")
@@ -67,6 +103,10 @@ def build_account_snapshot(
     selected = _select_record(records, gameweek)
     selected_gameweek = _positive_int(selected.get("event"))
     assert selected_gameweek is not None
+    if free_transfers is None:
+        free_transfers = derive_free_transfers(
+            records, selected_gameweek, initial_free_transfers=initial_free_transfers,
+        )
     picks = picks_payload.get("picks")
     if not isinstance(picks, list):
         raise ValueError("FPL account picks must contain a picks collection")
@@ -98,7 +138,9 @@ def build_account_snapshot(
     vice = [pick for pick in starting if bool(pick.get("is_vice_captain"))]
     if len(captain) != 1 or len(vice) != 1:
         raise ValueError("FPL account picks must identify one captain and one vice-captain")
-    chips = _validate_chips(chips_remaining or {})
+    chips = _validate_chips(
+        derive_chips_remaining(history_payload) if chips_remaining is None else chips_remaining,
+    )
     fetched = (fetched_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     overall_rank = _required_id(
         selected.get("overall_rank", selected.get("rank")), "overall rank",
@@ -203,6 +245,68 @@ def _select_record(records: list[Mapping[str, Any]], gameweek: int | None) -> Ma
     return matching[-1]
 
 
+def derive_free_transfers(
+    records: list[Mapping[str, Any]],
+    gameweek: int,
+    *,
+    initial_free_transfers: int = 1,
+) -> int:
+    """Calculate the transfers available for the next gameweek from FPL history."""
+    if not 1 <= initial_free_transfers <= 5:
+        raise ValueError("initial_free_transfers must be within 1..5")
+    available = initial_free_transfers
+    previous_gameweek = 0
+    for record in sorted(records, key=lambda item: int(item["event"])):
+        event = int(record["event"])
+        if event > gameweek:
+            break
+        if event > previous_gameweek + 1:
+            available = min(5, available + event - previous_gameweek - 1)
+        transfers = _nonnegative_int(record.get("event_transfers"), "event transfers")
+        available = min(5, max(0, available + 1 - transfers))
+        previous_gameweek = event
+    return available
+
+
+def derive_chips_remaining(history_payload: Mapping[str, Any]) -> dict[str, int]:
+    """Return remaining two-set chips based on the public account chip history."""
+    remaining = {name: 2 for name in ("wildcard", "free_hit", "bench_boost", "triple_captain")}
+    used = history_payload.get("chips", [])
+    if not isinstance(used, list):
+        return remaining
+    aliases = {
+        "freehit": "free_hit",
+        "free_hit": "free_hit",
+        "benchboost": "bench_boost",
+        "bench_boost": "bench_boost",
+        "triplecaptain": "triple_captain",
+        "triple_captain": "triple_captain",
+    }
+    for chip in used:
+        raw_name = chip.get("name") if isinstance(chip, Mapping) else chip
+        if not isinstance(raw_name, str):
+            continue
+        name = aliases.get(raw_name.casefold(), raw_name.casefold())
+        if name in remaining:
+            remaining[name] = max(0, remaining[name] - 1)
+    return remaining
+
+
+def _latest_gameweek(history_payload: Mapping[str, Any]) -> int:
+    current = history_payload.get("current")
+    if not isinstance(current, list):
+        raise ValueError("FPL account history must contain a current collection")
+    gameweeks = [
+        _positive_int(record.get("event"))
+        for record in current
+        if isinstance(record, Mapping)
+    ]
+    latest = max((event for event in gameweeks if event is not None), default=None)
+    if latest is None:
+        raise ValueError("FPL account history contains no valid gameweek records")
+    return latest
+
+
 def _validate_chips(values: Mapping[str, int]) -> dict[str, int]:
     allowed = {"wildcard", "free_hit", "bench_boost", "triple_captain"}
     result: dict[str, int] = {}
@@ -217,6 +321,18 @@ def _validate_chips(values: Mapping[str, int]) -> dict[str, int]:
             raise ValueError(f"Chip count for {name} must be within 0..2")
         result[name] = count
     return result
+
+
+def _nonnegative_int(value: object, label: str) -> int:
+    if value is None:
+        return 0
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a non-negative integer") from exc
+    if number < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return number
 
 
 def _positive_int(value: object) -> int | None:

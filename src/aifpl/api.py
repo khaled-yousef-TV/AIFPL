@@ -16,7 +16,11 @@ from pydantic import BaseModel, Field
 
 from aifpl.config import cors_origins, data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
-from aifpl.account import AccountSnapshot, AccountSnapshotStore, build_account_snapshot
+from aifpl.account import (
+    AccountSnapshot,
+    AccountSnapshotStore,
+    fetch_and_build_account_state,
+)
 from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
 from aifpl.captaincy_strategy import choose_captain
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
@@ -183,9 +187,10 @@ class AccountStateRequest(BaseModel):
     entry_id: int = Field(gt=0)
     season_id: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
     target_rank: int = Field(gt=0)
-    free_transfers: int = Field(ge=0, le=5)
+    free_transfers: int | None = Field(default=None, ge=0, le=5)
+    initial_free_transfers: int = Field(default=1, ge=1, le=5)
     gameweek: int | None = Field(default=None, ge=1, le=38)
-    chips_remaining: dict[str, int] = Field(default_factory=dict)
+    chips_remaining: dict[str, int] | None = None
 
 
 class ExecutionConfirmationRequest(BaseModel):
@@ -268,24 +273,16 @@ def save_game_state(state: GameState) -> GameState:
 @app.post("/game-state/account", response_model=GameState, status_code=201)
 def import_account_game_state(request: AccountStateRequest) -> GameState:
     try:
-        client = FplClient()
-        history = asyncio.run(client.fetch_entry_history(request.entry_id))
-        gameweek = request.gameweek or max(
-            int(record["event"])
-            for record in history.get("current", [])
-            if isinstance(record, dict) and str(record.get("event", "")).isdigit()
-        )
-        picks = asyncio.run(client.fetch_entry_picks(request.entry_id, gameweek))
-        snapshot, state = build_account_snapshot(
-            history,
-            picks,
+        snapshot, state = asyncio.run(fetch_and_build_account_state(
+            FplClient(),
             entry_id=request.entry_id,
             season_id=request.season_id,
             target_rank=request.target_rank,
             free_transfers=request.free_transfers,
+            initial_free_transfers=request.initial_free_transfers,
             chips_remaining=request.chips_remaining,
-            gameweek=gameweek,
-        )
+            gameweek=request.gameweek,
+        ))
         AccountSnapshotStore(data_dir()).save(snapshot)
         GameStateStore(data_dir()).save(state)
         return state
@@ -940,7 +937,11 @@ def scheduler_log(request: Request) -> dict[str, object]:
 @app.get("/debug/env")
 def debug_env(request: Request) -> dict[str, object]:
     _protect_sensitive_read(request)
-    keys = ("AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP", "AIFPL_HERMES_AUTO_RUN", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL")
+    keys = (
+        "AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP",
+        "AIFPL_HERMES_AUTO_RUN", "AIFPL_ACCOUNT_AUTO_SYNC", "AIFPL_ACCOUNT_ENTRY_ID",
+        "AIFPL_ACCOUNT_TARGET_RANK", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL",
+    )
     return {
         "present": {key: bool(os.environ.get(key)) for key in keys},
         "data_dir": str(data_dir()),

@@ -34,6 +34,14 @@ services:
         value: deepseek-v4-flash
       - key: AIFPL_HERMES_AUTO_RUN
         value: "true"
+      - key: AIFPL_ACCOUNT_AUTO_SYNC
+        value: "false"
+      - key: AIFPL_ACCOUNT_ENTRY_ID
+        sync: false
+      - key: AIFPL_ACCOUNT_TARGET_RANK
+        sync: false
+      - key: AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS
+        value: "1"
       - key: AIFPL_SCHEDULER_LEAD_MINUTES
         value: "150"
       - key: AIFPL_SCHEDULER_TIMEZONE

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import typer
 
-from aifpl.account import AccountSnapshotStore, build_account_snapshot
-from aifpl.config import data_dir
+from aifpl.account import AccountSnapshotStore, build_account_snapshot, fetch_and_build_account_state
+from aifpl.config import account_sync_settings, data_dir
 from aifpl.calibration import compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.chips import ChipAdviceStore, ChipStateStore
 from aifpl.captaincy_strategy import choose_captain
@@ -22,7 +22,7 @@ from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError
 from aifpl.health import SourceHealthChecker
 from aifpl.hermes import HermesManager
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
-from aifpl.live_calibration import calibrated_odds_rows
+from aifpl.live_calibration import calibrated_odds_rows, current_season_id
 from aifpl.projections import BaselineBacktester
 from aifpl.projection_catalogs import ProjectionSource, load_projection_candidates
 from aifpl.player_evidence import PlayerEvidenceStore
@@ -108,7 +108,7 @@ def import_account_state(
     try:
         history = json.loads(history_file.read_text(encoding="utf-8"))
         picks = json.loads(picks_file.read_text(encoding="utf-8"))
-        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else {}
+        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else None
         snapshot, state = build_account_snapshot(
             history,
             picks,
@@ -131,31 +131,49 @@ def fetch_account_state(
     entry_id: int = typer.Argument(..., min=1),
     season_id: str = typer.Option(...),
     target_rank: int = typer.Option(..., min=1),
-    free_transfers: int = typer.Option(..., min=0, max=5),
+    free_transfers: int | None = typer.Option(None, min=0, max=5),
+    initial_free_transfers: int = typer.Option(1, min=1, max=5),
     gameweek: int | None = typer.Option(None, min=1, max=38),
     chips_file: Path | None = typer.Option(None, exists=True, readable=True),
 ) -> None:
     """Fetch public FPL account history and picks, then persist rank state."""
     try:
         client = FplClient()
-        history = asyncio.run(client.fetch_entry_history(entry_id))
-        selected_gameweek = gameweek or max(
-            int(record["event"])
-            for record in history.get("current", [])
-            if isinstance(record, dict) and str(record.get("event", "")).isdigit()
-        )
-        picks = asyncio.run(client.fetch_entry_picks(entry_id, selected_gameweek))
-        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else {}
-        snapshot, state = build_account_snapshot(
-            history,
-            picks,
+        chips = json.loads(chips_file.read_text(encoding="utf-8")) if chips_file is not None else None
+        snapshot, state = asyncio.run(fetch_and_build_account_state(
+            client,
             entry_id=entry_id,
             season_id=season_id,
             target_rank=target_rank,
             free_transfers=free_transfers,
+            initial_free_transfers=initial_free_transfers,
             chips_remaining=chips,
-            gameweek=selected_gameweek,
-        )
+            gameweek=gameweek,
+        ))
+        account_path = AccountSnapshotStore(data_dir()).save(snapshot)
+        state_path = GameStateStore(data_dir()).save(state)
+    except (FplSourceError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"account_path": str(account_path), "state_path": str(state_path), "state": state}))
+
+
+@app.command()
+def sync_account_state() -> None:
+    """Automatically refresh the configured public FPL account rank state."""
+    try:
+        settings = account_sync_settings()
+        if not settings.enabled or settings.entry_id is None or settings.target_rank is None:
+            raise ValueError("Account auto-sync is not configured")
+        season_id = current_season_id(data_dir())
+        if season_id is None:
+            raise ValueError("Cannot determine the current season from the latest FPL bootstrap")
+        snapshot, state = asyncio.run(fetch_and_build_account_state(
+            FplClient(),
+            entry_id=settings.entry_id,
+            season_id=season_id,
+            target_rank=settings.target_rank,
+            initial_free_transfers=settings.initial_free_transfers,
+        ))
         account_path = AccountSnapshotStore(data_dir()).save(snapshot)
         state_path = GameStateStore(data_dir()).save(state)
     except (FplSourceError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:

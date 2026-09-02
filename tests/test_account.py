@@ -2,7 +2,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aifpl.account import AccountSnapshotStore, build_account_snapshot
+from aifpl.account import (
+    AccountSnapshotStore,
+    build_account_snapshot,
+    derive_chips_remaining,
+    derive_free_transfers,
+)
 
 
 def history() -> dict:
@@ -76,3 +81,42 @@ def test_account_import_rejects_missing_captain() -> None:
             history(), payload, entry_id=123, season_id="2026-27", target_rank=50_000,
             free_transfers=2,
         )
+
+
+def test_account_import_derives_free_transfers_and_chips_from_history() -> None:
+    account_history = {
+        "current": [
+            {"event": 1, "overall_rank": 900_000, "bank": 40, "event_transfers": 0},
+            {"event": 2, "overall_rank": 184_000, "bank": 83, "event_transfers": 2},
+        ],
+        "chips": [{"name": "wildcard"}, {"name": "freehit"}],
+    }
+
+    assert derive_free_transfers(account_history["current"], 2) == 1
+    remaining = derive_chips_remaining(account_history)
+    assert remaining == {
+        "wildcard": 1,
+        "free_hit": 1,
+        "bench_boost": 2,
+        "triple_captain": 2,
+    }
+
+
+def test_account_import_uses_derived_account_values_when_not_overridden() -> None:
+    account_history = history()
+    account_history["current"][0]["event_transfers"] = 0
+    account_history["current"][1]["event_transfers"] = 2
+    account_history["chips"] = [{"name": "wildcard"}]
+
+    snapshot, state = build_account_snapshot(
+        account_history,
+        picks(),
+        entry_id=123,
+        season_id="2026-27",
+        target_rank=50_000,
+    )
+
+    assert snapshot.free_transfers == 1
+    assert state.free_transfers == 1
+    assert snapshot.chips_remaining["wildcard"] == 1
+    assert snapshot.chips_remaining["free_hit"] == 2

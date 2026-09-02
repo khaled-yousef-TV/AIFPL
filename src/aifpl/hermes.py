@@ -506,6 +506,8 @@ class HermesManager:
         deadline_clock: datetime | None = None,
         objective_mode: ObjectiveMode | None = None,
     ) -> HermesRunResult:
+        if objective_mode is None:
+            objective_mode = self._account_objective_mode()
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
         self._deadline = deadline
@@ -536,6 +538,15 @@ class HermesManager:
             deadline=schedule.deadline,
             objective_mode=objective_mode,
         )
+
+    def _account_objective_mode(self) -> ObjectiveMode | None:
+        latest_game_state = getattr(self.backend, "latest_game_state", None)
+        if not callable(latest_game_state):
+            return None
+        state = latest_game_state()
+        if state is not None and state.objective_mode == "RANK_MODE" and state.rank_data_available:
+            return "RANK_MODE"
+        return None
 
     def supersede_decision(
         self,
@@ -719,11 +730,15 @@ class HermesManager:
             previous = None
         if previous is not None and self._expected_gameweek is not None:
             if previous.gameweek == self._expected_gameweek:
-                decision = self.latest_decision(
-                    season_id=previous.season_id or self._expected_season_id,
-                    gameweek=self._expected_gameweek,
-                )
-                return HermesRunResult(decision=decision, state_path=decision.state_path, tool_steps=0)
+                if (
+                    self._requested_objective_mode is None
+                    or previous.strategy.objective_mode == self._requested_objective_mode
+                ):
+                    decision = self.latest_decision(
+                        season_id=previous.season_id or self._expected_season_id,
+                        gameweek=self._expected_gameweek,
+                    )
+                    return HermesRunResult(decision=decision, state_path=decision.state_path, tool_steps=0)
             if previous.gameweek > self._expected_gameweek:
                 raise ValueError(f"Hermes has already advanced to gameweek {previous.gameweek}")
         if previous is not None and self._expected_gameweek and self._expected_gameweek > previous.gameweek + 1:
@@ -741,6 +756,12 @@ class HermesManager:
         self._hold_horizon = None
         self._initial_gameweek = None
         self._strategy = previous.strategy if previous else None
+        objective_instruction = ""
+        if self._requested_objective_mode is not None:
+            objective_instruction = (
+                f" This planning cycle is explicitly {self._requested_objective_mode}; "
+                f"set_strategy must use {self._requested_objective_mode}."
+            )
         system = (
             "You are Hermes, an autonomous FPL manager playing your own experimental team. "
             "The backend is authoritative for all numbers and legality. Set your own stable strategy when none exists, "
@@ -756,6 +777,7 @@ class HermesManager:
             "POINTS_MODE optimizes expected points. RANK_MODE is only valid when the context contains a current rank, "
             "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
             " A public account snapshot is read-only evidence; never treat it as transfer execution confirmation or invent purchase prices."
+            + objective_instruction
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -15,7 +16,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
-from aifpl.config import SchedulerSettings, scheduler_settings
+from aifpl.account import AccountSnapshotStore, fetch_and_build_account_state
+from aifpl.config import SchedulerSettings, account_sync_settings, scheduler_settings
+from aifpl.fpl import FplClient
+from aifpl.game_state import GameStateStore
 from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
 from aifpl.scoring import CompletedDecisionScorer
 from aifpl.security import redact_secrets
@@ -141,6 +145,19 @@ class DeadlineScheduler:
             "scored_decision_paths": scored_decision_paths,
             "scoring_error": scoring_error,
         }
+        if not schedule.completed and not schedule.missed and (schedule.due or force):
+            try:
+                self._sync_account_state_if_enabled(schedule.season_id)
+            except Exception as exc:
+                result = self._persist_tick(
+                    output_path,
+                    schedule,
+                    "failed",
+                    force,
+                    error=redact_secrets(f"{type(exc).__name__}: {exc}"),
+                    **scorecard_kwargs,
+                )
+                raise SchedulerTickError(result) from exc
         if not schedule.completed and not schedule.missed and not self._before_deadline(schedule.deadline, checked_at):
             return self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
         if schedule.completed:
@@ -224,6 +241,21 @@ class DeadlineScheduler:
             raise SchedulerTickError(result) from exc
         finally:
             self._release_claim(claim)
+
+    def _sync_account_state_if_enabled(self, season_id: str) -> None:
+        settings = account_sync_settings()
+        if not settings.enabled:
+            return
+        assert settings.entry_id is not None and settings.target_rank is not None
+        snapshot, state = asyncio.run(fetch_and_build_account_state(
+            FplClient(),
+            entry_id=settings.entry_id,
+            season_id=season_id,
+            target_rank=settings.target_rank,
+            initial_free_transfers=settings.initial_free_transfers,
+        ))
+        AccountSnapshotStore(self.root).save(snapshot)
+        GameStateStore(self.root).save(state)
 
     def run_forever(self, stop_event: Event | None = None) -> None:
         while stop_event is None or not stop_event.is_set():
