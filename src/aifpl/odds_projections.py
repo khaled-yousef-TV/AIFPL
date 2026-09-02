@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.fixture_projections import DIFFICULTY_MULTIPLIERS
@@ -13,8 +14,10 @@ from aifpl.xg_projections import elapsed_gameweeks, xg_xa_blend
 from aifpl.player_evidence import PlayerEvidenceStore, late_return_adjustments, predicted_start_probabilities
 from aifpl.market_signals import MarketSignalStore, PlayerPropSignal, TeamCleanSheetSignal
 from aifpl.transfer_awareness import TransferProfile, TransferAwarenessStore
+from aifpl.ownership import configured_effective_ownership
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, verify_lineage, write_immutable, write_manifest
 from aifpl.model_identity import model_identity
+from aifpl.template import PlayerTemplateState
 
 
 ODDS_PROJECTION_METHOD = "fpl_xg_xa_blend_v2.fixture_difficulty_v1.match_odds_v1.availability_evidence_v1.market_signals_v1"
@@ -39,6 +42,10 @@ class OddsAdjustedGameweekProjection:
     expected_minutes: float | None = None
     start_probability: float | None = None
     availability_multiplier: float | None = None
+    effective_ownership_pct: float | None = None
+    expected_captaincy: float | None = None
+    template_score: float | None = None
+    template_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,9 +74,11 @@ def build_odds_adjusted_projections(
     player_prop_weight: float = 0.0,
     transfer_profiles: dict[int, TransferProfile] | None = None,
     late_return_evidence: dict[tuple[int, int], tuple[float, float]] | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
 ) -> list[OddsAdjustedGameweekProjection]:
     if start_gameweek < 1 or end_gameweek < start_gameweek:
         raise ValueError("gameweek range is invalid")
+    configured_eo = configured_effective_ownership()
     consensus_by_fixture = {row.fixture_id: row for row in consensus}
     gameweeks_elapsed = gameweeks_elapsed or max(1, max((player.starts for player in players), default=0))
     fixtures_by_team_gameweek: dict[tuple[int, int], list[CurrentFixture]] = {}
@@ -135,6 +144,7 @@ def build_odds_adjusted_projections(
                 if assist_probability is not None:
                     total += player_prop_weight * assist_probability * participation * 3
                     assist_probabilities.append(assist_probability)
+            template_eo = _template_value(template_states, player.id, "effective_ownership")
             projections.append(OddsAdjustedGameweekProjection(
                 player_id=player.id, player_name=player.name, position=player.position, club=player.club, cost=player.cost,
                 gameweek=gameweek, fixture_count=len(player_fixtures), odds_backed_fixture_count=odds_backed,
@@ -145,6 +155,10 @@ def build_odds_adjusted_projections(
                 expected_minutes=round(expected_minutes_total, 4) if player_fixtures else None,
                 start_probability=round(start_probability, 4) if start_probability is not None else None,
                 availability_multiplier=round(availability_multiplier, 4) if availability_multiplier is not None else None,
+                 effective_ownership_pct=template_eo if template_eo is not None else configured_eo.get(player.id),
+                expected_captaincy=_template_value(template_states, player.id, "expected_captaincy"),
+                template_score=_template_value(template_states, player.id, "template_score"),
+                template_status=_template_status(template_states, player.id),
             ))
     return projections
 
@@ -215,6 +229,7 @@ class OddsProjectionStore:
         if not __import__("math").isfinite(prop_weight) or not 0 <= prop_weight <= 1:
             raise ValueError("AIFPL_PLAYER_PROP_WEIGHT must be a finite value within 0..1")
         transfer_profiles = TransferAwarenessStore(self.root).latest(players)
+        season_id = _season_id(fixtures)
         projections = build_odds_adjusted_projections(
             players, fixtures, consensus, start_gameweek, end_gameweek,
             elapsed_gameweeks(self.root, player_path, players),
@@ -222,6 +237,7 @@ class OddsProjectionStore:
             clean_signals, prop_signals, prop_weight,
             transfer_profiles,
             late_return_evidence,
+            _latest_template_states(self.root, season_id, start_gameweek),
         )
         created_at = datetime.now(timezone.utc)
         run_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")
@@ -311,3 +327,41 @@ def _season_id(fixtures: list[CurrentFixture]) -> str:
     earliest = min(kickoffs)
     start_year = earliest.year if earliest.month >= 7 else earliest.year - 1
     return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _latest_template_states(
+    root: Path, season_id: str | None = None, gameweek: int | None = None,
+) -> dict[int, PlayerTemplateState]:
+    try:
+        from aifpl.template import TemplateCatalogStore
+
+        return {
+            row.player_id: row
+            for row in TemplateCatalogStore(root).latest(season_id=season_id, gameweek=gameweek).players
+        }
+    except (FileNotFoundError, ValueError):
+        if gameweek is not None:
+            try:
+                from aifpl.template import TemplateCatalogStore
+
+                return {
+                    row.player_id: row
+                    for row in TemplateCatalogStore(root).latest(season_id=season_id).players
+                }
+            except (FileNotFoundError, ValueError):
+                pass
+        return {}
+
+
+def _template_value(states: Mapping[int, PlayerTemplateState] | None, player_id: int, field: str) -> float | None:
+    if not states or player_id not in states:
+        return None
+    value = getattr(states[player_id], field, None)
+    return round(float(value), 4) if value is not None else None
+
+
+def _template_status(states: Mapping[int, PlayerTemplateState] | None, player_id: int) -> str | None:
+    if not states or player_id not in states:
+        return None
+    value = getattr(states[player_id], "template_status", None)
+    return str(value) if value is not None else None

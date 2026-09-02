@@ -10,11 +10,13 @@ import typer
 from aifpl.config import data_dir
 from aifpl.calibration import compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.chips import ChipAdviceStore, ChipStateStore
+from aifpl.captaincy_strategy import choose_captain
 from aifpl.current import CurrentPlayerCatalogStore
-from aifpl.current_projections import CurrentProjectionStore
+from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient, FplSourceError
+from aifpl.game_state import GameState, GameStateStore, ObjectiveMode
 from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError
 from aifpl.health import SourceHealthChecker
 from aifpl.hermes import HermesManager
@@ -32,12 +34,93 @@ from aifpl.odds import OddsSnapshotStore, OddsSourceError, TheOddsApiClient
 from aifpl.odds_matching import FixtureOddsConsensusStore, load_team_aliases
 from aifpl.odds_projections import OddsProjectionStore
 from aifpl.rules import SquadRequest, select_best_lineup, validate_squad as validate_fpl_squad
+from aifpl.strategy_policy import derive_strategy_policy
+from aifpl.template import OwnershipLandscape, PlayerTemplateState, TemplateCatalogStore, build_template_catalog
 from aifpl.tavily_news import TavilyNewsStore
 from aifpl.transfers import CurrentSquadState, plan_transfers as build_transfer_plan
 from aifpl.xg_projections import XgXaProjectionStore
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 
 app = typer.Typer(help="Tools for the AIFPL backend")
+
+
+def _rank_context(objective_mode: ObjectiveMode) -> tuple[GameState | None, dict[int, PlayerTemplateState]]:
+    if objective_mode == "POINTS_MODE":
+        return None, {}
+    try:
+        state = GameStateStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise ValueError("RANK_MODE requires a saved GameState") from exc
+    if not state.rank_data_available:
+        raise ValueError("RANK_MODE requires a GameState with rank and target rank")
+    try:
+        templates = {
+            row.player_id: row
+            for row in TemplateCatalogStore(data_dir()).latest(
+                season_id=state.season_id, gameweek=state.gameweek,
+            ).players
+        }
+    except FileNotFoundError:
+        try:
+            templates = {
+                row.player_id: row
+                for row in TemplateCatalogStore(data_dir()).latest(season_id=state.season_id).players
+            }
+        except FileNotFoundError:
+            templates = {}
+    return state.model_copy(update={"objective_mode": "RANK_MODE"}), templates
+
+
+@app.command()
+def save_game_state(state_file: Path = typer.Argument(..., exists=True, readable=True)) -> None:
+    """Persist a rank/account GameState JSON document."""
+    try:
+        state = GameState.model_validate_json(state_file.read_text(encoding="utf-8"))
+        path = GameStateStore(data_dir()).save(state)
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps({"output_path": str(path), "state": state}))
+
+
+@app.command()
+def latest_game_state() -> None:
+    """Show the latest persisted rank/account GameState."""
+    try:
+        state = GameStateStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(state))
+
+
+@app.command()
+def build_template(ownership_file: Path = typer.Argument(..., exists=True, readable=True)) -> None:
+    """Build and persist a template catalog from an ownership landscape JSON document."""
+    try:
+        landscape = OwnershipLandscape.model_validate_json(ownership_file.read_text(encoding="utf-8"))
+        catalog = build_template_catalog(landscape)
+        path = TemplateCatalogStore(data_dir()).save(catalog)
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(catalog.model_copy(update={"output_path": str(path)})))
+
+
+@app.command()
+def plan_captaincy(
+    projections_file: Path = typer.Argument(..., exists=True, readable=True),
+    objective_mode: ObjectiveMode = typer.Option("POINTS_MODE"),
+) -> None:
+    """Rank captain and vice-captain options from a projection JSON list."""
+    try:
+        from pydantic import TypeAdapter
+
+        players = TypeAdapter(list[CurrentPlayerProjection]).validate_json(
+            projections_file.read_text(encoding="utf-8"),
+        )
+        game_state, templates = _rank_context(objective_mode)
+        choice = choose_captain(players, game_state, templates)
+    except (OSError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(choice))
 
 
 @app.command()
@@ -545,13 +628,16 @@ def optimize_current_squad(
     projection_source: ProjectionSource = typer.Option(ProjectionSource.CURRENT),
     catalog_id: str | None = typer.Option(None, help="Exact fixture/odds projection JSONL filename"),
     differential_appetite: float = typer.Option(0.0, min=0, max=1,
-                                                help="Prefer low-owned players when projections are near-tied (0..1)"),
+                                                 help="Prefer low-owned players when projections are near-tied (0..1)"),
+    objective_mode: ObjectiveMode = typer.Option("POINTS_MODE"),
 ) -> None:
     """Choose the exact highest-projected legal squad from all current FPL players."""
     try:
+        game_state, templates = _rank_context(objective_mode)
         squad = optimize_squad(
             load_projection_candidates(data_dir(), projection_source, catalog_id), budget,
             differential_appetite=differential_appetite,
+            objective_mode=objective_mode, game_state=game_state, template_states=templates,
         )
     except (FileNotFoundError, SquadOptimizationError, ValueError) as exc:
         raise typer.Exit(str(exc)) from exc
@@ -563,11 +649,16 @@ def plan_transfers(
     squad_file: Path = typer.Argument(..., exists=True, readable=True),
     projection_source: ProjectionSource = typer.Option(ProjectionSource.CURRENT),
     catalog_id: str | None = typer.Option(None, help="Exact fixture/odds projection JSONL filename"),
+    objective_mode: ObjectiveMode = typer.Option("POINTS_MODE"),
 ) -> None:
     """Compare hold and legal transfer plans for a current squad JSON state."""
     try:
         state = CurrentSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
-        plan = build_transfer_plan(load_projection_candidates(data_dir(), projection_source, catalog_id), state)
+        game_state, templates = _rank_context(objective_mode)
+        plan = build_transfer_plan(
+            load_projection_candidates(data_dir(), projection_source, catalog_id), state,
+            objective_mode=objective_mode, game_state=game_state, template_states=templates,
+        )
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc
     typer.echo(json_dumps(plan))
@@ -581,15 +672,18 @@ def plan_horizon(
     decision_hit_penalty: float = typer.Option(4.0, min=0,
                                                 help="Projected-point penalty per transfer over the free allowance"),
     churn_penalty: float | None = typer.Option(None, min=0,
-                                               help="Override the planned-transfer penalty (defaults to AIFPL_TRANSFER_PENALTY)"),
+                                                help="Override the planned-transfer penalty (defaults to AIFPL_TRANSFER_PENALTY)"),
+    objective_mode: ObjectiveMode = typer.Option("POINTS_MODE"),
 ) -> None:
     """Optimize transfers, hits, free-transfer rollover, and bank across 1-6 gameweeks."""
     try:
         state = HorizonSquadState.model_validate(json.loads(squad_file.read_text(encoding="utf-8")))
+        game_state, templates = _rank_context(objective_mode)
         plan = plan_horizon_transfers(
             calibrated_odds_rows(data_dir(), catalog_id)[0], state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
-            churn_penalty=churn_penalty,
+            churn_penalty=churn_penalty, objective_mode=objective_mode,
+            game_state=game_state, template_states=templates,
         )
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc

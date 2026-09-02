@@ -56,6 +56,7 @@ Backend optional:
 - `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
 - `AIFPL_DEPLOYED_COMMIT`: optional deployment SHA included in calibration model identity.
 - `AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS`: keep `false` unless transcript and debug reads are intentionally public.
+- `AIFPL_EFFECTIVE_OWNERSHIP_FILE`: optional JSON mapping of player IDs to externally-derived effective ownership percentages; raw `selected_by_percent` is never silently treated as EO when this is configured.
 - `AIFPL_FETCH_EVENT_MARKETS=true`: fetch team-total/clean-sheet and player-prop markets during refresh (one Odds API call per fixture event; uses quota). Clean-sheet probabilities then adjust GK/DEF projections. Refresh prioritizes the actionable gameweek and caps the request at `AIFPL_EVENT_MARKET_MAX_EVENTS` (default `10`) to stay within the Starter-plan memory limit.
 
 Frontend required:
@@ -81,7 +82,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **300 passing tests**. Commands below assume the
+The current suite contains **311 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests
@@ -125,6 +126,11 @@ aifpl fixture-odds-consensus --limit 10
 aifpl build-odds-projections --start-gameweek 1 --end-gameweek 6
 aifpl odds-projections --limit 10
 aifpl plan-horizon examples/current_squad.json
+aifpl save-game-state /path/to/rank_state.json
+aifpl build-template /path/to/ownership_landscape.json
+aifpl optimize-current-squad --projection-source odds --objective-mode RANK_MODE
+aifpl plan-transfers examples/current_squad.json --projection-source odds --objective-mode RANK_MODE
+aifpl plan-captaincy /path/to/projections.json --objective-mode RANK_MODE
 aifpl build-player-evidence
 aifpl player-evidence --limit 20
 aifpl fetch-event-markets
@@ -144,6 +150,9 @@ aifpl optimize-current-squad --projection-source odds
 aifpl plan-transfers examples/current_squad.json --projection-source odds
 uvicorn aifpl.api:app --reload
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/game-state -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl http://127.0.0.1:8000/template/players -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
+curl 'http://127.0.0.1:8000/strategy/policy?objective_mode=RANK_MODE' -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl -X POST http://127.0.0.1:8000/health/sources/check -H "X-AIFPL-Admin-Key: $AIFPL_ADMIN_API_KEY"
 curl http://127.0.0.1:8000/health/sources
 curl http://127.0.0.1:8000/config/team-aliases
@@ -323,17 +332,22 @@ the `AIFPL_SCHEDULER_*` variables in `.env.example`.
     affine correction activates only after four gameweeks and 1,000 player-GW
     observations, then applies only to future catalogs.
 25. Execution truth: manual or imported deadline confirmations persist the
-    actual squad, ordered bench, captaincy, transfers, hit cost, and chip state;
-    scorecards prefer a matching confirmation and explicitly label their basis.
+     actual squad, ordered bench, captaincy, transfers, hit cost, and chip state;
+     scorecards prefer a matching confirmation and explicitly label their basis.
+26. Rank/game layer: explicit `POINTS_MODE` and `RANK_MODE`, persisted rank state,
+     template and effective-ownership inputs, exposure/net-exposure accounting,
+     rank-aware transfer/captain/chip signals, dynamic strategy policy, and
+     rank objective decomposition in plans and dashboard payloads.
 
 ### Next
 
 1. **Calibrated projection intervals:** add real confidence intervals once
    enough chronological holdout forecasts have accumulated to estimate
    per-player variance honestly.
-2. **Effective ownership:** FPL exposes only raw `selected_by_percent`; true
-   effective ownership (including captain/TC ownership) needs a data source
-   before the differential metrics can be upgraded beyond the documented proxy.
+2. **Rank distributions and rival cohorts:** the current rank layer accepts
+   externally supplied EO/template data and uses a calibrated exposure signal;
+   production-quality rank distributions, rival cohorts, and confidence intervals
+   still need a timestamped data source.
 3. **Authenticated account integration:** exact selling prices and real transfer
    execution and automatic deadline-squad import in place of the current manual
    confirmation workflow.
@@ -347,7 +361,7 @@ with five views, all read-only against the backend:
 
 - **Squad:** the committed XI pitch, bench, decision explanation, confidence,
   planned horizon, transfers with computed gains, captain options, scorecard,
-  and squad state.
+  squad state, objective mode, rank state, template coverage, and exposure.
 - **Evidence:** player evidence records (`/evidence/players`).
 - **Hermes:** strategy, squad state, latest run transcript, and decision history
   (`/hermes/state`, `/hermes/runs/latest`, `/hermes/decisions`).
@@ -406,6 +420,12 @@ planning, holding, and decision recording. Hermes creates its own risk tolerance
 hit aversion, differential appetite, planning horizon, and soft player preferences.
 Those settings alter backend objective penalties and tie-breakers, but cannot
 bypass FPL constraints or invent projections.
+
+Hermes can operate in `POINTS_MODE` or `RANK_MODE`. Rank mode requires a saved
+`GameState` containing current and target rank; template/EO data is treated as an
+explicit external input and is never fabricated from public ownership. The
+rank-aware backend returns signed exposure, strategy classification, and an
+objective decomposition for Hermes to explain.
 
 Hermes state and decisions are append-only, season/gameweek-bound, concurrency
 locked, and include purchase prices for legal future selling values. The deadline

@@ -18,6 +18,7 @@ from aifpl.config import minimum_odds_fixture_coverage, partial_odds_fixture_cov
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient
+from aifpl.game_state import GameState, GameStateStore
 from aifpl.health import SourceHealthChecker
 from aifpl.live_calibration import current_season_id
 from aifpl.odds import OddsSnapshotStore, TheOddsApiClient
@@ -31,6 +32,7 @@ from aifpl.projection_catalogs import ProjectionSource, load_projection_candidat
 from aifpl.snapshots import SnapshotStore
 from aifpl.security import redact_secrets
 from aifpl.tavily_news import TavilyNewsCatalog, TavilyNewsStore
+from aifpl.template import PlayerTemplateState, TemplateCatalogStore
 from aifpl.transfers import CurrentSquadState, plan_transfers
 from aifpl.xg_projections import XgXaProjectionStore
 
@@ -225,10 +227,12 @@ class CurrentDataRefreshJob:
             if health.overall_status != "healthy":
                 raise ValueError("Refusing recommendation because refreshed source health is degraded")
 
+            objective_mode, rank_state, template_states = _rank_inputs(self.root, hermes_state)
             recommendation = optimize_squad(
                 load_projection_candidates(
                     self.root, ProjectionSource.ODDS, Path(odds_projection.output_path).name,
-                ), budget,
+                ), budget, objective_mode=objective_mode, game_state=rank_state,
+                template_states=template_states,
             )
             steps.append("optimize_squad")
             chip_advice_path = _build_chip_advice(
@@ -328,7 +332,11 @@ def _research_transfer_candidates(
         max_transfers=2,
     )
     try:
-        transfer_plan = plan_transfers(candidates, squad_state)
+        objective_mode, rank_state, template_states = _rank_inputs(root, state)
+        transfer_plan = plan_transfers(
+            candidates, squad_state, objective_mode=objective_mode,
+            game_state=rank_state, template_states=template_states,
+        )
     except Exception:
         return None
     incoming_ids = [player.player_id for player in transfer_plan.incoming]
@@ -394,6 +402,55 @@ def _build_chip_advice(
         list(state.starting_xi_ids),
         [player.player_id for player in best_squad.players],
         intel,
+        game_state=getattr(state, "game_state", None),
+        template_states=_latest_template_states(
+            root,
+            getattr(getattr(state, "game_state", None), "season_id", None),
+            getattr(getattr(state, "game_state", None), "gameweek", None),
+        ),
     )
     saved = ChipAdviceStore(root).save(advice)
     return Path(saved.output_path)
+
+
+def _latest_template_states(
+    root: Path, season_id: str | None = None, gameweek: int | None = None,
+) -> dict[int, PlayerTemplateState]:
+    try:
+        return {
+            row.player_id: row
+            for row in TemplateCatalogStore(root).latest(
+                season_id=season_id, gameweek=gameweek,
+            ).players
+        }
+    except FileNotFoundError:
+        if gameweek is not None:
+            try:
+                return {
+                    row.player_id: row
+                    for row in TemplateCatalogStore(root).latest(season_id=season_id).players
+                }
+            except FileNotFoundError:
+                pass
+        return {}
+
+
+def _rank_inputs(
+    root: Path, hermes_state: object | None,
+) -> tuple[str, GameState | None, dict[int, PlayerTemplateState]]:
+    strategy = getattr(hermes_state, "strategy", None)
+    objective_mode = getattr(strategy, "objective_mode", "POINTS_MODE")
+    if objective_mode == "POINTS_MODE":
+        return objective_mode, None, {}
+    game_state = getattr(hermes_state, "game_state", None)
+    if game_state is None:
+        try:
+            game_state = GameStateStore(root).latest()
+        except FileNotFoundError as exc:
+            raise ValueError("RANK_MODE requires a saved GameState") from exc
+    if not game_state.rank_data_available:
+        raise ValueError("RANK_MODE requires a GameState with rank and target rank")
+    game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
+    return objective_mode, game_state, _latest_template_states(
+        root, game_state.season_id, game_state.gameweek,
+    )

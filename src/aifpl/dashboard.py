@@ -7,11 +7,20 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
+from aifpl.captaincy_strategy import choose_captain
+from aifpl.game_state import GameStateStore
 from aifpl.hermes import HermesDecision, HermesManager, HorizonPlanSnapshot, HorizonPlanWeekSnapshot
 from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
 from aifpl.scheduler import DeadlineScheduler
 from aifpl.scoring import DecisionScorer
+from aifpl.template import (
+    PlayerTemplateState,
+    TemplateCatalogStore,
+    build_exposure_states,
+    coverage as template_coverage,
+    target_cohort_eo,
+)
 
 
 class DashboardChipAdvice(BaseModel):
@@ -41,6 +50,13 @@ class DashboardPlayer(BaseModel):
     availability_multiplier: float | None = None
     value: float | None = None
     differential_score: float | None = None
+    effective_ownership_pct: float | None = None
+    expected_captaincy: float | None = None
+    template_score: float | None = None
+    template_status: str | None = None
+    my_exposure: float | None = None
+    net_exposure: float | None = None
+    rank_swing_potential: float | None = None
 
 
 class DashboardTransfer(BaseModel):
@@ -62,6 +78,10 @@ class DashboardMove(BaseModel):
     odds_coverage: float | None = None
     out_ownership: float | None = None
     in_ownership: float | None = None
+    out_effective_ownership: float | None = None
+    in_effective_ownership: float | None = None
+    template_exposure_delta: float | None = None
+    strategy_classification: str | None = None
 
 
 class DashboardCaptainOption(BaseModel):
@@ -71,6 +91,9 @@ class DashboardCaptainOption(BaseModel):
     expected_minutes: float | None = None
     start_probability: float | None = None
     is_captain: bool = False
+    target_cohort_eo: float | None = None
+    net_exposure_if_captained: float | None = None
+    strategy_classification: str | None = None
 
 
 class DashboardHorizonPoint(BaseModel):
@@ -87,6 +110,7 @@ class DashboardHorizonPoint(BaseModel):
     free_transfers_after: int | None = None
     captain_id: int | None = None
     transfers: list[DashboardTransfer] = Field(default_factory=list)
+    objective_components: dict[str, float] = Field(default_factory=dict)
 
 
 class DashboardInput(BaseModel):
@@ -144,6 +168,17 @@ class CurrentDashboard(BaseModel):
     robustness: float | None = None
     confidence: DashboardConfidence = Field(default_factory=DashboardConfidence)
     chip_advice: list[DashboardChipAdvice] = Field(default_factory=list)
+    active_chip: str | None = None
+    active_chip_set: int | None = None
+    objective_mode: str = "POINTS_MODE"
+    overall_rank: int | None = None
+    target_rank: int | None = None
+    gameweeks_remaining: int | None = None
+    strategy_status: str = "UNKNOWN"
+    risk_level: float | None = None
+    template_coverage: float | None = None
+    captain_template_coverage: float | None = None
+    rank_gap_ratio: float | None = None
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
@@ -159,6 +194,25 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
     plan_snapshot = decision.horizon_plan
     current_players = CurrentPlayerCatalogStore(root).latest_players()
     players_by_id = {player.id: player for player in current_players}
+    try:
+        game_state = GameStateStore(root).latest(season_id=schedule.season_id)
+    except FileNotFoundError:
+        game_state = None
+    try:
+        template_states = {
+            row.player_id: row
+            for row in TemplateCatalogStore(root).latest(
+                season_id=schedule.season_id, gameweek=decision.gameweek,
+            ).players
+        }
+    except FileNotFoundError:
+        try:
+            template_states = {
+                row.player_id: row
+                for row in TemplateCatalogStore(root).latest(season_id=schedule.season_id).players
+            }
+        except FileNotFoundError:
+            template_states = {}
     projections = (
         OddsProjectionStore(root).latest(plan_snapshot.projection_catalog)
         if plan_snapshot is not None and plan_snapshot.projection_catalog
@@ -171,12 +225,20 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         raise ValueError(f"Current player catalog is missing squad IDs: {sorted(missing_ids)}")
 
     starting_ids = set(decision.starting_xi_ids)
+    exposure_states = build_exposure_states(
+        [projections_by_key[(player_id, decision.gameweek)] for player_id in decision.squad.player_ids
+         if (player_id, decision.gameweek) in projections_by_key],
+        set(decision.squad.player_ids), decision.captain_id,
+        decision.active_chip == "triple_captain", template_states,
+    )
+    exposure_by_id = {row.player_id: row for row in exposure_states}
     squad_rows = [
         _dashboard_player(
             players_by_id[player_id],
             projections_by_key.get((player_id, decision.gameweek)),
             player_id in starting_ids,
             player_id == decision.captain_id,
+            template_states.get(player_id), exposure_by_id.get(player_id),
         )
         for player_id in decision.squad.player_ids
     ]
@@ -233,8 +295,18 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         )
         if committed is not None:
             robustness = committed.robustness_score
-    moves = _dashboard_moves(plan_snapshot, projections_by_key, names) if plan_snapshot is not None else []
-    captain_options = _dashboard_captain_options(projections_by_key, decision, names) if plan_snapshot is not None else []
+    account_state = game_state or decision.game_state
+    rank_state = account_state if decision.strategy.objective_mode == "RANK_MODE" else None
+    if rank_state is not None and rank_state.objective_mode != "RANK_MODE":
+        rank_state = rank_state.model_copy(update={"objective_mode": "RANK_MODE"})
+    moves = (
+        _dashboard_moves(plan_snapshot, projections_by_key, names, rank_state, template_states)
+        if plan_snapshot is not None else []
+    )
+    captain_options = (
+        _dashboard_captain_options(projections_by_key, decision, names, rank_state, template_states)
+        if plan_snapshot is not None else []
+    )
     transfers = [
         DashboardTransfer(
             out_id=out_id,
@@ -308,6 +380,23 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         robustness=robustness,
         confidence=_dashboard_confidence(root),
         chip_advice=_dashboard_chip_advice(root, decision.season_id),
+        active_chip=decision.active_chip,
+        active_chip_set=decision.active_chip_set,
+        objective_mode=decision.strategy.objective_mode,
+        overall_rank=account_state.overall_rank if account_state is not None else None,
+        target_rank=account_state.target_rank if account_state is not None else None,
+        gameweeks_remaining=account_state.gameweeks_remaining if account_state is not None else None,
+        strategy_status=account_state.strategy_status if account_state is not None else "UNKNOWN",
+        risk_level=account_state.risk_level if account_state is not None else None,
+        template_coverage=(
+            account_state.template_coverage if account_state is not None and account_state.template_coverage is not None
+            else template_coverage(template_states.values(), decision.squad.player_ids)
+        ),
+        captain_template_coverage=(
+            account_state.captain_template_coverage if account_state is not None and account_state.captain_template_coverage is not None
+            else _captain_template_coverage(template_states.get(decision.captain_id))
+        ),
+        rank_gap_ratio=account_state.rank_gap_ratio if account_state is not None else None,
     )
 
 
@@ -382,6 +471,8 @@ def _dashboard_moves(
     plan_snapshot: HorizonPlanSnapshot,
     projections_by_key: dict[tuple[int, int], OddsAdjustedGameweekProjection],
     names: dict[int, str],
+    game_state: object | None = None,
+    template_states: dict[int, PlayerTemplateState] | None = None,
 ) -> list[DashboardMove]:
     gameweeks = [week.gameweek for week in plan_snapshot.weeks]
     moves: list[DashboardMove] = []
@@ -398,12 +489,18 @@ def _dashboard_moves(
             )
             out_row = projections_by_key.get((out_id, week.gameweek))
             in_row = projections_by_key.get((in_id, week.gameweek))
+            out_eo = _row_cohort_eo(out_row, out_id, template_states)
+            in_eo = _row_cohort_eo(in_row, in_id, template_states)
             moves.append(DashboardMove(
                 out_id=out_id, out_name=names.get(out_id), in_id=in_id, in_name=names.get(in_id, f"#{in_id}"),
                 gameweek=week.gameweek, horizon_gain=round(gain, 4), hit_cost=week.hit_cost,
                 net_gain=round(gain - allocated_hit, 4), odds_coverage=week.odds_coverage,
                 out_ownership=out_row.selected_by_percent if out_row is not None else None,
                 in_ownership=in_row.selected_by_percent if in_row is not None else None,
+                out_effective_ownership=out_eo,
+                in_effective_ownership=in_eo,
+                template_exposure_delta=round(in_eo - out_eo, 4) if in_eo is not None and out_eo is not None else None,
+                strategy_classification=_move_classification(game_state, out_eo, in_eo),
             ))
     return moves
 
@@ -412,6 +509,8 @@ def _dashboard_captain_options(
     projections_by_key: dict[tuple[int, int], OddsAdjustedGameweekProjection],
     decision: HermesDecision,
     names: dict[int, str],
+    game_state: object | None = None,
+    template_states: dict[int, PlayerTemplateState] | None = None,
 ) -> list[DashboardCaptainOption]:
     gameweek = decision.gameweek
     candidates = [
@@ -419,7 +518,17 @@ def _dashboard_captain_options(
         for player_id in decision.squad.player_ids
         if (player_id, gameweek) in projections_by_key
     ]
-    candidates.sort(key=lambda item: item[1].projected_points, reverse=True)
+    if game_state is not None and getattr(game_state, "rank_data_available", False):
+        choice = choose_captain(
+            [row for _, row in candidates], game_state, template_states,
+            decision.active_chip == "triple_captain",
+        )
+        ranked_ids = [option.player_id for option in choice.options]
+        candidates.sort(key=lambda item: ranked_ids.index(item[0]))
+        option_by_id = {option.player_id: option for option in choice.options}
+    else:
+        candidates.sort(key=lambda item: (-item[1].projected_points, item[0]))
+        option_by_id = {}
     return [
         DashboardCaptainOption(
             player_id=player_id, name=names.get(player_id, f"#{player_id}"),
@@ -427,6 +536,11 @@ def _dashboard_captain_options(
             expected_minutes=row.expected_minutes,
             start_probability=row.start_probability,
             is_captain=player_id == decision.captain_id,
+            target_cohort_eo=option_by_id[player_id].target_cohort_eo if player_id in option_by_id else _row_cohort_eo(row, player_id, template_states),
+            net_exposure_if_captained=option_by_id[player_id].net_exposure if player_id in option_by_id else _captain_net_exposure(
+                row, player_id, template_states, decision.active_chip == "triple_captain",
+            ),
+            strategy_classification=option_by_id[player_id].classification if player_id in option_by_id else None,
         )
         for player_id, row in candidates[:3]
     ]
@@ -446,6 +560,7 @@ def _horizon_point(week: HorizonPlanWeekSnapshot, names: dict[int, str]) -> Dash
         unlimited_transfers=week.unlimited_transfers,
         free_transfers_after=week.free_transfers_after,
         captain_id=week.captain_id,
+        objective_components=week.objective_components,
         transfers=[
             DashboardTransfer(
                 out_id=out_id,
@@ -463,6 +578,8 @@ def _dashboard_player(
     projection: object,
     is_starter: bool,
     is_captain: bool,
+    template: PlayerTemplateState | None = None,
+    exposure: object | None = None,
 ) -> DashboardPlayer:
     projected_points = float(getattr(projection, "projected_points", 0.0))
     ownership = player.selected_by_percent
@@ -484,4 +601,74 @@ def _dashboard_player(
         availability_multiplier=getattr(projection, "availability_multiplier", None),
         value=round(projected_points / (player.cost / 10), 4) if player.cost > 0 else None,
         differential_score=round(projected_points * (1 - ownership / 100), 4),
+        effective_ownership_pct=_first_number(
+            getattr(template, "effective_ownership", None),
+            getattr(projection, "effective_ownership_pct", None),
+        ),
+        expected_captaincy=_first_number(
+            getattr(template, "expected_captaincy", None),
+            getattr(projection, "expected_captaincy", None),
+        ),
+        template_score=getattr(template, "template_score", None),
+        template_status=getattr(template, "template_status", None),
+        my_exposure=getattr(exposure, "my_exposure", None),
+        net_exposure=getattr(exposure, "net_exposure", None),
+        rank_swing_potential=getattr(exposure, "rank_swing_potential", None),
     )
+
+
+def _captain_template_coverage(template: PlayerTemplateState | None) -> float | None:
+    if template is None or template.expected_captaincy is None:
+        return None
+    return round(min(100.0, template.expected_captaincy) / 100, 4)
+
+
+def _first_number(*values: object) -> float | None:
+    for value in values:
+        if value is not None:
+            return float(value)
+    return None
+
+
+def _row_cohort_eo(
+    row: OddsAdjustedGameweekProjection | None,
+    player_id: int,
+    template_states: dict[int, PlayerTemplateState] | None,
+) -> float | None:
+    if row is not None and row.effective_ownership_pct is not None:
+        return row.effective_ownership_pct
+    value, _ = target_cohort_eo(
+        player_id,
+        (template_states or {}).get(player_id),
+        row.selected_by_percent if row is not None else None,
+    )
+    return value
+
+
+def _captain_net_exposure(
+    row: OddsAdjustedGameweekProjection,
+    player_id: int,
+    template_states: dict[int, PlayerTemplateState] | None,
+    triple_captain: bool = False,
+) -> float | None:
+    field_eo = _row_cohort_eo(row, player_id, template_states)
+    own_exposure = 300.0 if triple_captain else 200.0
+    return round(own_exposure - field_eo, 4) if field_eo is not None else None
+
+
+def _move_classification(
+    game_state: object | None,
+    out_eo: float | None,
+    in_eo: float | None,
+) -> str | None:
+    if game_state is None or not getattr(game_state, "rank_data_available", False) or out_eo is None or in_eo is None:
+        return None
+    delta = in_eo - out_eo
+    status = getattr(game_state, "strategy_status", "UNKNOWN")
+    if status == "PROTECT_POSITION" and delta < 0:
+        return "UNNECESSARY_RISK"
+    if status == "BEHIND_TARGET" and delta < 0:
+        return "CALCULATED_ATTACK"
+    if status == "BEHIND_TARGET":
+        return "SELECTIVE_LEVERAGE"
+    return "BALANCED_PLAY"

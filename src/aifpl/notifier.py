@@ -183,11 +183,17 @@ def build_recommendation_message(
         f"Deadline: {deadline_utc.strftime('%a %d %b %Y, %H:%M UTC')}",
         "-------------------------------------",
         f"Hermes: {decision.action} ({decision.model})",
+        f"Objective: {decision.strategy.objective_mode}",
         f"Captain: {_describe(decision.captain_id, names)} (C)",
         f"Vice-captain: {_describe(decision.vice_captain_id, names)} (VC)"
         if decision.vice_captain_id is not None
         else "Vice-captain: not selected",
     ]
+    if decision.game_state is not None and decision.game_state.rank_data_available:
+        lines.append(
+            f"Rank: {decision.game_state.overall_rank:,} | target {decision.game_state.target_rank:,} "
+            f"| {decision.game_state.strategy_status.replace('_', ' ').lower()}"
+        )
     if decision.action == "adopt_initial":
         lines.append("Transfers: new squad adopted (pre-season unlimited transfers)")
     elif decision.transfers_in or decision.transfers_out:
@@ -227,6 +233,11 @@ def build_recommendation_message(
             f"Plan: {plan.total_net_projected_points:.1f} net pts | {plan.total_hit_cost} pts hits "
             f"| robustness {plan.robustness_score:.0f}"
         )
+        if plan.objective_mode == "RANK_MODE":
+            lines.append(
+                f"Rank utility: {plan.objective_value:.2f} objective units "
+                f"| leverage {plan.objective_components.get('rank_adjustment', 0.0):+.2f}"
+            )
         for week in plan.weeks:
             parts = [f"GW{week.gameweek}"]
             if week.unlimited_transfers:

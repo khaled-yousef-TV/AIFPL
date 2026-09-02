@@ -7,6 +7,7 @@ from pathlib import Path
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.artifacts import complete_artifact_paths, jsonl_bytes, verify_artifact, write_immutable, write_manifest
+from aifpl.ownership import apply_effective_ownership
 
 
 PROJECTION_METHOD = "fpl_source_baseline_v2.shrunk_early_season"
@@ -31,6 +32,9 @@ class CurrentPlayerProjection:
     effective_ownership_pct: float | None = None
     current_evidence_weight: float | None = None
     prior_points: float | None = None
+    expected_captaincy: float | None = None
+    template_score: float | None = None
+    template_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,10 +110,10 @@ class CurrentProjectionStore:
     def build(self, source_path: Path) -> ProjectionCatalog:
         players = CurrentPlayerCatalogStore(self.root).load(source_path)
         gameweeks_elapsed = _elapsed_gameweeks(self.root, source_path)
-        projections = [
+        projections = apply_effective_ownership([
             fpl_source_baseline(player, gameweeks_elapsed=gameweeks_elapsed)
             for player in players
-        ]
+        ])
         created_at = datetime.now(timezone.utc)
         output_path = self._output_path(source_path.stem, created_at.strftime("%Y%m%dT%H%M%S%fZ"))
         write_immutable(output_path, jsonl_bytes(projections))

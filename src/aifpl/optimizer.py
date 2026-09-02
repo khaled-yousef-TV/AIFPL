@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 from ortools.sat.python import cp_model
 
 from aifpl.config import bench_min_projection, bench_weight, minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
+from aifpl.game_state import GameState, ObjectiveMode
 from aifpl.objective_accounting import (
     DEAD_BENCH_ALLOWANCE,
     bench_coefficient,
@@ -14,7 +16,9 @@ from aifpl.objective_accounting import (
     preferred_coefficient,
     starter_coefficient,
 )
+from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, validate_squad
+from aifpl.template import PlayerTemplateState
 
 
 class SquadOptimizationError(RuntimeError):
@@ -34,12 +38,17 @@ class OptimizedSquad:
     methodology: str
     starting_xi: list[CurrentPlayerProjection]
     captain: CurrentPlayerProjection
+    objective_mode: ObjectiveMode = "POINTS_MODE"
+    vice_captain: CurrentPlayerProjection | None = None
 
 
 def optimize_squad(
     candidates: list[CurrentPlayerProjection], budget: int = DEFAULT_BUDGET_TENTHS,
     preferred_player_ids: set[int] | None = None,
     differential_appetite: float = 0.0,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
 ) -> OptimizedSquad:
     """Find the exact highest-projected legal squad from every supplied candidate.
 
@@ -52,6 +61,10 @@ def optimize_squad(
         raise ValueError("budget must not be negative")
     if not 0 <= differential_appetite <= 1:
         raise ValueError("differential_appetite must be within 0..1")
+    if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
+        raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
+        game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     if len({candidate.player_id for candidate in candidates}) != len(candidates):
         raise ValueError("Candidate player IDs must be unique")
     min_bank = minimum_bank_tenths()
@@ -88,19 +101,36 @@ def optimize_squad(
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") >= 1)
     model.add(sum(starters[index] for index, candidate in enumerate(candidates) if candidate.position == "FWD") <= 3)
     model.add(sum(selected[index] * candidate.cost for index, candidate in enumerate(candidates)) <= budget - min_bank)
-    model.maximize(
+    objective = (
         sum(starters[index] * starter_coefficient(candidate.projected_points, 1.0) for index, candidate in enumerate(candidates))
         + sum(captains[index] * captain_coefficient(candidate.projected_points, 1.0) for index, candidate in enumerate(candidates))
         + sum(benches[index] * bench_coefficient(candidate.projected_points, 1.0, bench_bonus) for index, candidate in enumerate(candidates))
         + sum(selected[index] * preferred_coefficient(1.0) for index, candidate in enumerate(candidates) if candidate.player_id in (preferred_player_ids or set()))
-        + sum(
+    )
+    if objective_mode == "RANK_MODE":
+        objective += sum(
+            selected[index]
+            * rank_adjustment_coefficient(
+                candidate, game_state, (template_states or {}).get(candidate.player_id),
+            )
+            for index, candidate in enumerate(candidates)
+        )
+        objective += sum(
+            captains[index]
+            * rank_adjustment_coefficient(
+                candidate, game_state, (template_states or {}).get(candidate.player_id), captain=True,
+            )
+            for index, candidate in enumerate(candidates)
+        )
+    else:
+        objective += sum(
             selected[index]
             * differential_coefficient(
                 candidate.projected_points, candidate.selected_by_percent, differential_appetite, 1.0,
             )
             for index, candidate in enumerate(candidates)
         )
-    )
+    model.maximize(objective)
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = 1
     status = solver.solve(model)
@@ -109,6 +139,20 @@ def optimize_squad(
     squad = [candidate for index, candidate in enumerate(candidates) if solver.value(selected[index])]
     starting_xi = [candidate for index, candidate in enumerate(candidates) if solver.value(starters[index])]
     captain = next(candidate for index, candidate in enumerate(candidates) if solver.value(captains[index]))
+    vice_candidates = [candidate for candidate in starting_xi if candidate.player_id != captain.player_id]
+    vice_captain = max(
+        vice_candidates,
+        key=lambda candidate: (
+            candidate.projected_points + (
+                rank_objective_adjustment(
+                    candidate, game_state, (template_states or {}).get(candidate.player_id),
+                    captain=True,
+                ) if objective_mode == "RANK_MODE" else 0.0
+            ),
+            -candidate.player_id,
+        ),
+        default=None,
+    )
     squad.sort(key=lambda candidate: (candidate.position, candidate.player_id))
     validation = validate_squad(SquadRequest(players=[
         SquadPlayer(
@@ -130,4 +174,6 @@ def optimize_squad(
         methodology=squad[0].methodology if squad else "unknown",
         starting_xi=sorted(starting_xi, key=lambda candidate: (("GK", "DEF", "MID", "FWD").index(candidate.position), candidate.player_id)),
         captain=captain,
+        objective_mode=objective_mode,
+        vice_captain=vice_captain,
     )

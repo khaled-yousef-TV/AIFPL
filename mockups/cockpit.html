@@ -303,10 +303,11 @@
         </div>
       </div>
 
-      <div class="bottom-grid">
-        <section class="card bottom-card"><h2>Scorecard</h2><div id="scorecard-content"><div class="score"><strong>--</strong><span>not scored</span></div><p class="score-note">No scored decision is available yet. Scorecards appear after the gameweek completes.</p></div></section>
-        <section class="card bottom-card"><h2>Squad state</h2><div class="score"><strong id="bank-value">--</strong><span id="free-transfer-value">--</span></div><p class="score-note" id="squad-state-note">Loading bank and free transfers from Hermes state.</p></section>
-      </div>
+       <div class="bottom-grid">
+         <section class="card bottom-card"><h2>Scorecard</h2><div id="scorecard-content"><div class="score"><strong>--</strong><span>not scored</span></div><p class="score-note">No scored decision is available yet. Scorecards appear after the gameweek completes.</p></div></section>
+         <section class="card bottom-card"><h2>Squad state</h2><div class="score"><strong id="bank-value">--</strong><span id="free-transfer-value">--</span></div><p class="score-note" id="squad-state-note">Loading bank and free transfers from Hermes state.</p></section>
+         <section class="card bottom-card"><h2>Game state</h2><div class="score"><strong id="rank-value">--</strong><span id="rank-status">rank unavailable</span></div><p class="score-note" id="rank-state-note">Rank mode activates only when rank and target inputs are supplied.</p></section>
+       </div>
     </section>
 
     <section id="view-evidence" class="view" hidden>
@@ -485,6 +486,10 @@
     ];
     if (player.expected_minutes != null) rows.push(["Expected mins", `${Math.round(player.expected_minutes)}`]);
     if (player.start_probability != null) rows.push(["Start prob", `${Math.round(player.start_probability * 100)}%`]);
+    if (player.effective_ownership_pct != null) rows.push(["Target EO", `${player.effective_ownership_pct.toFixed(1)}%`]);
+    if (player.my_exposure != null) rows.push(["My exposure", `${player.my_exposure.toFixed(1)}%`]);
+    if (player.net_exposure != null) rows.push(["Net exposure", `${player.net_exposure >= 0 ? "+" : ""}${player.net_exposure.toFixed(1)}%`]);
+    if (player.template_status) rows.push(["Template", player.template_status.replaceAll("_", " ")]);
     if (player.value != null) rows.push(["Value", `${player.value.toFixed(2)} pts/\u00a3m`]);
     if (player.differential_score != null) rows.push(["Differential", `${player.differential_score.toFixed(1)}`]);
     rows.push(["Projected", `${player.projected_points.toFixed(1)} pts`]);
@@ -616,6 +621,7 @@
         const row = document.createElement("div");
         row.className = "move";
         row.innerHTML = `<span class="out">${escapeHTML(move.out_name)}</span><span class="arrow">&rarr;</span><span class="in">${escapeHTML(move.in_name)}</span>`;
+        if (move.strategy_classification) row.title = move.strategy_classification.replaceAll("_", " ");
         if (move.net_gain != null) {
           const gain = document.createElement("span");
           gain.className = "gain";
@@ -676,6 +682,7 @@
       if (point.bank_after != null) parts.push(`\u00a3${(point.bank_after / 10).toFixed(1)}m`);
       if (point.odds_coverage != null) parts.push(`${Math.round(point.odds_coverage * 100)}% odds`);
       if (point.robustness_score != null) parts.push(`Robustness ${Math.round(point.robustness_score)}`);
+      if (point.objective_components && point.objective_components.rank_adjustment) parts.push(`Rank ${point.objective_components.rank_adjustment >= 0 ? "+" : ""}${point.objective_components.rank_adjustment.toFixed(1)}`);
       if (parts.length) {
         const detail = document.createElement("div");
         detail.className = "horizon-detail";
@@ -746,9 +753,11 @@
     const captainOptions = (dashboard.captain_options || []).map(option => {
       const minutes = option.expected_minutes != null ? ` ${Math.round(option.expected_minutes)}m` : "";
       const safety = option.start_probability != null ? ` (${Math.round(option.start_probability * 100)}%)` : "";
+      const exposure = option.net_exposure_if_captained != null ? ` net ${option.net_exposure_if_captained >= 0 ? "+" : ""}${option.net_exposure_if_captained.toFixed(0)}%` : "";
+      const classification = option.strategy_classification ? ` ${option.strategy_classification.replaceAll("_", " ")}` : "";
       return option.is_captain
-        ? `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety} (C)`
-        : `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}`;
+        ? `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${classification} (C)`
+        : `${option.name} ${option.projected_points.toFixed(1)}${minutes}${safety}${exposure}${classification}`;
     }).join(" \u00b7 ");
     document.getElementById("captain-options").textContent = captainOptions ? `Options: ${captainOptions}` : "";
     document.getElementById("bank-value").textContent = `\u00a3${(dashboard.bank / 10).toFixed(1)}m`;
@@ -758,6 +767,15 @@
     document.getElementById("squad-state-note").textContent = dashboard.robustness != null
       ? `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 robustness ${Math.round(dashboard.robustness)}/100 \u00b7 backend state`
       : `${dashboard.players.length} players \u00b7 ${dashboard.formation} \u00b7 backend state`;
+    const rankAvailable = dashboard.overall_rank != null && dashboard.target_rank != null;
+    document.getElementById("rank-value").textContent = rankAvailable ? `#${dashboard.overall_rank.toLocaleString()}` : "--";
+    document.getElementById("rank-status").textContent = rankAvailable
+      ? String(dashboard.strategy_status || "unknown").replaceAll("_", " ")
+      : "rank unavailable";
+    const chipText = dashboard.active_chip ? ` \u00b7 chip ${dashboard.active_chip.replaceAll("_", " ")}` : "";
+    document.getElementById("rank-state-note").textContent = rankAvailable
+      ? `Target #${dashboard.target_rank.toLocaleString()} \u00b7 ${dashboard.gameweeks_remaining ?? "--"} GWs left \u00b7 ${dashboard.objective_mode}${chipText}`
+      : `Objective ${dashboard.objective_mode || "POINTS_MODE"} \u00b7 add rank and target to enable game utility`;
     renderLineup(dashboard, teams);
     renderBench(dashboard, teams);
     renderTransfers(dashboard);

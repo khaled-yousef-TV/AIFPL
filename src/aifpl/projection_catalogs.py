@@ -10,6 +10,7 @@ from aifpl.current_projections import CurrentPlayerProjection, CurrentProjection
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.odds_projections import OddsProjectionStore
+from aifpl.ownership import apply_effective_ownership
 from aifpl.xg_projections import XgXaProjectionStore
 
 
@@ -27,23 +28,27 @@ def load_projection_candidates(
         raise ValueError("catalog_id is supported only for fixture and odds projection sources")
     ownership = _latest_ownership(root)
     if source == ProjectionSource.CURRENT:
-        return CurrentProjectionStore(root).latest()
+        return apply_effective_ownership(CurrentProjectionStore(root).latest())
     if source == ProjectionSource.XG_XA:
         rows = XgXaProjectionStore(root).latest()
     elif source == ProjectionSource.FIXTURE:
-        return _aggregate(FixtureProjectionStore(root).latest(catalog_id), ownership)
+        return apply_effective_ownership(_aggregate(FixtureProjectionStore(root).latest(catalog_id), ownership))
     else:
         rows, _ = calibrated_odds_rows(root, catalog_id)
-        return _aggregate(rows)
-    return [
+        return apply_effective_ownership(_aggregate(rows))
+    return apply_effective_ownership([
         CurrentPlayerProjection(
             player_id=row.player_id, player_name=row.player_name, position=row.position,
             club=row.club, cost=row.cost, projected_points=row.projected_points,
             availability_multiplier=1.0, methodology=row.methodology,
             selected_by_percent=ownership.get(row.player_id, 0.0),
+            effective_ownership_pct=getattr(row, "effective_ownership_pct", None),
+            expected_captaincy=getattr(row, "expected_captaincy", None),
+            template_score=getattr(row, "template_score", None),
+            template_status=getattr(row, "template_status", None),
         )
         for row in rows
-    ]
+    ])
 
 
 def _latest_ownership(root: Path) -> dict[int, float]:
@@ -83,6 +88,10 @@ def _aggregate(rows: list[object], ownership: dict[int, float] | None = None) ->
             club=first.club, cost=first.cost, projected_points=round(points, 4),
             availability_multiplier=1.0, methodology=first.methodology,
             selected_by_percent=getattr(first, "selected_by_percent", 0.0) or ownership.get(player_id, 0.0),
+            effective_ownership_pct=getattr(first, "effective_ownership_pct", None),
+            expected_captaincy=getattr(first, "expected_captaincy", None),
+            template_score=getattr(first, "template_score", None),
+            template_status=getattr(first, "template_status", None),
         ))
     if not candidates:
         raise ValueError("Projection catalog is empty")

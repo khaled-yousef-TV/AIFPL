@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Mapping
 
 from ortools.sat.python import cp_model
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from aifpl.config import (
 )
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
+from aifpl.game_state import GameState, ObjectiveMode
 from aifpl.objective_accounting import (
     DEAD_BENCH_ALLOWANCE,
     OBJECTIVE_SCALE,
@@ -30,19 +32,22 @@ from aifpl.objective_accounting import (
     horizon_objective_settings,
     horizon_week_weights,
     preferred_coefficient,
+    rank_adjustment_coefficient,
     starter_coefficient,
     strategy_hit_coefficient,
     validate_horizon_plan,
 )
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
 from aifpl.projection_catalogs import _aggregate
+from aifpl.rank_utility import rank_objective_adjustment
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, club_key, select_best_lineup, validate_squad
+from aifpl.template import PlayerTemplateState
 
 
 # Bump when plan-generation semantics change (accounting, objective, captain
 # selection, robustness, ...). Committed plans record their version so stale
 # opening squads can be regenerated deterministically.
-PLANNER_VERSION = "v6"
+PLANNER_VERSION = "v7-rank-layer"
 
 
 class HorizonSquadState(BaseModel):
@@ -95,6 +100,7 @@ class HorizonTransferPlan:
     robustness_score: float = 0.0
     objective_value: float = 0.0
     objective_components: dict[str, float] = field(default_factory=dict)
+    objective_mode: ObjectiveMode = "POINTS_MODE"
 
 
 def plan_horizon_transfers(
@@ -105,6 +111,9 @@ def plan_horizon_transfers(
     pre_season: bool = False,
     churn_penalty: float | None = None,
     hold_only: bool = False,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
 ) -> HorizonTransferPlan:
     """Plan transfers and lineups across the horizon.
 
@@ -146,8 +155,16 @@ def plan_horizon_transfers(
     for player_id in player_ids:
         expected = metadata[player_id]
         if any(
-            (row.player_name, row.position, row.club, row.cost, row.methodology)
-            != (expected.player_name, expected.position, expected.club, expected.cost, expected.methodology)
+            (
+                row.player_name, row.position, row.club, row.cost, row.methodology,
+                row.effective_ownership_pct, row.expected_captaincy,
+                row.template_score, row.template_status,
+            )
+            != (
+                expected.player_name, expected.position, expected.club, expected.cost, expected.methodology,
+                expected.effective_ownership_pct, expected.expected_captaincy,
+                expected.template_score, expected.template_status,
+            )
             for row in (by_player_gameweek[(player_id, gameweek)] for gameweek in gameweeks)
         ):
             raise ValueError(f"Inconsistent projection metadata for player {player_id}")
@@ -182,7 +199,11 @@ def plan_horizon_transfers(
     if not 1 <= initial_free_transfers <= 5:
         raise ValueError("Free transfers before the horizon must be within 1..5")
     paid_transfer_cap = paid_transfer_safety_cap()
-    objective_settings = horizon_objective_settings(decision_hit_penalty, churn_penalty)
+    objective_settings = horizon_objective_settings(
+        decision_hit_penalty, churn_penalty, objective_mode, game_state, template_states,
+    )
+    if objective_mode == "RANK_MODE":
+        game_state = objective_settings.game_state
     week_weights = horizon_week_weights(rows, gameweeks, objective_settings)
     min_bank = objective_settings.minimum_bank_tenths
     bench_floor = bench_min_projection()
@@ -208,6 +229,7 @@ def plan_horizon_transfers(
             objective_components=aggregate_objective_components(
                 [plan.objective_components for plan in plans]
             ),
+            objective_mode=objective_mode,
         )
         try:
             validate_horizon_plan(
@@ -432,16 +454,34 @@ def plan_horizon_transfers(
             selected[player_id, week_index] * preferred_coefficient(week_weight)
             for player_id in preferred_player_ids or set() if player_id in player_ids
         )
-        objective.extend(
-            selected[player_id, week_index]
-            * differential_coefficient(
-                by_player_gameweek[player_id, gameweek].projected_points,
-                by_player_gameweek[player_id, gameweek].selected_by_percent,
-                differential_appetite,
-                week_weight,
+        if objective_mode == "RANK_MODE":
+            objective.extend(
+                selected[player_id, week_index]
+                * rank_adjustment_coefficient(
+                    by_player_gameweek[player_id, gameweek], game_state,
+                    (template_states or {}).get(player_id), week_weight=week_weight,
+                )
+                for player_id in player_ids
             )
-            for player_id in player_ids
-        )
+            objective.extend(
+                captain[player_id, week_index]
+                * rank_adjustment_coefficient(
+                    by_player_gameweek[player_id, gameweek], game_state,
+                    (template_states or {}).get(player_id), captain=True, week_weight=week_weight,
+                )
+                for player_id in player_ids
+            )
+        else:
+            objective.extend(
+                selected[player_id, week_index]
+                * differential_coefficient(
+                    by_player_gameweek[player_id, gameweek].projected_points,
+                    by_player_gameweek[player_id, gameweek].selected_by_percent,
+                    differential_appetite,
+                    week_weight,
+                )
+                for player_id in player_ids
+            )
     model.maximize(sum(objective))
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = 1
@@ -467,9 +507,18 @@ def plan_horizon_transfers(
             solver.value(captain[player_id, week_index]) for player_id in player_ids
         ):
             raise SquadOptimizationError("Solver returned an invalid lineup")
-        # Stable tie-breaking keeps persistence deterministic while preserving
-        # the quantized captain term used by the model.
-        captain_player = min(lineup, key=lambda player: (-player.projected_points, player.player_id))
+        # Points mode keeps the historical deterministic highest-points rule;
+        # rank mode lets the captaincy objective choose a different captain.
+        captain_player = (
+            next(
+                (player for player in lineup if solver.value(captain[player.player_id, week_index])),
+                None,
+            )
+            if objective_mode == "RANK_MODE"
+            else min(lineup, key=lambda player: (-player.projected_points, player.player_id))
+        )
+        if captain_player is None:
+            raise SquadOptimizationError("Solver returned no captain")
         projected = sum(player.projected_points for player in lineup) + captain_player.projected_points
         rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
         starting_ids = {player.player_id for player in lineup}
@@ -523,7 +572,9 @@ def plan_horizon_transfers(
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=_sort(outgoing_players), incoming=_sort(incoming_players),
             resulting_squad=_sort(squad), starting_xi=_sort(lineup), captain=captain_player,
-            vice_captain=_second_best(lineup, captain_player.player_id),
+             vice_captain=_second_best(
+                 lineup, captain_player.player_id, objective_mode, game_state, template_states,
+             ),
             transfers_made=transfers_made,
             free_transfers_before=free_before, hit_cost=hit,
             bank_after=bank_after, projected_points=round(projected, 4),
@@ -570,6 +621,7 @@ def plan_horizon_transfers(
         objective_components=aggregate_objective_components(
             [plan.objective_components for plan in plans]
         ),
+        objective_mode=objective_mode,
     )
     try:
         validate_horizon_plan(
@@ -595,6 +647,9 @@ def plan_hold_horizon_transfers(
     differential_appetite: float = 0.0,
     pre_season: bool = False,
     churn_penalty: float | None = None,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
 ) -> HorizonTransferPlan:
     """Build the complete no-transfer counterfactual for a current squad."""
     return plan_horizon_transfers(
@@ -606,6 +661,9 @@ def plan_hold_horizon_transfers(
         pre_season=pre_season,
         churn_penalty=churn_penalty,
         hold_only=True,
+        objective_mode=objective_mode,
+        game_state=game_state,
+        template_states=template_states,
     )
 
 
@@ -666,7 +724,11 @@ def _hold_plans(
         )
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=[], incoming=[], resulting_squad=_sort(squad),
-            starting_xi=_sort(starters), captain=captain, vice_captain=_second_best(starters, captain.player_id),
+             starting_xi=_sort(starters), captain=captain,
+             vice_captain=_second_best(
+                 starters, captain.player_id, objective_settings.objective_mode,
+                 objective_settings.game_state, objective_settings.template_states,
+             ),
             transfers_made=0,
             free_transfers_before=free, hit_cost=0, bank_after=state.bank,
             projected_points=round(sum(player.projected_points for player in starters) + captain.projected_points, 4),
@@ -721,6 +783,13 @@ def _candidate(row: OddsAdjustedGameweekProjection, gameweek: int) -> CurrentPla
         player_id=row.player_id, player_name=row.player_name, position=row.position,
         club=row.club, cost=row.cost, projected_points=row.projected_points,
         availability_multiplier=1.0, methodology=row.methodology,
+        selected_by_percent=row.selected_by_percent,
+        expected_minutes=row.expected_minutes,
+        start_probability=row.start_probability,
+        effective_ownership_pct=row.effective_ownership_pct,
+        expected_captaincy=row.expected_captaincy,
+        template_score=row.template_score,
+        template_status=row.template_status,
     )
 
 
@@ -735,6 +804,22 @@ def _sort(players: list[CurrentPlayerProjection]) -> list[CurrentPlayerProjectio
     return sorted(players, key=lambda player: (("GK", "DEF", "MID", "FWD").index(player.position), player.player_id))
 
 
-def _second_best(lineup: list[CurrentPlayerProjection], captain_id: int) -> CurrentPlayerProjection | None:
+def _second_best(
+    lineup: list[CurrentPlayerProjection], captain_id: int,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
+) -> CurrentPlayerProjection | None:
     others = [player for player in lineup if player.player_id != captain_id]
-    return min(others, key=lambda player: (-player.projected_points, player.player_id), default=None)
+    return max(
+        others,
+        key=lambda player: (
+            player.projected_points + (
+                rank_objective_adjustment(
+                    player, game_state, (template_states or {}).get(player.player_id), captain=True,
+                ) if objective_mode == "RANK_MODE" else 0.0
+            ),
+            -player.player_id,
+        ),
+        default=None,
+    )

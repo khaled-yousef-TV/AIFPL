@@ -16,9 +16,12 @@ from aifpl.artifacts import complete_artifact_paths, json_bytes, verify_artifact
 from aifpl.config import ChipSettings, chip_settings, http_retry_settings
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.fixtures import CurrentFixture
+from aifpl.game_state import GameState
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
+from aifpl.rank_utility import rank_objective_adjustment
 from aifpl.retry import retry_sync
 from aifpl.security import redact_secrets
+from aifpl.template import PlayerTemplateState
 
 CHIP_NAMES = ("wildcard", "free_hit", "bench_boost", "triple_captain")
 
@@ -449,6 +452,8 @@ class ChipAdvisor:
         starting_xi_ids: list[int],
         best_squad_ids: list[int],
         intel: ChipIntel,
+        game_state: GameState | None = None,
+        template_states: Mapping[int, PlayerTemplateState] | None = None,
     ) -> ChipAdvice:
         schedule = detect_schedule(fixtures, intel.expected_dgw_gws, intel.expected_bgw_gws)
         _merge_projection_schedule(schedule, projections)
@@ -484,6 +489,7 @@ class ChipAdvisor:
             recommendation = self._evaluate_slot(
                 slot, gameweek, schedule, by_player_gw, available_gws,
                 committed_player_ids, starting_xi_ids, best_squad_ids,
+                game_state, template_states,
             )
             recommendations.append(recommendation)
         advice = ChipAdvice(
@@ -502,6 +508,8 @@ class ChipAdvisor:
         committed_player_ids: list[int],
         starting_xi_ids: list[int],
         best_squad_ids: list[int],
+        game_state: GameState | None,
+        template_states: Mapping[int, PlayerTemplateState] | None,
     ) -> ChipRecommendation:
         set_deadline = self.settings.set1_end_gw if slot.set == 1 else 38
         remaining = set_deadline - gameweek
@@ -519,25 +527,46 @@ class ChipAdvisor:
                 if (player_id, gw) in by_player_gw
             )
             gap = best - committed
+            rank_gap = _rank_squad_gap(
+                best_squad_ids, committed_player_ids, horizon, by_player_gw,
+                game_state, template_states,
+            )
+            effective_gap = (
+                gap + rank_gap
+                if game_state is not None and game_state.rank_data_available
+                else gap
+            )
             threshold = self.settings.wildcard_points_gap - pressure * (
                 self.settings.wildcard_points_gap - self.settings.wildcard_gap_floor
             )
-            if gap >= threshold:
+            if effective_gap >= threshold:
                 expiry_note = " Set-1 wildcard otherwise expires at the GW19 deadline." if slot.set == 1 else ""
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
                     rationale=(
                         f"Best-available squad projects {gap:.1f} points better over {len(horizon)} GWs"
+                        f"{f' with {rank_gap:.1f} rank-utility leverage' if rank_gap else ''}"
                         f"{' (use-it window: threshold relaxed to %.1f)' % threshold}.{expiry_note}"
                     ),
                     confidence=min(1.0, gap / max(1.0, threshold * 2)),
-                    conditions={"projected_gap": round(gap, 4), "horizon_gws": horizon, "threshold": round(threshold, 4)},
+                    conditions={
+                        "projected_gap": round(gap, 4),
+                        "rank_utility_gap": round(rank_gap, 4),
+                        "effective_gap": round(effective_gap, 4),
+                        "horizon_gws": horizon,
+                        "threshold": round(threshold, 4),
+                    },
                 )
             return ChipRecommendation(
                 chip=slot.chip, set=slot.set, status="save",
                 rationale=f"Current squad trails best-available by only {gap:.1f} points over {len(horizon)} GWs.",
                 confidence=0.5,
-                conditions={"projected_gap": round(gap, 4), "horizon_gws": horizon},
+                conditions={
+                    "projected_gap": round(gap, 4),
+                    "rank_utility_gap": round(rank_gap, 4),
+                    "effective_gap": round(effective_gap, 4),
+                    "horizon_gws": horizon,
+                },
             )
         next_dgw = next((gw for gw in sorted(schedule) if gw >= gameweek and schedule[gw].get("double")), None)
         if slot.chip == "bench_boost":
@@ -547,6 +576,9 @@ class ChipAdvisor:
                     bench_points = sum(
                         by_player_gw[(player_id, gameweek)].projected_points
                         for player_id in bench_ids if (player_id, gameweek) in by_player_gw
+                    )
+                    bench_rank_utility = _rank_rows_value(
+                        bench_ids, gameweek, by_player_gw, game_state, template_states,
                     )
                     floor = self.settings.bench_boost_floor_points
                     if bench_points >= floor:
@@ -558,13 +590,13 @@ class ChipAdvisor:
                                 "at the GW19 deadline."
                             ),
                             confidence=min(1.0, bench_points / (floor * 1.5)),
-                            conditions={"bench_projected_points": round(bench_points, 4), "use_it_window": True},
+                            conditions={"bench_projected_points": round(bench_points, 4), "bench_rank_utility": round(bench_rank_utility, 4), "use_it_window": True},
                         )
                     return ChipRecommendation(
                         chip=slot.chip, set=slot.set, status="save", gameweek=gameweek,
                         rationale=f"Expiry window open but the bench only projects {bench_points:.1f} this GW.",
                         confidence=0.5,
-                        conditions={"bench_projected_points": round(bench_points, 4)},
+                        conditions={"bench_projected_points": round(bench_points, 4), "bench_rank_utility": round(bench_rank_utility, 4)},
                     )
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="save",
@@ -576,40 +608,43 @@ class ChipAdvisor:
                 by_player_gw[(player_id, next_dgw)].projected_points
                 for player_id in bench_ids if (player_id, next_dgw) in by_player_gw
             )
+            bench_rank_utility = _rank_rows_value(
+                bench_ids, next_dgw, by_player_gw, game_state, template_states,
+            )
             if bench_points >= self.settings.bench_boost_bench_points:
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="recommend", gameweek=next_dgw,
                     rationale=f"Double gameweek in GW{next_dgw} with bench projecting {bench_points:.1f} points.",
                     confidence=min(1.0, bench_points / (self.settings.bench_boost_bench_points * 1.5)),
-                    conditions={"bench_projected_points": round(bench_points, 4), "double_gameweek": next_dgw},
+                    conditions={"bench_projected_points": round(bench_points, 4), "bench_rank_utility": round(bench_rank_utility, 4), "double_gameweek": next_dgw},
                 )
             return ChipRecommendation(
                 chip=slot.chip, set=slot.set, status="save", gameweek=next_dgw,
                 rationale=f"Double gameweek in GW{next_dgw} but the bench only projects {bench_points:.1f} points.",
                 confidence=0.5,
-                conditions={"bench_projected_points": round(bench_points, 4), "double_gameweek": next_dgw},
+                conditions={"bench_projected_points": round(bench_points, 4), "bench_rank_utility": round(bench_rank_utility, 4), "double_gameweek": next_dgw},
             )
         if slot.chip == "triple_captain":
             if next_dgw is None:
                 if pressure > 0.0:
-                    captain_candidates = sorted(
-                        (by_player_gw[(player_id, gameweek)].projected_points for player_id in starting_xi_ids if (player_id, gameweek) in by_player_gw),
-                        reverse=True,
+                    captain_candidates = _ranked_captain_candidates(
+                        starting_xi_ids, gameweek, by_player_gw, game_state, template_states,
                     )
                     if len(captain_candidates) >= 2:
-                        top, second = captain_candidates[0], captain_candidates[1]
+                        top, second = captain_candidates[0][0], captain_candidates[1][0]
+                        top_points = captain_candidates[0][1]
                         floor = self.settings.tc_captain_floor_points
                         margin_floor = self.settings.tc_margin_floor
-                        if top >= floor and (top - second) >= margin_floor:
+                        if top_points >= floor and (top - second) >= margin_floor:
                             return ChipRecommendation(
                                 chip=slot.chip, set=slot.set, status="recommend", gameweek=gameweek,
                                 rationale=(
-                                    f"No double gameweek before expiry; top starter projects {top:.1f} "
+                                    f"No double gameweek before expiry; top starter projects {top_points:.1f} "
                                     f"this GW (use-it floor {floor:.1f}) — otherwise the chip is forfeited "
                                     "at the GW19 deadline."
                                 ),
                                 confidence=min(1.0, (top - second) / max(1.0, margin_floor * 2)),
-                                conditions={"captain_projected_points": round(top, 4), "use_it_window": True},
+                                conditions={"captain_projected_points": round(top_points, 4), "rank_aware": _rank_available(game_state), "use_it_window": True},
                             )
                     return ChipRecommendation(
                         chip=slot.chip, set=slot.set, status="save", gameweek=gameweek,
@@ -621,9 +656,8 @@ class ChipAdvisor:
                     rationale="No double gameweek detected; Triple Captain is worth saving for one.",
                     confidence=0.4,
                 )
-            captain_candidates = sorted(
-                (by_player_gw[(player_id, next_dgw)].projected_points for player_id in starting_xi_ids if (player_id, next_dgw) in by_player_gw),
-                reverse=True,
+            captain_candidates = _ranked_captain_candidates(
+                starting_xi_ids, next_dgw, by_player_gw, game_state, template_states,
             )
             if len(captain_candidates) < 2:
                 return ChipRecommendation(
@@ -631,19 +665,20 @@ class ChipAdvisor:
                     rationale="Not enough starter projections for a Triple Captain assessment.",
                     confidence=0.3,
                 )
-            top, second = captain_candidates[0], captain_candidates[1]
-            if top >= self.settings.tc_captain_points and (top - second) >= self.settings.tc_margin:
+            top, second = captain_candidates[0][0], captain_candidates[1][0]
+            top_points = captain_candidates[0][1]
+            if top_points >= self.settings.tc_captain_points and (top - second) >= self.settings.tc_margin:
                 return ChipRecommendation(
                     chip=slot.chip, set=slot.set, status="recommend", gameweek=next_dgw,
-                    rationale=f"Top starter projects {top:.1f} in the GW{next_dgw} double with a {top - second:.1f} point margin.",
+                    rationale=f"Top starter projects {top_points:.1f} in the GW{next_dgw} double with a {top - second:.1f} objective margin.",
                     confidence=min(1.0, (top - second) / (self.settings.tc_margin * 2)),
-                    conditions={"captain_projected_points": round(top, 4), "margin": round(top - second, 4), "double_gameweek": next_dgw},
+                    conditions={"captain_projected_points": round(top_points, 4), "margin": round(top - second, 4), "double_gameweek": next_dgw, "rank_aware": _rank_available(game_state)},
                 )
             return ChipRecommendation(
                 chip=slot.chip, set=slot.set, status="save", gameweek=next_dgw,
-                rationale=f"GW{next_dgw} double has no standout captain (top {top:.1f}, margin {top - second:.1f}).",
+                rationale=f"GW{next_dgw} double has no standout captain (top {top_points:.1f}, objective margin {top - second:.1f}).",
                 confidence=0.5,
-                conditions={"captain_projected_points": round(top, 4), "margin": round(top - second, 4), "double_gameweek": next_dgw},
+                conditions={"captain_projected_points": round(top_points, 4), "margin": round(top - second, 4), "double_gameweek": next_dgw, "rank_aware": _rank_available(game_state)},
             )
         if slot.chip == "free_hit":
             next_bgw = next((gw for gw in sorted(schedule) if gw >= gameweek and schedule[gw].get("blank")), None)
@@ -721,3 +756,73 @@ def _extract_gws(text: str) -> list[int]:
 def _snippet(text: str, limit: int = 160) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
     return cleaned[:limit]
+
+
+def _rank_available(state: GameState | None) -> bool:
+    return state is not None and state.rank_data_available
+
+
+def _rank_value(
+    row: OddsAdjustedGameweekProjection,
+    state: GameState | None,
+    template_states: Mapping[int, PlayerTemplateState] | None,
+    *,
+    captain: bool = False,
+) -> float:
+    if not _rank_available(state):
+        return 0.0
+    return rank_objective_adjustment(
+        row, state, (template_states or {}).get(row.player_id), captain=captain,
+    )
+
+
+def _rank_rows_value(
+    player_ids: list[int],
+    gameweek: int,
+    by_player_gw: Mapping[tuple[int, int], OddsAdjustedGameweekProjection],
+    state: GameState | None,
+    template_states: Mapping[int, PlayerTemplateState] | None,
+) -> float:
+    return round(
+        sum(
+            _rank_value(by_player_gw[(player_id, gameweek)], state, template_states)
+            for player_id in player_ids
+            if (player_id, gameweek) in by_player_gw
+        ),
+        4,
+    )
+
+
+def _rank_squad_gap(
+    best_ids: list[int],
+    committed_ids: list[int],
+    gameweeks: list[int],
+    by_player_gw: Mapping[tuple[int, int], OddsAdjustedGameweekProjection],
+    state: GameState | None,
+    template_states: Mapping[int, PlayerTemplateState] | None,
+) -> float:
+    if not _rank_available(state):
+        return 0.0
+    return round(
+        sum(_rank_rows_value(best_ids, gameweek, by_player_gw, state, template_states) for gameweek in gameweeks)
+        - sum(_rank_rows_value(committed_ids, gameweek, by_player_gw, state, template_states) for gameweek in gameweeks),
+        4,
+    )
+
+
+def _ranked_captain_candidates(
+    player_ids: list[int],
+    gameweek: int,
+    by_player_gw: Mapping[tuple[int, int], OddsAdjustedGameweekProjection],
+    state: GameState | None,
+    template_states: Mapping[int, PlayerTemplateState] | None,
+) -> list[tuple[float, float]]:
+    candidates = [
+        (
+            row.projected_points + _rank_value(row, state, template_states, captain=True),
+            row.projected_points,
+        )
+        for player_id in player_ids
+        if (row := by_player_gw.get((player_id, gameweek))) is not None
+    ]
+    return sorted(candidates, key=lambda value: (-value[0], -value[1]))

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Mapping
 
 from ortools.sat.python import cp_model
 from pydantic import BaseModel, Field
 
 from aifpl.config import paid_transfer_safety_cap
 from aifpl.current_projections import CurrentPlayerProjection
+from aifpl.game_state import GameState, ObjectiveMode
 from aifpl.optimizer import SquadOptimizationError
+from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
 from aifpl.rules import SquadPlayer, SquadRequest, club_key, validate_squad
+from aifpl.template import PlayerTemplateState, target_cohort_eo
 
 
 class CurrentSquadState(BaseModel):
@@ -23,6 +27,18 @@ class CurrentSquadState(BaseModel):
         default=None, ge=0, le=15,
         description="Optional paid-transfer cap; units are transfers, not points",
     )
+
+
+@dataclass(frozen=True)
+class TransferImpact:
+    out_id: int | None
+    in_id: int
+    projected_points_delta: float
+    out_effective_ownership: float | None
+    in_effective_ownership: float | None
+    template_exposure_delta: float | None
+    strategy_classification: str
+    recommendation: str
 
 
 @dataclass(frozen=True)
@@ -41,11 +57,25 @@ class TransferPlan:
     captain: CurrentPlayerProjection
     objective_projected_points: float
     net_objective_points: float
+    objective_mode: ObjectiveMode = "POINTS_MODE"
+    objective_components: dict[str, float] | None = None
+    strategy_classification: str = "POINTS_OPTIMAL"
+    recommendation: str = "HOLD"
+    transfer_impacts: list[TransferImpact] = field(default_factory=list)
 
 
-def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSquadState) -> TransferPlan:
+def plan_transfers(
+    candidates: list[CurrentPlayerProjection], state: CurrentSquadState,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
+) -> TransferPlan:
     """Select the highest-net legal squad reachable from a current squad and bank."""
     candidate_by_id = {candidate.player_id: candidate for candidate in candidates}
+    if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
+        raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
+        game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     if len(candidate_by_id) != len(candidates):
         raise ValueError("Candidate player IDs must be unique")
     current_ids = set(state.player_ids)
@@ -98,12 +128,28 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     excess_transfers = model.new_int_var(0, transfer_limit, "excess_transfers")
     model.add(excess_transfers >= transfers_made - state.free_transfers)
     hit_cost_scaled = excess_transfers * 4 * projection_scale
-    model.maximize(
+    objective = (
         sum(starters[index] * round(candidate.projected_points * projection_scale) for index, candidate in enumerate(candidates))
         + sum(captains[index] * round(candidate.projected_points * projection_scale) for index, candidate in enumerate(candidates))
         - hit_cost_scaled
         - transfers_made
     )
+    if objective_mode == "RANK_MODE":
+        objective += sum(
+            selected[index]
+            * rank_adjustment_coefficient(
+                candidate, game_state, (template_states or {}).get(candidate.player_id),
+            )
+            for index, candidate in enumerate(candidates)
+        )
+        objective += sum(
+            captains[index]
+            * rank_adjustment_coefficient(
+                candidate, game_state, (template_states or {}).get(candidate.player_id), captain=True,
+            )
+            for index, candidate in enumerate(candidates)
+        )
+    model.maximize(objective)
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = 1
     status = solver.solve(model)
@@ -119,6 +165,25 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
     hit_cost = max(0, transfers - state.free_transfers) * 4
     bank_after = state.bank + sum(player.cost for player in outgoing) - sum(player.cost for player in incoming)
     _validate_current_squad(resulting, bank_after)
+    projected_points = round(sum(player.projected_points for player in starting_xi) + captain.projected_points, 4)
+    rank_adjustment = 0.0
+    if objective_mode == "RANK_MODE":
+        rank_adjustment = sum(
+            rank_objective_adjustment(
+                player, game_state, (template_states or {}).get(player.player_id),
+            )
+            for player in resulting
+        )
+        rank_adjustment += rank_objective_adjustment(
+            captain, game_state, (template_states or {}).get(captain.player_id), captain=True,
+        )
+    objective_total = round(projected_points - hit_cost + rank_adjustment, 4)
+    classification, recommendation = _classify_transfer(
+        outgoing, incoming, game_state, template_states, transfers,
+    )
+    impacts = _transfer_impacts(
+        outgoing, incoming, template_states, classification, recommendation,
+    )
     return TransferPlan(
         outgoing=outgoing,
         incoming=incoming,
@@ -126,15 +191,99 @@ def plan_transfers(candidates: list[CurrentPlayerProjection], state: CurrentSqua
         transfers_made=transfers,
         hit_cost=hit_cost,
         bank_after=bank_after,
-        projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points, 4),
-        net_projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points - hit_cost, 4),
+        projected_points=projected_points,
+        net_projected_points=round(projected_points - hit_cost, 4),
         solver_status=solver.status_name(status),
         methodology=resulting[0].methodology,
         starting_xi=sorted(starting_xi, key=lambda item: (("GK", "DEF", "MID", "FWD").index(item.position), item.player_id)),
         captain=captain,
-        objective_projected_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points, 4),
-        net_objective_points=round(sum(player.projected_points for player in starting_xi) + captain.projected_points - hit_cost, 4),
+        objective_projected_points=projected_points,
+        net_objective_points=objective_total,
+        objective_mode=objective_mode,
+        objective_components={
+            "projected_points": projected_points,
+            "hit_cost": -float(hit_cost),
+            "rank_adjustment": round(rank_adjustment, 4),
+            "total": objective_total,
+        },
+        strategy_classification=classification,
+        recommendation=recommendation,
+        transfer_impacts=impacts,
     )
+
+
+def _classify_transfer(
+    outgoing: list[CurrentPlayerProjection],
+    incoming: list[CurrentPlayerProjection],
+    game_state: GameState | None,
+    template_states: Mapping[int, PlayerTemplateState] | None,
+    transfers: int,
+) -> tuple[str, str]:
+    if game_state is None or not game_state.rank_data_available:
+        return "POINTS_OPTIMAL", "MAKE_TRANSFER" if transfers else "HOLD"
+    templates = template_states or {}
+    leverage_delta = sum(
+        rank_objective_adjustment(player, game_state, templates.get(player.player_id))
+        for player in incoming
+    ) - sum(
+        rank_objective_adjustment(player, game_state, templates.get(player.player_id))
+        for player in outgoing
+    )
+    if game_state.strategy_status == "PROTECT_POSITION" and leverage_delta < 0:
+        return "UNNECESSARY_RISK", "HOLD"
+    if game_state.strategy_status == "BEHIND_TARGET" and leverage_delta > 0:
+        return "CALCULATED_ATTACK", "MAKE_TRANSFER"
+    if game_state.strategy_status == "BEHIND_TARGET":
+        return "SELECTIVE_LEVERAGE", "MAKE_TRANSFER" if transfers else "HOLD"
+    if leverage_delta < 0:
+        return "UNNECESSARY_RISK", "HOLD"
+    return "BALANCED_PLAY", "MAKE_TRANSFER" if transfers else "HOLD"
+
+
+def _transfer_impacts(
+    outgoing: list[CurrentPlayerProjection],
+    incoming: list[CurrentPlayerProjection],
+    template_states: Mapping[int, PlayerTemplateState] | None,
+    classification: str,
+    recommendation: str,
+) -> list[TransferImpact]:
+    remaining_out = sorted(outgoing, key=lambda player: (player.position, player.player_id))
+    impacts: list[TransferImpact] = []
+    templates = template_states or {}
+    for player in sorted(incoming, key=lambda item: (item.position, item.player_id)):
+        match = next(
+            (index for index, candidate in enumerate(remaining_out) if candidate.position == player.position),
+            0,
+        )
+        outgoing_player = remaining_out.pop(match) if remaining_out else None
+        out_eo = _cohort_eo(outgoing_player, templates)
+        in_eo = _cohort_eo(player, templates)
+        impacts.append(TransferImpact(
+            out_id=outgoing_player.player_id if outgoing_player is not None else None,
+            in_id=player.player_id,
+            projected_points_delta=round(
+                player.projected_points - (outgoing_player.projected_points if outgoing_player is not None else 0.0),
+                4,
+            ),
+            out_effective_ownership=out_eo,
+            in_effective_ownership=in_eo,
+            template_exposure_delta=round(in_eo - out_eo, 4) if in_eo is not None and out_eo is not None else None,
+            strategy_classification=classification,
+            recommendation=recommendation,
+        ))
+    return impacts
+
+
+def _cohort_eo(
+    player: CurrentPlayerProjection | None,
+    template_states: Mapping[int, PlayerTemplateState],
+) -> float | None:
+    if player is None:
+        return None
+    value, _ = target_cohort_eo(
+        player.player_id, template_states.get(player.player_id), player.selected_by_percent,
+    )
+    return value
 
 
 def _validate_current_squad(players: list[CurrentPlayerProjection], bank: int) -> None:

@@ -5,7 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 
 
-MODEL_SPEC_VERSION = "aifpl-scoring-spec-2026-27-v1"
+MODEL_SPEC_VERSION = "aifpl-scoring-spec-2026-27-v2-rank-layer"
 MODEL_SOURCE_FILES = (
     "model_identity.py",
     "config.py",
@@ -25,6 +25,15 @@ MODEL_SOURCE_FILES = (
     "scoring.py",
     "rules.py",
     "chips.py",
+    "game_state.py",
+    "template.py",
+    "strategy_policy.py",
+    "rank_utility.py",
+    "captaincy_strategy.py",
+    "objective_accounting.py",
+    "optimizer.py",
+    "horizon_transfers.py",
+    "transfers.py",
 )
 
 

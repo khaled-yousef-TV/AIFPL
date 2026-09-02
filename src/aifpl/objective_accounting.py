@@ -17,6 +17,9 @@ from aifpl.config import (
     transfer_penalty,
 )
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, legal_formations, validate_squad
+from aifpl.game_state import GameState, ObjectiveMode
+from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
+from aifpl.template import PlayerTemplateState
 
 
 OBJECTIVE_SCALE = 10_000
@@ -36,6 +39,9 @@ class HorizonObjectiveSettings:
     minimum_bank_tenths: int
     minimum_confidence_weight: float
     forecast_distance_decay: float
+    objective_mode: ObjectiveMode = "POINTS_MODE"
+    game_state: GameState | None = None
+    template_states: Mapping[int, PlayerTemplateState] | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,7 @@ class HorizonObjectiveBreakdown:
     forecast_distance_weight: float
     week_weight: float
     total: float
+    rank_adjustment: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -88,6 +95,7 @@ class HorizonObjectiveBreakdown:
             "information_weight": round(self.information_weight, 6),
             "forecast_distance_weight": round(self.forecast_distance_weight, 6),
             "week_weight": round(self.week_weight, 6),
+            "rank_adjustment": round(self.rank_adjustment, 4),
             "total": round(self.total, 4),
         }
 
@@ -99,7 +107,14 @@ class HorizonPlanValidationError(ValueError):
 def horizon_objective_settings(
     strategy_hit_penalty: float,
     churn_penalty_override: float | None = None,
+    objective_mode: ObjectiveMode = "POINTS_MODE",
+    game_state: GameState | None = None,
+    template_states: Mapping[int, PlayerTemplateState] | None = None,
 ) -> HorizonObjectiveSettings:
+    if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
+        raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
+        game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     return HorizonObjectiveSettings(
         strategy_hit_penalty=strategy_hit_penalty,
         churn_penalty=transfer_penalty() if churn_penalty_override is None else churn_penalty_override,
@@ -109,6 +124,9 @@ def horizon_objective_settings(
         minimum_bank_tenths=minimum_bank_tenths(),
         minimum_confidence_weight=horizon_min_confidence_weight(),
         forecast_distance_decay=horizon_forecast_distance_decay(),
+        objective_mode=objective_mode,
+        game_state=game_state,
+        template_states=template_states,
     )
 
 
@@ -244,9 +262,24 @@ def horizon_objective_breakdown(
         )
         for row in selected_rows
     ) / OBJECTIVE_SCALE
+    rank_adjustment = 0.0
+    if settings.objective_mode == "RANK_MODE":
+        rank_adjustment = sum(
+            objective_float(rank_adjustment_coefficient(
+                row, settings.game_state, (settings.template_states or {}).get(row.player_id),
+                week_weight=week.week_weight,
+            ))
+            for row in selected_rows
+        )
+        rank_adjustment += objective_float(rank_adjustment_coefficient(
+            rows_by_id[captain_id], settings.game_state,
+            (settings.template_states or {}).get(captain_id), captain=True,
+            week_weight=week.week_weight,
+        ))
     total = (
         starter_points + captain_points + bench_points + strategy_penalty + churn
-        + shortfall_penalty + dead_penalty + preferred + differential
+        + shortfall_penalty + dead_penalty + preferred
+        + (rank_adjustment if settings.objective_mode == "RANK_MODE" else differential)
     )
     return HorizonObjectiveBreakdown(
         starter_points=starter_points,
@@ -263,6 +296,7 @@ def horizon_objective_breakdown(
         forecast_distance_weight=week.forecast_distance_weight,
         week_weight=week.week_weight,
         total=total,
+        rank_adjustment=rank_adjustment,
     )
 
 
@@ -285,11 +319,21 @@ def best_objective_lineup(
                 for midfielder_group in combinations(by_position["MID"], midfielders):
                     for forward_group in combinations(by_position["FWD"], forwards):
                         starter_ids = set(goalkeeper + defender_group + midfielder_group + forward_group)
-                        ranked = sorted(
-                            starter_ids,
-                            key=lambda player_id: (-rows_by_id[player_id].projected_points, player_id),
-                        )
-                        captain_id = ranked[0]
+                        if settings.objective_mode == "RANK_MODE":
+                            from aifpl.captaincy_strategy import choose_captain
+
+                            starter_players = [
+                                player for player in squad if player.player_id in starter_ids
+                            ]
+                            captain_id = choose_captain(
+                                starter_players, settings.game_state, settings.template_states,
+                            ).captain.player_id
+                        else:
+                            ranked = sorted(
+                                starter_ids,
+                                key=lambda player_id: (-rows_by_id[player_id].projected_points, player_id),
+                            )
+                            captain_id = ranked[0]
                         bench_ids = set(rows_by_id) & ({player.player_id for player in squad} - starter_ids)
                         dead_excess = max(
                             0,
@@ -305,6 +349,20 @@ def best_objective_lineup(
                             )
                             - dead_excess * dead_bench_coefficient(week.week_weight, settings)
                         )
+                        if settings.objective_mode == "RANK_MODE":
+                            score += sum(
+                                rank_adjustment_coefficient(
+                                    rows_by_id[player_id], settings.game_state,
+                                    (settings.template_states or {}).get(player_id),
+                                    week_weight=week.week_weight,
+                                )
+                                for player_id in {player.player_id for player in squad}
+                            )
+                            score += rank_adjustment_coefficient(
+                                rows_by_id[captain_id], settings.game_state,
+                                (settings.template_states or {}).get(captain_id),
+                                captain=True, week_weight=week.week_weight,
+                            )
                         key = tuple(sorted(starter_ids))
                         candidate = (score, key, captain_id)
                         if best is None or score > best[0] or (score == best[0] and key < best[1]):
@@ -399,10 +457,25 @@ def _audit_objective_breakdown(
         q(row.projected_points * differential_appetite * (100 - row.selected_by_percent) / 100 * week.week_weight)
         for row in selected_rows
     )
+    rank_adjustment = 0.0
+    if settings.objective_mode == "RANK_MODE":
+        rank_adjustment = sum(
+            q(rank_objective_adjustment(
+                row, settings.game_state, (settings.template_states or {}).get(row.player_id),
+            ) * week.week_weight)
+            for row in selected_rows
+        )
+        rank_adjustment += q(
+            rank_objective_adjustment(
+                rows_by_id[captain_id], settings.game_state,
+                (settings.template_states or {}).get(captain_id), captain=True,
+            ) * week.week_weight
+        )
     total = (
         starter_points + captain_points + bench_points + strategy_hit_penalty
         + churn_penalty_value + bank_shortfall_value + dead_bench_value
-        + preferred_bonus + differential_bonus
+        + preferred_bonus
+        + (rank_adjustment if settings.objective_mode == "RANK_MODE" else differential_bonus)
     )
     return {
         "starter_points": round(starter_points, 4),
@@ -414,6 +487,7 @@ def _audit_objective_breakdown(
         "dead_bench_penalty": round(dead_bench_value, 4),
         "preferred_bonus": round(preferred_bonus, 4),
         "differential_bonus": round(differential_bonus, 4),
+        "rank_adjustment": round(rank_adjustment, 4),
         "odds_coverage": round(week.odds_coverage, 6),
         "information_weight": round(week.information_weight, 6),
         "forecast_distance_weight": round(week.forecast_distance_weight, 6),
@@ -444,6 +518,8 @@ def validate_horizon_plan(
 ) -> None:
     """Audit a complete horizon plan with deterministic, non-solver checks."""
     settings = settings or horizon_objective_settings(decision_hit_penalty, churn_penalty)
+    if getattr(plan, "objective_mode", "POINTS_MODE") != settings.objective_mode:
+        raise HorizonPlanValidationError("Plan objective mode does not match its accounting settings")
     paid_cap = paid_transfer_safety_cap() if paid_transfer_cap is None else paid_transfer_cap
     gameweeks = sorted({row.gameweek for row in rows})
     if [week.gameweek for week in plan.gameweeks] != gameweeks:
@@ -608,9 +684,17 @@ def validate_horizon_plan(
         captain_id = week.captain.player_id
         vice_id = week.vice_captain.player_id if week.vice_captain is not None else None
         ranked_starters = sorted(starter_set, key=lambda player_id: (-week_rows[player_id].projected_points, player_id))
-        if captain_id not in starter_set or captain_id != ranked_starters[0]:
+        expected_captain_id = ranked_starters[0]
+        expected_vice_id = ranked_starters[1] if len(ranked_starters) > 1 else None
+        if settings.objective_mode == "RANK_MODE":
+            from aifpl.captaincy_strategy import choose_captain
+
+            choice = choose_captain(week.starting_xi, settings.game_state, settings.template_states)
+            expected_captain_id = choice.captain.player_id
+            expected_vice_id = choice.vice_captain.player_id
+        if captain_id not in starter_set or captain_id != expected_captain_id:
             raise HorizonPlanValidationError(f"GW{gameweek} captain is invalid")
-        if vice_id is None or vice_id == captain_id or vice_id != ranked_starters[1]:
+        if vice_id is None or vice_id == captain_id or vice_id != expected_vice_id:
             raise HorizonPlanValidationError(f"GW{gameweek} vice-captain is invalid")
         projected = round(
             sum(week_rows[player_id].projected_points for player_id in starter_set)

@@ -138,6 +138,66 @@ def test_horizon_plan_route_passes_preseason_and_penalty_options(monkeypatch, tm
     assert captured["churn_penalty"] == 2.5
 
 
+def test_rank_captaincy_route_requires_a_saved_rank_state(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    players = [
+        {
+            "player_id": 1,
+            "player_name": "Player 1",
+            "position": "MID",
+            "club": "A",
+            "cost": 100,
+            "projected_points": 8.0,
+            "availability_multiplier": 1.0,
+        },
+        {
+            "player_id": 2,
+            "player_name": "Player 2",
+            "position": "MID",
+            "club": "B",
+            "cost": 100,
+            "projected_points": 7.5,
+            "availability_multiplier": 1.0,
+        },
+    ]
+
+    response = TestClient(api.app).post(
+        "/captaincy/plan?objective_mode=RANK_MODE",
+        json={"players": players},
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert response.status_code == 422
+    assert "saved GameState" in response.json()["detail"]
+
+
+def test_game_state_route_round_trips_rank_state(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    payload = {
+        "season_id": "2026-27",
+        "gameweek": 27,
+        "overall_rank": 184000,
+        "target_rank": 50000,
+        "free_transfers": 3,
+        "bank": 80,
+        "objective_mode": "RANK_MODE",
+    }
+
+    response = TestClient(api.app).post(
+        "/game-state", json=payload, headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+    assert response.status_code == 201
+    assert response.json()["strategy_status"] == "BEHIND_TARGET"
+
+    latest = TestClient(api.app).get(
+        "/game-state", headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+    assert latest.status_code == 200
+    assert latest.json()["rank_gap_ratio"] == 3.68
+
+
 def test_scheduler_ticks_returns_recent_ticks_newest_first(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
     monkeypatch.setattr(api, "data_dir", lambda: tmp_path)

@@ -17,10 +17,12 @@ from pydantic import BaseModel, Field
 from aifpl.config import cors_origins, data_dir
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
+from aifpl.captaincy_strategy import choose_captain
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCatalogStore
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
 from aifpl.dashboard import CurrentDashboard, build_current_dashboard
 from aifpl.execution import ExecutionConfirmation, ExecutionConfirmationError, ExecutionConfirmationStore
+from aifpl.game_state import ExposureState, GameState, GameStateStore, ObjectiveMode
 from aifpl.fixture_projections import FixtureGameweekProjection, FixtureProjectionCatalog, FixtureProjectionStore, build_fixture_gameweek_projections
 from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCatalog
 from aifpl.fpl import FplClient, FplSourceError
@@ -45,6 +47,15 @@ from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError, RefreshJobResu
 from aifpl.scheduler import DeadlineScheduler, DeadlineStatus, SchedulerTickError, SchedulerTickResult
 from aifpl.rules import LineupRecommendation, SquadRequest, SquadValidation, TransferCostRequest, select_best_lineup, transfer_hit_cost, validate_squad
 from aifpl.transfers import CurrentSquadState, TransferPlan, plan_transfers
+from aifpl.strategy_policy import StrategyPolicy, derive_strategy_policy
+from aifpl.template import (
+    OwnershipLandscape,
+    PlayerTemplateState,
+    TemplateCatalog,
+    TemplateCatalogStore,
+    build_template_catalog,
+    build_exposure_states,
+)
 from aifpl.xg_projections import XgXaProjection, XgXaProjectionCatalog, XgXaProjectionStore, elapsed_gameweeks
 from aifpl.snapshots import SnapshotNotFoundError, SnapshotStore
 from aifpl.security import valid_admin_key
@@ -190,9 +201,171 @@ class ExecutionConfirmationRequest(BaseModel):
     notes: str = Field(default="", max_length=2000)
 
 
+class CaptaincyRequest(BaseModel):
+    players: list[CurrentPlayerProjection] = Field(min_length=2, max_length=11)
+    triple_captain: bool = False
+
+
+def _rank_context(
+    objective_mode: ObjectiveMode,
+) -> tuple[GameState | None, dict[int, PlayerTemplateState]]:
+    if objective_mode == "POINTS_MODE":
+        return None, {}
+    try:
+        state = GameStateStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="RANK_MODE requires a saved GameState") from exc
+    if not state.rank_data_available:
+        raise HTTPException(status_code=422, detail="RANK_MODE requires a GameState with rank and target rank")
+    try:
+        templates = {
+            row.player_id: row
+            for row in TemplateCatalogStore(data_dir()).latest(
+                season_id=state.season_id, gameweek=state.gameweek,
+            ).players
+        }
+    except FileNotFoundError:
+        try:
+            templates = {
+                row.player_id: row
+                for row in TemplateCatalogStore(data_dir()).latest(season_id=state.season_id).players
+            }
+        except FileNotFoundError:
+            templates = {}
+    return state.model_copy(update={"objective_mode": "RANK_MODE"}), templates
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/game-state", response_model=GameState)
+def latest_game_state(request: Request) -> GameState:
+    _protect_sensitive_read(request)
+    try:
+        return GameStateStore(data_dir()).latest()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/game-state", response_model=GameState, status_code=201)
+def save_game_state(state: GameState) -> GameState:
+    GameStateStore(data_dir()).save(state)
+    return state
+
+
+@app.get("/template/landscape", response_model=TemplateCatalog)
+def latest_template_landscape(
+    request: Request,
+    season_id: str | None = Query(None, min_length=3, max_length=32),
+    gameweek: int | None = Query(None, ge=1, le=38),
+) -> TemplateCatalog:
+    _protect_sensitive_read(request)
+    try:
+        return TemplateCatalogStore(data_dir()).latest(season_id, gameweek)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/template/players", response_model=list[PlayerTemplateState])
+def latest_template_players(
+    request: Request,
+    limit: int = Query(1000, ge=1, le=5000),
+    season_id: str | None = Query(None, min_length=3, max_length=32),
+    gameweek: int | None = Query(None, ge=1, le=38),
+) -> list[PlayerTemplateState]:
+    _protect_sensitive_read(request)
+    try:
+        return TemplateCatalogStore(data_dir()).latest(season_id, gameweek).players[:limit]
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/template/landscape", response_model=TemplateCatalog, status_code=201)
+def save_template_landscape(landscape: OwnershipLandscape) -> TemplateCatalog:
+    catalog = build_template_catalog(landscape)
+    path = TemplateCatalogStore(data_dir()).save(catalog)
+    return catalog.model_copy(update={"output_path": str(path)})
+
+
+@app.get("/game-state/exposure", response_model=list[ExposureState])
+def latest_exposure(request: Request) -> list[ExposureState]:
+    _protect_sensitive_read(request)
+    try:
+        state = GameStateStore(data_dir()).latest()
+        if state.exposures:
+            return state.exposures
+        hermes_state = HermesManager(data_dir()).latest_state(
+            optional=True, season_id=state.season_id,
+        )
+        if hermes_state is None:
+            return []
+        try:
+            rows = OddsProjectionStore(data_dir()).latest()
+        except FileNotFoundError:
+            return []
+        try:
+            templates = {
+                row.player_id: row
+                for row in TemplateCatalogStore(data_dir()).latest(
+                    season_id=state.season_id, gameweek=state.gameweek,
+                ).players
+            }
+        except FileNotFoundError:
+            templates = {}
+        return build_exposure_states(
+            [row for row in rows if row.gameweek == state.gameweek],
+            set(hermes_state.squad.player_ids),
+            hermes_state.captain_id,
+            hermes_state.active_chip == "triple_captain",
+            templates,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/strategy/policy", response_model=StrategyPolicy)
+def strategy_policy(
+    request: Request,
+    objective_mode: ObjectiveMode = Query("POINTS_MODE"),
+) -> StrategyPolicy:
+    _protect_sensitive_read(request)
+    state, _ = _rank_context(objective_mode)
+    if state is None:
+        state = GameState(season_id="unknown", gameweek=1, free_transfers=1, bank=0)
+    return derive_strategy_policy(state, objective_mode)
+
+
+@app.post("/captaincy/plan")
+def captaincy_plan(
+    request: CaptaincyRequest,
+    objective_mode: ObjectiveMode = Query("POINTS_MODE"),
+) -> dict[str, object]:
+    try:
+        game_state, templates = _rank_context(objective_mode)
+        choice = choose_captain(request.players, game_state, templates, request.triple_captain)
+    except (HTTPException, ValueError) as exc:
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "mode": choice.mode,
+        "captain_id": choice.captain.player_id,
+        "vice_captain_id": choice.vice_captain.player_id,
+        "options": [
+            {
+                "player_id": option.player_id,
+                "projected_points": option.projected_points,
+                "target_cohort_eo": option.target_cohort_eo,
+                "own_exposure_if_captained": option.own_exposure_if_captained,
+                "net_exposure": option.net_exposure,
+                "score": option.score,
+                "classification": option.classification,
+            }
+            for option in choice.options
+        ],
+    }
 
 
 @app.post("/health/sources/check", response_model=SourceHealthReport)
@@ -781,11 +954,14 @@ def optimize_current_squad(
     budget: int = Query(1000, ge=0), projection_source: ProjectionSource = Query(ProjectionSource.CURRENT),
     catalog_id: str | None = Query(None),
     differential_appetite: float = Query(0.0, ge=0, le=1),
+    objective_mode: ObjectiveMode = Query("POINTS_MODE"),
 ) -> OptimizedSquad:
     try:
+        game_state, templates = _rank_context(objective_mode)
         return optimize_squad(
             load_projection_candidates(data_dir(), projection_source, catalog_id), budget,
             differential_appetite=differential_appetite,
+            objective_mode=objective_mode, game_state=game_state, template_states=templates,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -797,9 +973,14 @@ def optimize_current_squad(
 def transfer_plan(
     state: CurrentSquadState, projection_source: ProjectionSource = Query(ProjectionSource.CURRENT),
     catalog_id: str | None = Query(None),
+    objective_mode: ObjectiveMode = Query("POINTS_MODE"),
 ) -> TransferPlan:
     try:
-        return plan_transfers(load_projection_candidates(data_dir(), projection_source, catalog_id), state)
+        game_state, templates = _rank_context(objective_mode)
+        return plan_transfers(
+            load_projection_candidates(data_dir(), projection_source, catalog_id), state,
+            objective_mode=objective_mode, game_state=game_state, template_states=templates,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (SquadOptimizationError, ValueError) as exc:
@@ -813,12 +994,15 @@ def horizon_transfer_plan(
     pre_season: bool = Query(False, description="Unlimited transfers for the opening gameweek only"),
     decision_hit_penalty: float = Query(4.0, ge=0),
     churn_penalty: float | None = Query(None, ge=0),
+    objective_mode: ObjectiveMode = Query("POINTS_MODE"),
 ) -> HorizonTransferPlan:
     try:
+        game_state, templates = _rank_context(objective_mode)
         return plan_horizon_transfers(
             calibrated_odds_rows(data_dir(), catalog_id)[0], state,
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
-            churn_penalty=churn_penalty,
+            churn_penalty=churn_penalty, objective_mode=objective_mode,
+            game_state=game_state, template_states=templates,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -871,9 +1055,16 @@ def odds_projections(
 ) -> list[OddsAdjustedGameweekProjection]:
     try:
         player_path, players = CurrentPlayerCatalogStore(data_dir()).latest_with_path()
+        try:
+            template_states = {
+                row.player_id: row for row in TemplateCatalogStore(data_dir()).latest().players
+            }
+        except FileNotFoundError:
+            template_states = {}
         return build_odds_adjusted_projections(
             players, CurrentFixtureCatalogStore(data_dir()).latest(), FixtureOddsConsensusStore(data_dir()).latest(),
             start_gameweek, end_gameweek, elapsed_gameweeks(data_dir(), player_path, players),
+            template_states=template_states,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

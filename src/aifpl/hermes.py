@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, sha256_path, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
+from aifpl.game_state import GameState, GameStateStore, ObjectiveMode
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import (
     HorizonGameweekPlan,
@@ -30,6 +31,7 @@ from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import SquadPlayer, SquadRequest, select_best_lineup
 from aifpl.retry import retry_sync
 from aifpl.security import redact_secrets
+from aifpl.template import PlayerTemplateState, TemplateCatalogStore
 
 
 class HermesModel(Protocol):
@@ -44,6 +46,7 @@ class HermesStrategy(BaseModel):
     differential_appetite: float = Field(ge=0, le=1)
     planning_horizon: int = Field(ge=3, le=6)
     preferred_players: list[str] = Field(default_factory=list)
+    objective_mode: ObjectiveMode = "POINTS_MODE"
     rationale: str
 
 
@@ -71,6 +74,7 @@ class HermesState(BaseModel):
     bench_ids: list[int] = Field(default_factory=list)
     active_chip: str | None = None
     active_chip_set: Literal[1, 2] | None = None
+    game_state: GameState | None = None
 
 
 class HermesDecision(BaseModel):
@@ -97,6 +101,7 @@ class HermesDecision(BaseModel):
     bench_ids: list[int] = Field(default_factory=list)
     active_chip: str | None = None
     active_chip_set: Literal[1, 2] | None = None
+    game_state: GameState | None = None
 
 
 class HermesRunResult(BaseModel):
@@ -159,6 +164,7 @@ class HorizonPlanSnapshot(BaseModel):
     robustness_score: float = 0.0
     objective_value: float = 0.0
     objective_components: dict[str, float] = Field(default_factory=dict)
+    objective_mode: ObjectiveMode = "POINTS_MODE"
     weeks: list[HorizonPlanWeekSnapshot] = Field(default_factory=list)
 
 
@@ -198,13 +204,84 @@ class HermesDecisionBackend:
             evidence_count = len(PlayerEvidenceStore(self.root).latest())
         except FileNotFoundError:
             evidence_count = 0
+        state = self.latest_game_state()
         return {
             "source_health": health,
             "player_evidence_records": evidence_count,
             "decision_history": self._decision_history(),
             "odds_projection_coverage": self._odds_coverage(),
             "chip_advice": self._chip_advice(),
+            "game_state": state.model_dump(mode="json") if state else None,
+            "template_summary": self._template_summary(state),
         }
+
+    def latest_game_state(self) -> GameState | None:
+        try:
+            return GameStateStore(self.root).latest()
+        except FileNotFoundError:
+            return None
+
+    def template_states(
+        self, season_id: str | None = None, gameweek: int | None = None,
+    ) -> dict[int, PlayerTemplateState]:
+        try:
+            return {
+                row.player_id: row
+                for row in TemplateCatalogStore(self.root).latest(
+                    season_id=season_id, gameweek=gameweek,
+                ).players
+            }
+        except FileNotFoundError:
+            if gameweek is not None:
+                try:
+                    return {
+                        row.player_id: row
+                        for row in TemplateCatalogStore(self.root).latest(season_id=season_id).players
+                    }
+                except FileNotFoundError:
+                    pass
+            return {}
+
+    def _template_summary(self, state: GameState | None) -> dict[str, Any] | None:
+        try:
+            catalog = TemplateCatalogStore(self.root).latest(
+                season_id=state.season_id if state is not None else None,
+                gameweek=state.gameweek if state is not None else None,
+            )
+        except FileNotFoundError:
+            return None
+        top = sorted(
+            catalog.players,
+            key=lambda row: (-row.template_score, row.player_id),
+        )[:25]
+        return {
+            "source": catalog.source,
+            "gameweek": catalog.gameweek,
+            "players": len(catalog.players),
+            "top_template": [
+                {
+                    "player_id": row.player_id,
+                    "template_score": row.template_score,
+                    "template_status": row.template_status,
+                    "effective_ownership": row.effective_ownership,
+                    "expected_captaincy": row.expected_captaincy,
+                }
+                for row in top
+            ],
+        }
+
+    def _rank_inputs(
+        self, strategy: HermesStrategy,
+    ) -> tuple[GameState | None, dict[int, PlayerTemplateState]]:
+        state = self.latest_game_state()
+        if strategy.objective_mode == "RANK_MODE":
+            if state is None or not state.rank_data_available:
+                raise ValueError("RANK_MODE requires a saved GameState with rank and target rank")
+            state = state.model_copy(update={"objective_mode": "RANK_MODE"})
+        return state, self.template_states(
+            season_id=state.season_id if state is not None else None,
+            gameweek=state.gameweek if state is not None else None,
+        )
 
     def _chip_advice(self) -> dict[str, object] | None:
         try:
@@ -283,6 +360,7 @@ class HermesDecisionBackend:
 
     def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int, HorizonPlanSnapshot]:
         rows, catalog_id = self._horizon_rows(1, strategy.planning_horizon)
+        game_state, templates = self._rank_inputs(strategy)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         plan = plan_horizon_transfers(
             rows, HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
@@ -290,6 +368,9 @@ class HermesDecisionBackend:
             differential_appetite=strategy.differential_appetite,
             pre_season=True,
             churn_penalty=_strategy_churn_penalty(strategy),
+            objective_mode=strategy.objective_mode,
+            game_state=game_state,
+            template_states=templates,
         )
         opening = plan.gameweeks[0]
         total_cost = sum(player.cost for player in opening.resulting_squad)
@@ -299,10 +380,12 @@ class HermesDecisionBackend:
             projected_points=opening.projected_points, budget=total_cost + opening.bank_after,
             solver_status=plan.solver_status, methodology=plan.methodology,
             starting_xi=opening.starting_xi, captain=opening.captain,
+            objective_mode=strategy.objective_mode, vice_captain=opening.vice_captain,
         ), opening.gameweek, _plan_snapshot(plan, catalog_id, pre_season=True)
 
     def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
+        game_state, templates = self._rank_inputs(strategy)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_horizon_transfers(rows, HorizonSquadState(
@@ -310,10 +393,15 @@ class HermesDecisionBackend:
             purchase_prices=state.purchase_prices,
         ), decision_hit_penalty=4 + strategy.hit_aversion * 4 + (1 - strategy.risk_tolerance) * 2,
             preferred_player_ids=preferred, differential_appetite=strategy.differential_appetite,
-             pre_season=pre_season, churn_penalty=_strategy_churn_penalty(strategy)), catalog_id
+            pre_season=pre_season, churn_penalty=_strategy_churn_penalty(strategy),
+            objective_mode=strategy.objective_mode,
+            game_state=game_state,
+            template_states=templates,
+        ), catalog_id
 
     def hold_horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
+        game_state, templates = self._rank_inputs(strategy)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_hold_horizon_transfers(
@@ -327,6 +415,9 @@ class HermesDecisionBackend:
             differential_appetite=strategy.differential_appetite,
             pre_season=pre_season,
             churn_penalty=_strategy_churn_penalty(strategy),
+            objective_mode=strategy.objective_mode,
+            game_state=game_state,
+            template_states=templates,
         ), catalog_id
 
     def hold_week(self, state: HermesSquadState, horizon: int, target_gameweek: int) -> dict[str, Any]:
@@ -646,7 +737,9 @@ class HermesManager:
             "re-read the squad and plan before deciding. "
             "The context includes decision_history with your prior decisions' outcomes; use it as advisory evidence only. "
             "Any outcome-driven strategy change is recommendation-only for a new planning cycle, never an automatic mutation "
-            "of an already computed plan; set and finalize strategy before requesting a plan."
+            "of an already computed plan; set and finalize strategy before requesting a plan. "
+            "POINTS_MODE optimizes expected points. RANK_MODE is only valid when the context contains a current rank, "
+            "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -833,8 +926,9 @@ class HermesManager:
                 player_id for player_id in squad.player_ids
                 if player_id not in set(legacy.starting_xi_ids)
             ],
-            active_chip=legacy.active_chip,
-            active_chip_set=legacy.active_chip_set,
+             active_chip=legacy.active_chip,
+             active_chip_set=legacy.active_chip_set,
+             game_state=legacy.game_state,
         )
         state = legacy.model_copy(update={
             "squad": squad, "gameweek": gameweek, "season_id": season_id,
@@ -920,7 +1014,7 @@ class HermesManager:
             purchase_prices = {player.player_id: player.cost for player in self._initial.players}
             methodology = self._initial.methodology
             plan_snapshot = self._initial_snapshot
-            vice_captain = max(
+            vice_captain = self._initial.vice_captain or max(
                 (player for player in self._initial.starting_xi if player.player_id != captain_id),
                 key=lambda player: player.projected_points,
                 default=None,
@@ -975,6 +1069,11 @@ class HermesManager:
         state_path = self.root / "hermes" / "states" / f"{stamp}.json"
         season_id = self._expected_season_id or (previous.season_id if previous else _season_id_for_now(now))
         decision_model = model_name or (self.model.model_name if self.model is not None else previous.model if previous else "unknown")
+        latest_game_state = self.backend.latest_game_state() if hasattr(self.backend, "latest_game_state") else None
+        if self._strategy.objective_mode == "RANK_MODE":
+            if latest_game_state is None or not latest_game_state.rank_data_available:
+                raise ValueError("RANK_MODE requires a saved GameState with rank and target rank")
+            latest_game_state = latest_game_state.model_copy(update={"objective_mode": "RANK_MODE"})
         active_chip = arguments.get("active_chip")
         active_chip_set = arguments.get("active_chip_set")
         if active_chip is not None:
@@ -1002,6 +1101,7 @@ class HermesManager:
             bench_ids=bench_ids,
             active_chip=active_chip,
             active_chip_set=active_chip_set,
+            game_state=latest_game_state,
         )
         state = HermesState(
             strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
@@ -1014,6 +1114,7 @@ class HermesManager:
             bench_ids=bench_ids,
             active_chip=active_chip,
             active_chip_set=active_chip_set,
+            game_state=latest_game_state,
             initialization_method="horizon_v1" if action == "adopt_initial" else (
                 previous.initialization_method if previous else ""
             ),
@@ -1073,7 +1174,7 @@ def _reference_points_to(root: Path, reference_key: str, reference: str, artifac
 
 def _tools() -> list[dict[str, Any]]:
     return [
-        _tool("set_strategy", "Set your autonomous strategy before planning; outcome history is advisory and any outcome-driven change is recommendation-only for this new plan. differential_appetite (0..1) weights under-owned players in squad purchases only, adding up to appetite * projected_points extra value for a 0%-owned player, and never changes which players start", {"risk_tolerance": {"type": "number", "minimum": 0, "maximum": 1}, "hit_aversion": {"type": "number", "minimum": 0, "maximum": 1}, "differential_appetite": {"type": "number", "minimum": 0, "maximum": 1}, "planning_horizon": {"type": "integer", "minimum": 3, "maximum": 6}, "preferred_players": {"type": "array", "items": {"type": "string"}}, "rationale": {"type": "string"}}, ["risk_tolerance", "hit_aversion", "differential_appetite", "planning_horizon", "rationale"]),
+        _tool("set_strategy", "Set your autonomous strategy before planning; outcome history is advisory and any outcome-driven change is recommendation-only for this new plan. objective_mode selects expected-points or rank-aware optimization. differential_appetite is used only in POINTS_MODE; RANK_MODE uses rank state and cohort ownership leverage.", {"risk_tolerance": {"type": "number", "minimum": 0, "maximum": 1}, "hit_aversion": {"type": "number", "minimum": 0, "maximum": 1}, "differential_appetite": {"type": "number", "minimum": 0, "maximum": 1}, "planning_horizon": {"type": "integer", "minimum": 3, "maximum": 6}, "preferred_players": {"type": "array", "items": {"type": "string"}}, "objective_mode": {"type": "string", "enum": ["POINTS_MODE", "RANK_MODE"]}, "rationale": {"type": "string"}}, ["risk_tolerance", "hit_aversion", "differential_appetite", "planning_horizon", "rationale"]),
         _tool("get_initial_squad", "Get the backend's best multi-gameweek initial squad", {}, []),
         _tool("get_horizon_plan", "Get the backend's transfer plan for the existing squad", {}, []),
         _tool("commit_decision", "Commit one backend-validated action. Chip fields are optional and mean confirmed activation, never mere advice.", {"action": {"type": "string", "enum": ["adopt_initial", "execute_horizon", "hold"]}, "explanation": {"type": "string"}, "active_chip": {"type": ["string", "null"], "enum": ["wildcard", "free_hit", "bench_boost", "triple_captain", None]}, "active_chip_set": {"type": ["integer", "null"], "enum": [1, 2, None]}}, ["action", "explanation"]),
@@ -1116,7 +1217,28 @@ def _hold_week_from_plan(plan: HorizonTransferPlan, target_gameweek: int) -> dic
 
 
 def _squad_summary(squad: OptimizedSquad) -> dict[str, Any]:
-    return {"players": [{"id": p.player_id, "name": p.player_name, "position": p.position, "club": p.club, "points": p.projected_points} for p in squad.players], "starting_xi": [p.player_name for p in squad.starting_xi], "captain": squad.captain.player_name, "projected_points": squad.projected_points, "bank": squad.bank, "methodology": squad.methodology}
+    return {
+        "players": [
+            {
+                "id": p.player_id,
+                "name": p.player_name,
+                "position": p.position,
+                "club": p.club,
+                "points": p.projected_points,
+                "effective_ownership": p.effective_ownership_pct,
+                "expected_captaincy": p.expected_captaincy,
+                "template_status": p.template_status,
+            }
+            for p in squad.players
+        ],
+        "starting_xi": [p.player_name for p in squad.starting_xi],
+        "captain": squad.captain.player_name,
+        "vice_captain": squad.vice_captain.player_name if squad.vice_captain is not None else None,
+        "objective_mode": squad.objective_mode,
+        "projected_points": squad.projected_points,
+        "bank": squad.bank,
+        "methodology": squad.methodology,
+    }
 
 
 def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool) -> HorizonPlanSnapshot:
@@ -1132,6 +1254,7 @@ def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool)
         robustness_score=plan.robustness_score,
         objective_value=plan.objective_value,
         objective_components=plan.objective_components,
+        objective_mode=plan.objective_mode,
         weeks=[_week_snapshot(week) for week in plan.gameweeks],
     )
 
@@ -1181,6 +1304,7 @@ def _hold_plan_snapshot(
         robustness_score=plan.robustness_score,
         objective_value=plan.objective_value,
         objective_components=objective_components,
+        objective_mode=plan.objective_mode,
         weeks=weeks,
     )
 
@@ -1215,6 +1339,9 @@ def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
 def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
     return {
         "solver_status": plan.solver_status,
+        "objective_mode": plan.objective_mode,
+        "objective_value": plan.objective_value,
+        "objective_components": plan.objective_components,
         "total_net_points": plan.total_net_projected_points,
         "weeks": [
             {
@@ -1228,6 +1355,9 @@ def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
                 "hits": w.hit_cost,
                 "bank_after": w.bank_after,
                 "captain": w.captain.player_name,
+                "captain_effective_ownership": w.captain.effective_ownership_pct,
+                "captain_template_status": w.captain.template_status,
+                "objective_components": w.objective_components,
                 "net_points": w.net_projected_points,
             }
             for w in plan.gameweeks
