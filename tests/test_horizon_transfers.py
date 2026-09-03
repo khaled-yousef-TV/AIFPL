@@ -156,6 +156,54 @@ def test_normal_week_skips_a_marginal_second_transfer_hit() -> None:
     assert plan.gameweeks[0].hit_cost == 0
 
 
+def test_wildcard_makes_transfers_unlimited_and_preserves_free_transfer() -> None:
+    rows = pool() + [
+        row(16, "MID", "F", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ] + [
+        row(17, "DEF", "I", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ] + [
+        row(18, "FWD", "J", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ]
+    state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
+
+    plan = plan_horizon_transfers(rows, state, churn_penalty=0.0, active_chip="wildcard")
+
+    first = plan.gameweeks[0]
+    assert plan.active_chip == "wildcard"
+    assert first.active_chip == "wildcard"
+    assert first.transfers_made > state.free_transfers
+    assert first.unlimited_transfers is True
+    assert first.hit_cost == 0
+    assert first.free_transfers_after == 2
+    assert plan.gameweeks[1].free_transfers_before == 2
+    assert plan.total_hit_cost == 0
+
+
+def test_free_hit_restores_squad_bank_and_transfer_balance_for_next_week() -> None:
+    rows = pool() + [
+        row(16, "MID", "F", 1, 40.0), row(16, "MID", "F", 2, 0.0), row(16, "MID", "F", 3, 0.0),
+        row(17, "DEF", "I", 1, 40.0), row(17, "DEF", "I", 2, 0.0), row(17, "DEF", "I", 3, 0.0),
+        row(18, "FWD", "J", 1, 40.0), row(18, "FWD", "J", 2, 0.0), row(18, "FWD", "J", 3, 0.0),
+    ]
+    state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
+
+    plan = plan_horizon_transfers(rows, state, churn_penalty=10.0, active_chip="free_hit")
+
+    first, second = plan.gameweeks[:2]
+    assert plan.active_chip == "free_hit"
+    assert first.active_chip == "free_hit"
+    assert first.transfers_made > state.free_transfers
+    assert first.unlimited_transfers is True
+    assert first.hit_cost == 0
+    assert first.free_transfers_after == 2
+    assert second.free_transfers_before == 2
+    assert second.incoming == []
+    assert second.outgoing == []
+    assert {player.player_id for player in second.resulting_squad} == set(state.player_ids)
+    assert second.bank_before == state.bank
+    assert second.bank_after == state.bank
+
+
 def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:
     plan = plan_horizon_transfers(
         pool(), HorizonSquadState(player_ids=[], bank=0, free_transfers=0),

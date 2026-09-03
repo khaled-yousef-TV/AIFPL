@@ -1,10 +1,12 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import aifpl.hermes as hermes_module
+import aifpl.scheduler as scheduler_module
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.hermes import (
     HermesDecisionBackend,
@@ -264,6 +266,47 @@ def test_hermes_gw1_commit_resets_free_transfers(tmp_path, action) -> None:
     assert result.decision.squad.free_transfers == 1
 
 
+def test_hermes_commit_replans_a_free_hit_and_persists_the_restored_state(tmp_path) -> None:
+    backend = FakeHorizonBackend(tmp_path)
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=backend)
+    manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    previous = manager.latest_state()
+    manager._strategy = previous.strategy
+    manager._expected_gameweek = 2
+    manager._expected_season_id = "2026-27"
+
+    result = manager._commit(
+        {
+            "action": "execute_horizon",
+            "explanation": "Use the Free Hit for the active gameweek.",
+            "active_chip": "free_hit",
+            "active_chip_set": 1,
+        },
+        previous,
+    )
+
+    decision = result.decision
+    state = manager.latest_state()
+    assert decision.active_chip == "free_hit"
+    assert decision.active_chip_set == 1
+    assert decision.horizon_plan is not None
+    assert decision.horizon_plan.active_chip == "free_hit"
+    assert decision.pre_free_hit_squad_ids == previous.squad.player_ids
+    assert decision.pre_free_hit_bank == previous.squad.bank
+    assert decision.pre_free_hit_free_transfers == previous.squad.free_transfers
+    assert decision.pre_free_hit_purchase_prices == previous.squad.purchase_prices
+    assert state.squad.player_ids == previous.squad.player_ids
+    assert state.squad.bank == previous.squad.bank
+    assert state.squad.free_transfers == decision.horizon_plan.weeks[0].free_transfers_after
+    from aifpl.chips import ChipStateStore
+
+    slot = next(
+        slot for slot in ChipStateStore(tmp_path).latest("2026-27").slots
+        if slot.chip == "free_hit" and slot.set == 1
+    )
+    assert slot.used is False
+
+
 def test_committed_hold_rewrites_the_first_horizon_week(tmp_path) -> None:
     state, plan, hold = manual_state_and_plan()
     manager = HermesManager(tmp_path)
@@ -394,6 +437,41 @@ def test_hermes_supersedes_gw2_from_a_valid_gw1_state(tmp_path) -> None:
     assert Path(bad.decision.decision_path).read_bytes() == bad_bytes
     receipt = json.loads(Path(corrected.correction_path).read_text(encoding="utf-8"))
     assert receipt["replacement_decision_path"] == corrected.decision.decision_path
+
+
+def test_hermes_replans_the_current_unexecuted_decision_from_prior_state(tmp_path, monkeypatch) -> None:
+    backend = FakeHorizonBackend(tmp_path)
+    manager = HermesManager(tmp_path, model=FakeModel(), backend=backend)
+    gw1 = manager.run(expected_gameweek=1, expected_season_id="2026-27")
+    base_state = manager.latest_state()
+    manager._strategy = base_state.strategy
+    manager._horizon, manager._catalog_id = backend.horizon_plan(base_state.squad, base_state.strategy, 2)
+    manager._hold = {
+        "gameweek": 2, "starting_ids": base_state.starting_xi_ids,
+        "captain_id": base_state.captain_id, "vice_captain_id": base_state.vice_captain_id,
+        "projected_points": 100.0, "methodology": "test",
+    }
+    manager._expected_gameweek = 2
+    manager._expected_season_id = "2026-27"
+    bad = manager._commit(
+        {"action": "execute_horizon", "explanation": "Old current-gameweek recommendation."},
+        base_state,
+    )
+    bad_bytes = Path(bad.decision.decision_path).read_bytes()
+
+    monkeypatch.setattr(
+        scheduler_module.DeadlineScheduler,
+        "status",
+        lambda self: SimpleNamespace(event=2, season_id="2026-27", missed=False),
+    )
+
+    corrected = manager.replan_current("Fresh account state superseded the stale recommendation.")
+
+    assert corrected.decision.gameweek == 2
+    assert corrected.decision.base_state_path == gw1.state_path
+    assert corrected.decision.supersedes_decision_path == bad.decision.decision_path
+    assert manager.latest_decision() == corrected.decision
+    assert Path(bad.decision.decision_path).read_bytes() == bad_bytes
 
 
 def test_initial_squad_persists_horizon_plan_snapshot(tmp_path) -> None:

@@ -349,6 +349,26 @@ def hermes_migrate_state(
 
 
 @app.command()
+def hermes_replan_current(
+    reason: str = typer.Option(..., help="Why the current decision must be replaced."),
+    active_chip: str | None = typer.Option(
+        None, help="Optional confirmed chip: wildcard | free_hit | bench_boost | triple_captain",
+    ),
+    active_chip_set: int | None = typer.Option(
+        None, min=1, max=2, help="Chip set for the optional active chip.",
+    ),
+) -> None:
+    """Safely supersede an unexecuted decision for the current gameweek."""
+    try:
+        result = HermesManager(data_dir()).replan_current(
+            reason, active_chip=active_chip, active_chip_set=active_chip_set,
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise typer.Exit(str(exc)) from exc
+    typer.echo(json_dumps(result))
+
+
+@app.command()
 def player_evidence(limit: int = typer.Option(100, min=1, max=5000)) -> None:
     """List the latest normalized player evidence records."""
     try:
@@ -801,6 +821,9 @@ def plan_horizon(
     churn_penalty: float | None = typer.Option(None, min=0,
                                                 help="Override the planned-transfer penalty (defaults to AIFPL_TRANSFER_PENALTY)"),
     objective_mode: ObjectiveMode = typer.Option("POINTS_MODE"),
+    active_chip: str | None = typer.Option(
+        None, help="Optional first-week chip: wildcard | free_hit | bench_boost | triple_captain",
+    ),
 ) -> None:
     """Optimize transfers, hits, free-transfer rollover, and bank across 1-6 gameweeks."""
     try:
@@ -811,6 +834,7 @@ def plan_horizon(
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
             churn_penalty=churn_penalty, objective_mode=objective_mode,
             game_state=game_state, template_states=templates,
+            active_chip=active_chip,
         )
     except (OSError, ValueError, FileNotFoundError, SquadOptimizationError) as exc:
         raise typer.Exit(str(exc)) from exc

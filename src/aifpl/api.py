@@ -175,6 +175,14 @@ class HermesSupersedeRequest(BaseModel):
     base_state_id: str = Field(min_length=1, max_length=255)
     supersedes_decision_id: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=1, max_length=1000)
+    active_chip: str | None = Field(default=None, pattern=r"^(wildcard|free_hit|bench_boost|triple_captain)$")
+    active_chip_set: int | None = Field(default=None, ge=1, le=2)
+
+
+class HermesReplanRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+    active_chip: str | None = Field(default=None, pattern=r"^(wildcard|free_hit|bench_boost|triple_captain)$")
+    active_chip_set: int | None = Field(default=None, ge=1, le=2)
 
 
 class ChipStateRequest(BaseModel):
@@ -576,12 +584,33 @@ def supersede_hermes_decision(request: HermesSupersedeRequest) -> HermesSuperses
         schedule = DeadlineScheduler(root).status()
         if schedule.missed:
             raise ValueError(f"GW{schedule.event} has already passed its deadline")
+        kwargs: dict[str, object] = {}
+        if request.active_chip is not None or request.active_chip_set is not None:
+            kwargs = {
+                "active_chip": request.active_chip,
+                "active_chip_set": request.active_chip_set,
+            }
         return HermesManager(root).supersede_decision(
             request.base_state_id,
             request.supersedes_decision_id,
             request.reason,
             schedule.event,
             schedule.season_id,
+            **kwargs,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/hermes/replan-current", response_model=HermesSupersessionResult, status_code=201)
+def replan_current_hermes(request: HermesReplanRequest) -> HermesSupersessionResult:
+    try:
+        return HermesManager(data_dir()).replan_current(
+            request.reason,
+            active_chip=request.active_chip,
+            active_chip_set=request.active_chip_set,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1063,6 +1092,10 @@ def horizon_transfer_plan(
     decision_hit_penalty: float = Query(4.0, ge=0),
     churn_penalty: float | None = Query(None, ge=0),
     objective_mode: ObjectiveMode = Query("POINTS_MODE"),
+    active_chip: str | None = Query(
+        None, pattern=r"^(wildcard|free_hit|bench_boost|triple_captain)$",
+        description="Optional chip active in the first horizon gameweek.",
+    ),
 ) -> HorizonTransferPlan:
     try:
         game_state, templates = _rank_context(objective_mode)
@@ -1071,6 +1104,7 @@ def horizon_transfer_plan(
             decision_hit_penalty=decision_hit_penalty, pre_season=pre_season,
             churn_penalty=churn_penalty, objective_mode=objective_mode,
             game_state=game_state, template_states=templates,
+            active_chip=active_chip,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

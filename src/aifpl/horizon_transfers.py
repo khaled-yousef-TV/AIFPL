@@ -30,11 +30,17 @@ from aifpl.objective_accounting import (
     HorizonWeekWeight,
     horizon_objective_breakdown,
     horizon_objective_settings,
+    horizon_bench_weight,
+    horizon_captain_bonus_multiplier,
+    horizon_free_transfers_after,
+    horizon_week_chip,
+    horizon_week_unlimited,
     horizon_week_weights,
     preferred_coefficient,
     rank_adjustment_coefficient,
     starter_coefficient,
     strategy_hit_coefficient,
+    validate_horizon_chip,
     validate_horizon_plan,
 )
 from aifpl.optimizer import SquadOptimizationError, optimize_squad
@@ -47,7 +53,7 @@ from aifpl.template import PlayerTemplateState
 # Bump when plan-generation semantics change (accounting, objective, captain
 # selection, robustness, ...). Committed plans record their version so stale
 # opening squads can be regenerated deterministically.
-PLANNER_VERSION = "v7-rank-layer"
+PLANNER_VERSION = "v8-chip-aware-horizon"
 
 
 class HorizonSquadState(BaseModel):
@@ -85,6 +91,7 @@ class HorizonGameweekPlan:
     purchase_value: int = 0
     sale_value: int = 0
     objective_components: dict[str, float] = field(default_factory=dict)
+    active_chip: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,7 @@ class HorizonTransferPlan:
     objective_value: float = 0.0
     objective_components: dict[str, float] = field(default_factory=dict)
     objective_mode: ObjectiveMode = "POINTS_MODE"
+    active_chip: str | None = None
 
 
 def plan_horizon_transfers(
@@ -114,6 +122,7 @@ def plan_horizon_transfers(
     objective_mode: ObjectiveMode = "POINTS_MODE",
     game_state: GameState | None = None,
     template_states: Mapping[int, PlayerTemplateState] | None = None,
+    active_chip: str | None = None,
 ) -> HorizonTransferPlan:
     """Plan transfers and lineups across the horizon.
 
@@ -128,6 +137,7 @@ def plan_horizon_transfers(
         raise ValueError("decision_hit_penalty must not be negative")
     if churn_penalty is not None and churn_penalty < 0:
         raise ValueError("churn_penalty must not be negative")
+    validate_horizon_chip(active_chip)
     gameweeks = sorted({row.gameweek for row in rows})
     if not 1 <= len(gameweeks) <= 6 or gameweeks != list(range(gameweeks[0], gameweeks[-1] + 1)):
         raise ValueError("Horizon projection catalog must contain 1 to 6 contiguous gameweeks")
@@ -171,6 +181,8 @@ def plan_horizon_transfers(
     current_ids = set(state.player_ids)
     if len(current_ids) not in (0, 15):
         raise ValueError("Current squad player IDs must contain either 15 players or none for an initial adoption")
+    if active_chip in {"wildcard", "free_hit"} and not current_ids:
+        raise ValueError(f"{active_chip} planning requires an existing current squad")
     missing = current_ids - set(player_ids)
     if missing:
         raise ValueError(f"Current squad contains players absent from the projection catalog: {sorted(missing)}")
@@ -215,7 +227,7 @@ def plan_horizon_transfers(
         plans = _hold_plans(
             rows, state, gameweeks, by_player_gameweek, current_ids, pre_season,
             bench_floor, bank_scale, objective_settings, week_weights,
-            preferred_player_ids, differential_appetite,
+            preferred_player_ids, differential_appetite, active_chip,
         )
         result = HorizonTransferPlan(
             gameweeks=plans,
@@ -230,6 +242,7 @@ def plan_horizon_transfers(
                 [plan.objective_components for plan in plans]
             ),
             objective_mode=objective_mode,
+            active_chip=active_chip,
         )
         try:
             validate_horizon_plan(
@@ -242,6 +255,7 @@ def plan_horizon_transfers(
                 paid_transfer_cap=paid_transfer_cap,
                 settings=objective_settings,
                 initial_purchase_prices=purchase_prices,
+                active_chip=active_chip,
             )
         except ValueError as exc:
             raise SquadOptimizationError(f"Post-solve hold validation failed: {exc}") from exc
@@ -264,6 +278,8 @@ def plan_horizon_transfers(
     bank_shortfalls: list[cp_model.IntVar] = []
     dead_bench_excess: list[cp_model.IntVar] = []
     for week_index, gameweek in enumerate(gameweeks):
+        week_chip = horizon_week_chip(active_chip, week_index)
+        restore_after_free_hit = active_chip == "free_hit" and week_index == 1
         for player_id in player_ids:
             selected[player_id, week_index] = model.new_bool_var(f"selected_{player_id}_{gameweek}")
             starter[player_id, week_index] = model.new_bool_var(f"starter_{player_id}_{gameweek}")
@@ -282,7 +298,11 @@ def plan_horizon_transfers(
                 selected[player_id, week_index], bench[player_id, week_index], dead_bench[player_id, week_index].Not()
             )
 
-            previous = 1 if week_index == 0 and player_id in current_ids else 0 if week_index == 0 else selected[player_id, week_index - 1]
+            previous = (
+                int(player_id in current_ids)
+                if week_index == 0 or restore_after_free_hit
+                else selected[player_id, week_index - 1]
+            )
             model.add(incoming[player_id, week_index] >= selected[player_id, week_index] - previous)
             model.add(outgoing[player_id, week_index] >= previous - selected[player_id, week_index])
             model.add(incoming[player_id, week_index] <= selected[player_id, week_index])
@@ -290,8 +310,12 @@ def plan_horizon_transfers(
             model.add(outgoing[player_id, week_index] <= previous)
             model.add(outgoing[player_id, week_index] <= 1 - selected[player_id, week_index])
             model.add(incoming[player_id, week_index] + outgoing[player_id, week_index] <= 1)
-            original_before = 1 if week_index == 0 and player_id in current_ids else 0 if week_index == 0 else original_holding[player_id, week_index - 1]
-            if week_index == 0:
+            original_before = (
+                int(player_id in current_ids)
+                if week_index == 0 or restore_after_free_hit
+                else original_holding[player_id, week_index - 1]
+            )
+            if week_index == 0 or restore_after_free_hit:
                 model.add(original_holding[player_id, week_index] == (selected[player_id, week_index] if player_id in current_ids else 0))
             else:
                 model.add(original_holding[player_id, week_index] <= original_before)
@@ -315,7 +339,7 @@ def plan_horizon_transfers(
             model.add(count >= minimum)
             model.add(count <= maximum)
 
-        unlimited = pre_season and week_index == 0
+        unlimited = horizon_week_unlimited(active_chip, pre_season, week_index)
         transfers = model.new_int_var(0, 15, f"transfers_{gameweek}")
         model.add(transfers == sum(incoming[player_id, week_index] for player_id in player_ids))
         if current_ids or week_index > 0:
@@ -328,6 +352,10 @@ def plan_horizon_transfers(
         elif pre_season and week_index == 1:
             # Opening-squad transfers expire at the GW1 deadline.
             model.add(free == 1)
+        elif active_chip in {"wildcard", "free_hit"} and week_index == 1:
+            # Wildcard and Free Hit preserve the free transfer used to enter
+            # the active gameweek, then add the normal next-week rollover.
+            model.add_min_equality(free, [free_transfers[week_index - 1] + 1, 5])
         else:
             remaining = model.new_int_var(0, 15, f"remaining_free_{gameweeks[week_index - 1]}")
             model.add_max_equality(remaining, [free_transfers[week_index - 1] - transfer_counts[week_index - 1], 0])
@@ -340,7 +368,7 @@ def plan_horizon_transfers(
         excess_transfers.append(excess)
 
         bank = model.new_int_var(0, 5000, f"bank_{gameweek}")
-        previous_bank = state.bank if week_index == 0 else banks[week_index - 1]
+        previous_bank = state.bank if week_index == 0 or restore_after_free_hit else banks[week_index - 1]
         initial_funds = DEFAULT_BUDGET_TENTHS if (week_index == 0 and not current_ids) else 0
         sale_value = sum(
             original_outgoing[player_id, week_index] * sale_values.get(player_id, metadata[player_id].cost)
@@ -415,7 +443,10 @@ def plan_horizon_transfers(
     objective = []
     for week_index, gameweek in enumerate(gameweeks):
         week_weight = week_weights[week_index].week_weight
-        unlimited = pre_season and week_index == 0
+        week_chip = horizon_week_chip(active_chip, week_index)
+        unlimited = horizon_week_unlimited(active_chip, pre_season, week_index)
+        bench_weight = horizon_bench_weight(objective_settings, week_chip)
+        captain_multiplier = horizon_captain_bonus_multiplier(week_chip)
         objective.extend(
             starter[player_id, week_index]
             * starter_coefficient(by_player_gameweek[player_id, gameweek].projected_points, week_weight)
@@ -423,6 +454,7 @@ def plan_horizon_transfers(
         )
         objective.extend(
             captain[player_id, week_index]
+            * captain_multiplier
             * captain_coefficient(by_player_gameweek[player_id, gameweek].projected_points, week_weight)
             for player_id in player_ids
         )
@@ -431,7 +463,7 @@ def plan_horizon_transfers(
             * bench_coefficient(
                 by_player_gameweek[player_id, gameweek].projected_points,
                 week_weight,
-                objective_settings.bench_weight,
+                bench_weight,
             )
             for player_id in player_ids
         )
@@ -468,6 +500,7 @@ def plan_horizon_transfers(
                 * rank_adjustment_coefficient(
                     by_player_gameweek[player_id, gameweek], game_state,
                     (template_states or {}).get(player_id), captain=True, week_weight=week_weight,
+                    triple_captain=week_chip == "triple_captain",
                 )
                 for player_id in player_ids
             )
@@ -492,8 +525,14 @@ def plan_horizon_transfers(
 
     plans: list[HorizonGameweekPlan] = []
     purchase_book = dict(purchase_prices)
+    initial_purchase_book = dict(purchase_prices)
     account_bank = state.bank
     for week_index, gameweek in enumerate(gameweeks):
+        if active_chip == "free_hit" and week_index == 1:
+            # The temporary Free Hit squad, bank, and purchase prices do not
+            # carry into the next gameweek.
+            purchase_book = dict(initial_purchase_book)
+            account_bank = state.bank
         squad = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(selected[player_id, week_index])]
         incoming_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(incoming[player_id, week_index])]
         outgoing_players = [_candidate(by_player_gameweek[player_id, gameweek], gameweek) for player_id in player_ids if solver.value(outgoing[player_id, week_index])]
@@ -519,16 +558,23 @@ def plan_horizon_transfers(
         )
         if captain_player is None:
             raise SquadOptimizationError("Solver returned no captain")
-        projected = sum(player.projected_points for player in lineup) + captain_player.projected_points
-        rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
+        week_chip = horizon_week_chip(active_chip, week_index)
         starting_ids = {player.player_id for player in lineup}
-        unlimited = pre_season and week_index == 0
+        projected = (
+            sum(player.projected_points for player in lineup)
+            + horizon_captain_bonus_multiplier(week_chip) * captain_player.projected_points
+            + (
+                sum(player.projected_points for player in squad if player.player_id not in starting_ids)
+                if week_chip == "bench_boost" else 0.0
+            )
+        )
+        rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
+        unlimited = horizon_week_unlimited(active_chip, pre_season, week_index)
         free_before = solver.value(free_by_week[week_index])
         transfers_made = solver.value(transfer_counts[week_index])
-        free_after = (
-            1
-            if unlimited
-            else min(5, max(0, free_before - transfers_made) + 1)
+        free_after = horizon_free_transfers_after(
+            free_before, transfers_made, active_chip=active_chip,
+            pre_season=pre_season, week_index=week_index,
         )
         bank_before = account_bank
         sale_value = 0
@@ -568,13 +614,14 @@ def plan_horizon_transfers(
             week=week_weights[week_index],
             settings=objective_settings,
             unlimited_transfers=unlimited,
+            active_chip=week_chip,
         )
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=_sort(outgoing_players), incoming=_sort(incoming_players),
             resulting_squad=_sort(squad), starting_xi=_sort(lineup), captain=captain_player,
-             vice_captain=_second_best(
-                 lineup, captain_player.player_id, objective_mode, game_state, template_states,
-             ),
+            vice_captain=_second_best(
+                lineup, captain_player.player_id, objective_mode, game_state, template_states,
+            ),
             transfers_made=transfers_made,
             free_transfers_before=free_before, hit_cost=hit,
             bank_after=bank_after, projected_points=round(projected, 4),
@@ -590,6 +637,7 @@ def plan_horizon_transfers(
             purchase_value=purchase_value,
             sale_value=sale_value,
             objective_components=breakdown.as_dict(),
+            active_chip=week_chip,
         ))
         account_bank = bank_after
     solver_objective = solver.objective_value
@@ -602,7 +650,7 @@ def plan_horizon_transfers(
     hold_plans = _hold_plans(
         rows, state, gameweeks, by_player_gameweek, current_ids, pre_season,
         bench_floor, bank_scale, objective_settings, week_weights,
-        preferred_player_ids, differential_appetite,
+        preferred_player_ids, differential_appetite, active_chip,
     ) if current_ids else []
     if pre_season and hold_plans and _hold_plans_violate_robustness(hold_plans, min_bank, bench_floor, by_player_gameweek):
         hold_plans = []
@@ -622,6 +670,7 @@ def plan_horizon_transfers(
             [plan.objective_components for plan in plans]
         ),
         objective_mode=objective_mode,
+        active_chip=active_chip,
     )
     try:
         validate_horizon_plan(
@@ -634,6 +683,7 @@ def plan_horizon_transfers(
             paid_transfer_cap=paid_transfer_cap,
             settings=objective_settings,
             initial_purchase_prices=purchase_prices,
+            active_chip=active_chip,
         )
     except ValueError as exc:
         raise SquadOptimizationError(f"Post-solve horizon validation failed: {exc}") from exc
@@ -650,6 +700,7 @@ def plan_hold_horizon_transfers(
     objective_mode: ObjectiveMode = "POINTS_MODE",
     game_state: GameState | None = None,
     template_states: Mapping[int, PlayerTemplateState] | None = None,
+    active_chip: str | None = None,
 ) -> HorizonTransferPlan:
     """Build the complete no-transfer counterfactual for a current squad."""
     return plan_horizon_transfers(
@@ -664,6 +715,7 @@ def plan_hold_horizon_transfers(
         objective_mode=objective_mode,
         game_state=game_state,
         template_states=template_states,
+        active_chip=active_chip,
     )
 
 
@@ -692,6 +744,7 @@ def _hold_plans(
     pre_season: bool, bench_floor: float, bank_scale: int,
     objective_settings: HorizonObjectiveSettings, week_weights: list[HorizonWeekWeight],
     preferred_player_ids: set[int] | None, differential_appetite: float,
+    active_chip: str | None,
 ) -> list[HorizonGameweekPlan]:
     plans: list[HorizonGameweekPlan] = []
     free = 5 if pre_season else state.free_transfers
@@ -701,12 +754,16 @@ def _hold_plans(
         rows_by_id = {row.player_id: row for row in rows if row.gameweek == gameweek}
         starter_ids, captain_id = best_objective_lineup(
             squad, rows_by_id, week_weights[week_index], objective_settings, bench_floor,
+            active_chip=horizon_week_chip(active_chip, week_index),
         )
         starters = [by_id[player_id] for player_id in starter_ids]
         captain = by_id[captain_id]
         starting_ids = {player.player_id for player in starters}
-        unlimited = pre_season and week_index == 0
-        free_after = 1 if unlimited else min(5, free + 1)
+        week_chip = horizon_week_chip(active_chip, week_index)
+        unlimited = horizon_week_unlimited(active_chip, pre_season, week_index)
+        free_after = horizon_free_transfers_after(
+            free, 0, active_chip=active_chip, pre_season=pre_season, week_index=week_index,
+        )
         breakdown = horizon_objective_breakdown(
             rows_by_id=rows_by_id,
             selected_ids=set(current_ids),
@@ -721,18 +778,27 @@ def _hold_plans(
             week=week_weights[week_index],
             settings=objective_settings,
             unlimited_transfers=unlimited,
+            active_chip=week_chip,
+        )
+        projected = (
+            sum(player.projected_points for player in starters)
+            + horizon_captain_bonus_multiplier(week_chip) * captain.projected_points
+            + (
+                sum(player.projected_points for player in squad if player.player_id not in starting_ids)
+                if week_chip == "bench_boost" else 0.0
+            )
         )
         plans.append(HorizonGameweekPlan(
             gameweek=gameweek, outgoing=[], incoming=[], resulting_squad=_sort(squad),
-             starting_xi=_sort(starters), captain=captain,
-             vice_captain=_second_best(
-                 starters, captain.player_id, objective_settings.objective_mode,
-                 objective_settings.game_state, objective_settings.template_states,
-             ),
+            starting_xi=_sort(starters), captain=captain,
+            vice_captain=_second_best(
+                starters, captain.player_id, objective_settings.objective_mode,
+                objective_settings.game_state, objective_settings.template_states,
+            ),
             transfers_made=0,
             free_transfers_before=free, hit_cost=0, bank_after=state.bank,
-            projected_points=round(sum(player.projected_points for player in starters) + captain.projected_points, 4),
-            net_projected_points=round(sum(player.projected_points for player in starters) + captain.projected_points, 4),
+            projected_points=round(projected, 4),
+            net_projected_points=round(projected, 4),
             objective_net_points=round(breakdown.total, 4),
             robustness_score=_robustness_score(
                 squad, starting_ids, state.bank, 0, rows_by_id, bench_floor, bank_scale,
@@ -744,8 +810,9 @@ def _hold_plans(
             purchase_value=0,
             sale_value=0,
             objective_components=breakdown.as_dict(),
+            active_chip=week_chip,
         ))
-        free = 1 if pre_season and week_index == 0 else min(5, free + 1)
+        free = free_after
     return plans
 
 

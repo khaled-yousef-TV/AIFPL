@@ -19,10 +19,10 @@ def _strategy() -> HermesStrategy:
     )
 
 
-def write_decision(tmp_path: Path) -> Path:
+def write_decision(tmp_path: Path, gameweek: int = 1) -> Path:
     decision_path = tmp_path / "hermes" / "decisions" / "decision.json"
     decision = HermesDecision(
-        action="hold", gameweek=1,
+        action="hold", gameweek=gameweek,
         squad=HermesSquadState(
             player_ids=list(range(1, 16)), bank=20, free_transfers=1,
             purchase_prices={player_id: 50 for player_id in range(1, 16)},
@@ -107,6 +107,34 @@ def test_free_hit_confirmation_requires_restoration_state(tmp_path) -> None:
             active_chip="free_hit",
             active_chip_set=1,
         )
+
+
+def test_free_hit_execution_context_uses_restored_squad_for_reconciliation(tmp_path) -> None:
+    decision_path = write_decision(tmp_path, gameweek=2)
+    baseline, _, _ = _team()
+    temporary = [player_id for player_id in baseline if player_id != 5] + [16]
+
+    ExecutionConfirmationStore(tmp_path).confirm(
+        decision_path,
+        squad_ids=temporary,
+        starting_xi_ids=[1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12],
+        bench_ids=[13, 14, 15, 16],
+        captain_id=1,
+        vice_captain_id=2,
+        transfers_out=[5],
+        transfers_in=[16],
+        active_chip="free_hit",
+        active_chip_set=1,
+        pre_free_hit_squad_ids=baseline,
+        pre_free_hit_bank=20,
+        pre_free_hit_free_transfers=1,
+        pre_free_hit_purchase_prices={player_id: 50 for player_id in baseline},
+    )
+
+    internal_ids, internal_gameweek, _ = latest_internal_squad_context(tmp_path, "2026-27")
+
+    assert internal_ids == baseline
+    assert internal_gameweek == 2
 
 
 def test_confirmation_rejects_invalid_lineup(tmp_path) -> None:

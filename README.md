@@ -76,6 +76,17 @@ aifpl sync-account-state
 aifpl hermes-run
 ```
 
+If account sync completes after a current-gameweek decision, replace the
+unexecuted decision without mutating its immutable artifact:
+
+```bash
+aifpl hermes-replan-current --reason "Fresh account state superseded the stale recommendation."
+```
+
+Pass `--active-chip` and `--active-chip-set` only when the chip activation is
+confirmed. Hermes chip fields describe the recommendation; the chip ledger is
+updated by public account history or an execution confirmation.
+
 The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_KEY`. Until these commands complete, `/dashboard/current` correctly reports that no committed dashboard state exists.
 
 ### Tests
@@ -84,7 +95,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **338 passing tests**. Commands below assume the
+The current suite contains **344 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests

@@ -104,6 +104,51 @@ class HorizonPlanValidationError(ValueError):
     """Raised when a returned horizon plan fails deterministic audit checks."""
 
 
+SUPPORTED_HORIZON_CHIPS = frozenset({
+    "wildcard", "free_hit", "bench_boost", "triple_captain",
+})
+
+
+def validate_horizon_chip(active_chip: str | None) -> str | None:
+    if active_chip is not None and active_chip not in SUPPORTED_HORIZON_CHIPS:
+        raise ValueError(f"Unsupported horizon chip: {active_chip}")
+    return active_chip
+
+
+def horizon_week_chip(active_chip: str | None, week_index: int) -> str | None:
+    return active_chip if week_index == 0 else None
+
+
+def horizon_week_unlimited(
+    active_chip: str | None, pre_season: bool, week_index: int,
+) -> bool:
+    chip = horizon_week_chip(active_chip, week_index)
+    return (pre_season and week_index == 0) or chip in {"wildcard", "free_hit"}
+
+
+def horizon_free_transfers_after(
+    free_before: int,
+    transfers_made: int,
+    *,
+    active_chip: str | None,
+    pre_season: bool,
+    week_index: int,
+) -> int:
+    if pre_season and week_index == 0:
+        return 1
+    if horizon_week_chip(active_chip, week_index) in {"wildcard", "free_hit"}:
+        return min(5, free_before + 1)
+    return min(5, max(0, free_before - transfers_made) + 1)
+
+
+def horizon_bench_weight(settings: HorizonObjectiveSettings, active_chip: str | None) -> float:
+    return 1.0 if active_chip == "bench_boost" else settings.bench_weight
+
+
+def horizon_captain_bonus_multiplier(active_chip: str | None) -> int:
+    return 2 if active_chip == "triple_captain" else 1
+
+
 def horizon_objective_settings(
     strategy_hit_penalty: float,
     churn_penalty_override: float | None = None,
@@ -222,6 +267,7 @@ def horizon_objective_breakdown(
     week: HorizonWeekWeight,
     settings: HorizonObjectiveSettings,
     unlimited_transfers: bool,
+    active_chip: str | None = None,
 ) -> HorizonObjectiveBreakdown:
     selected_rows = [rows_by_id[player_id] for player_id in sorted(selected_ids)]
     starter_rows = [rows_by_id[player_id] for player_id in sorted(starter_ids)]
@@ -234,11 +280,16 @@ def horizon_objective_breakdown(
         objective_float(starter_coefficient(row.projected_points, week.week_weight))
         for row in starter_rows
     )
-    captain_points = objective_float(
+    captain_points = horizon_captain_bonus_multiplier(active_chip) * objective_float(
         captain_coefficient(rows_by_id[captain_id].projected_points, week.week_weight)
     )
     bench_points = sum(
-        objective_float(bench_coefficient(row.projected_points, week.week_weight, settings.bench_weight))
+        objective_float(
+            bench_coefficient(
+                row.projected_points, week.week_weight,
+                horizon_bench_weight(settings, active_chip),
+            )
+        )
         for row in bench_rows
     )
     strategy_penalty = -objective_float(
@@ -274,6 +325,7 @@ def horizon_objective_breakdown(
         rank_adjustment += objective_float(rank_adjustment_coefficient(
             rows_by_id[captain_id], settings.game_state,
             (settings.template_states or {}).get(captain_id), captain=True,
+            triple_captain=active_chip == "triple_captain",
             week_weight=week.week_weight,
         ))
     total = (
@@ -306,6 +358,7 @@ def best_objective_lineup(
     week: HorizonWeekWeight,
     settings: HorizonObjectiveSettings,
     bench_floor: float,
+    active_chip: str | None = None,
 ) -> tuple[list[int], int]:
     """Select a deterministic lineup using the same quantized lineup terms."""
     by_position = {
@@ -327,6 +380,7 @@ def best_objective_lineup(
                             ]
                             captain_id = choose_captain(
                                 starter_players, settings.game_state, settings.template_states,
+                                triple_captain=active_chip == "triple_captain",
                             ).captain.player_id
                         else:
                             ranked = sorted(
@@ -342,9 +396,14 @@ def best_objective_lineup(
                         )
                         score = (
                             sum(starter_coefficient(rows_by_id[player_id].projected_points, week.week_weight) for player_id in starter_ids)
-                            + captain_coefficient(rows_by_id[captain_id].projected_points, week.week_weight)
+                            + horizon_captain_bonus_multiplier(active_chip) * captain_coefficient(
+                                rows_by_id[captain_id].projected_points, week.week_weight,
+                            )
                             + sum(
-                                bench_coefficient(rows_by_id[player_id].projected_points, week.week_weight, settings.bench_weight)
+                                bench_coefficient(
+                                    rows_by_id[player_id].projected_points, week.week_weight,
+                                    horizon_bench_weight(settings, active_chip),
+                                )
                                 for player_id in bench_ids
                             )
                             - dead_excess * dead_bench_coefficient(week.week_weight, settings)
@@ -361,7 +420,9 @@ def best_objective_lineup(
                             score += rank_adjustment_coefficient(
                                 rows_by_id[captain_id], settings.game_state,
                                 (settings.template_states or {}).get(captain_id),
-                                captain=True, week_weight=week.week_weight,
+                                captain=True,
+                                triple_captain=active_chip == "triple_captain",
+                                week_weight=week.week_weight,
                             )
                         key = tuple(sorted(starter_ids))
                         candidate = (score, key, captain_id)
@@ -420,6 +481,7 @@ def _audit_objective_breakdown(
     week: HorizonWeekWeight,
     settings: HorizonObjectiveSettings,
     unlimited_transfers: bool,
+    active_chip: str | None = None,
 ) -> dict[str, float]:
     """Recompute objective values without reading any solver variables.
 
@@ -437,9 +499,11 @@ def _audit_objective_breakdown(
     excess_transfers = max(0, transfers_made - free_transfers_before)
     q = lambda value: round(value * OBJECTIVE_SCALE) / OBJECTIVE_SCALE
     starter_points = sum(q(row.projected_points * week.week_weight) for row in starter_rows)
-    captain_points = q(rows_by_id[captain_id].projected_points * week.week_weight)
+    captain_points = horizon_captain_bonus_multiplier(active_chip) * q(
+        rows_by_id[captain_id].projected_points * week.week_weight
+    )
     bench_points = sum(
-        q(row.projected_points * settings.bench_weight * week.week_weight)
+        q(row.projected_points * horizon_bench_weight(settings, active_chip) * week.week_weight)
         for row in bench_rows
     )
     strategy_hit_penalty = -excess_transfers * q(
@@ -469,6 +533,7 @@ def _audit_objective_breakdown(
             rank_objective_adjustment(
                 rows_by_id[captain_id], settings.game_state,
                 (settings.template_states or {}).get(captain_id), captain=True,
+                triple_captain=active_chip == "triple_captain",
             ) * week.week_weight
         )
     total = (
@@ -515,9 +580,15 @@ def validate_horizon_plan(
     paid_transfer_cap: int | None = None,
     settings: HorizonObjectiveSettings | None = None,
     initial_purchase_prices: Mapping[int, int] | None = None,
+    active_chip: str | None = None,
 ) -> None:
     """Audit a complete horizon plan with deterministic, non-solver checks."""
     settings = settings or horizon_objective_settings(decision_hit_penalty, churn_penalty)
+    plan_chip = validate_horizon_chip(
+        active_chip if active_chip is not None else getattr(plan, "active_chip", None)
+    )
+    if hasattr(plan, "active_chip") and plan.active_chip != plan_chip:
+        raise HorizonPlanValidationError("Plan active chip does not match its accounting settings")
     if getattr(plan, "objective_mode", "POINTS_MODE") != settings.objective_mode:
         raise HorizonPlanValidationError("Plan objective mode does not match its accounting settings")
     paid_cap = paid_transfer_safety_cap() if paid_transfer_cap is None else paid_transfer_cap
@@ -559,8 +630,17 @@ def validate_horizon_plan(
     total_net = 0.0
     audit_bench_floor = bench_min_projection() if bench_floor is None else bench_floor
 
+    initial_purchase_book = dict(purchase_book)
     for index, week in enumerate(plan.gameweeks):
         gameweek = gameweeks[index]
+        week_chip = horizon_week_chip(plan_chip, index)
+        if getattr(week, "active_chip", None) != week_chip:
+            raise HorizonPlanValidationError(f"GW{gameweek} active-chip marker is invalid")
+        if plan_chip == "free_hit" and index == 1:
+            # Free Hit transfers expire after the active gameweek.  Audit the
+            # next transition against the pre-chip squad and purchase book.
+            purchase_book = dict(initial_purchase_book)
+            bank = state.bank
         week_rows = {
             row.player_id: row for row in rows if row.gameweek == gameweek
         }
@@ -592,9 +672,12 @@ def validate_horizon_plan(
                 or not isclose(player.projected_points, row.projected_points, rel_tol=0.0, abs_tol=0.00001)
             ):
                 raise HorizonPlanValidationError(f"GW{gameweek} player data is inconsistent with its projection")
-        if set(selected_ids) - previous_ids != set(incoming_ids):
+        transition_previous_ids = (
+            current_ids if plan_chip == "free_hit" and index == 1 else previous_ids
+        )
+        if set(selected_ids) - transition_previous_ids != set(incoming_ids):
             raise HorizonPlanValidationError(f"GW{gameweek} incoming transfers do not match the squad transition")
-        if previous_ids - set(selected_ids) != set(outgoing_ids):
+        if transition_previous_ids - set(selected_ids) != set(outgoing_ids):
             raise HorizonPlanValidationError(f"GW{gameweek} outgoing transfers do not match the squad transition")
         opening_adoption = not current_ids and index == 0
         if (
@@ -606,7 +689,7 @@ def validate_horizon_plan(
         if set(incoming_ids) & set(outgoing_ids):
             raise HorizonPlanValidationError(f"GW{gameweek} cannot transfer a player both ways")
 
-        unlimited = pre_season and index == 0
+        unlimited = horizon_week_unlimited(plan_chip, pre_season, index)
         if week.unlimited_transfers != unlimited:
             raise HorizonPlanValidationError(f"GW{gameweek} unlimited-transfer flag is invalid")
         if week.free_transfers_before != free or not 1 <= free <= 5:
@@ -615,8 +698,9 @@ def validate_horizon_plan(
             raise HorizonPlanValidationError(f"GW{gameweek} exceeds the paid-transfer safety cap")
         if unlimited and week.transfers_made > 15:
             raise HorizonPlanValidationError(f"GW{gameweek} exceeds the opening-squad capacity")
-        expected_free_after = (
-            1 if unlimited else min(5, max(0, free - week.transfers_made) + 1)
+        expected_free_after = horizon_free_transfers_after(
+            free, week.transfers_made, active_chip=plan_chip,
+            pre_season=pre_season, week_index=index,
         )
         if week.free_transfers_after != expected_free_after:
             raise HorizonPlanValidationError(f"GW{gameweek} free-transfer rollover is invalid")
@@ -696,9 +780,14 @@ def validate_horizon_plan(
             raise HorizonPlanValidationError(f"GW{gameweek} captain is invalid")
         if vice_id is None or vice_id == captain_id or vice_id != expected_vice_id:
             raise HorizonPlanValidationError(f"GW{gameweek} vice-captain is invalid")
+        bench_projected = sum(
+            week_rows[player_id].projected_points
+            for player_id in set(selected_ids) - starter_set
+        )
         projected = round(
             sum(week_rows[player_id].projected_points for player_id in starter_set)
-            + week_rows[captain_id].projected_points,
+            + horizon_captain_bonus_multiplier(week_chip) * week_rows[captain_id].projected_points
+            + (bench_projected if week_chip == "bench_boost" else 0.0),
             4,
         )
         if not isclose(week.projected_points, projected, rel_tol=0.0, abs_tol=0.00011):
@@ -723,6 +812,7 @@ def validate_horizon_plan(
             week=audit_week,
             settings=settings,
             unlimited_transfers=unlimited,
+            active_chip=week_chip,
         )
         actual_components = getattr(week, "objective_components", None)
         if not isinstance(actual_components, Mapping):

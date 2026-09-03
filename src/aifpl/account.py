@@ -61,8 +61,13 @@ def latest_internal_squad_context(
 
     confirmation = ExecutionConfirmationStore(root).latest_for_season(season_id)
     if confirmation is not None:
+        squad_ids = (
+            confirmation.pre_free_hit_squad_ids
+            if confirmation.active_chip == "free_hit" and confirmation.pre_free_hit_squad_ids is not None
+            else confirmation.squad_ids
+        )
         return (
-            confirmation.squad_ids,
+            squad_ids,
             confirmation.gameweek,
             f"execution_confirmation:{confirmation.output_path}",
         )

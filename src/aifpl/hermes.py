@@ -102,6 +102,10 @@ class HermesDecision(BaseModel):
     bench_ids: list[int] = Field(default_factory=list)
     active_chip: str | None = None
     active_chip_set: Literal[1, 2] | None = None
+    pre_free_hit_squad_ids: list[int] | None = None
+    pre_free_hit_bank: int | None = Field(default=None, ge=0)
+    pre_free_hit_free_transfers: int | None = Field(default=None, ge=0, le=5)
+    pre_free_hit_purchase_prices: dict[int, int] | None = None
     game_state: GameState | None = None
 
 
@@ -151,6 +155,7 @@ class HorizonPlanWeekSnapshot(BaseModel):
     sale_value: int = 0
     objective_net_points: float = 0.0
     objective_components: dict[str, float] = Field(default_factory=dict)
+    active_chip: str | None = None
 
 
 class HorizonPlanSnapshot(BaseModel):
@@ -166,6 +171,7 @@ class HorizonPlanSnapshot(BaseModel):
     objective_value: float = 0.0
     objective_components: dict[str, float] = Field(default_factory=dict)
     objective_mode: ObjectiveMode = "POINTS_MODE"
+    active_chip: str | None = None
     weeks: list[HorizonPlanWeekSnapshot] = Field(default_factory=list)
 
 
@@ -413,7 +419,10 @@ class HermesDecisionBackend:
             objective_mode=strategy.objective_mode, vice_captain=opening.vice_captain,
         ), opening.gameweek, _plan_snapshot(plan, catalog_id, pre_season=True)
 
-    def horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> tuple[HorizonTransferPlan, str]:
+    def horizon_plan(
+        self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int,
+        active_chip: str | None = None,
+    ) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
         game_state, templates = self._rank_inputs(strategy)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
@@ -427,9 +436,13 @@ class HermesDecisionBackend:
             objective_mode=strategy.objective_mode,
             game_state=game_state,
             template_states=templates,
+            active_chip=active_chip,
         ), catalog_id
 
-    def hold_horizon_plan(self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int) -> tuple[HorizonTransferPlan, str]:
+    def hold_horizon_plan(
+        self, state: HermesSquadState, strategy: HermesStrategy, target_gameweek: int,
+        active_chip: str | None = None,
+    ) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
         game_state, templates = self._rank_inputs(strategy)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
@@ -448,6 +461,7 @@ class HermesDecisionBackend:
             objective_mode=strategy.objective_mode,
             game_state=game_state,
             template_states=templates,
+            active_chip=active_chip,
         ), catalog_id
 
     def hold_week(self, state: HermesSquadState, horizon: int, target_gameweek: int) -> dict[str, Any]:
@@ -560,6 +574,36 @@ class HermesManager:
             objective_mode=objective_mode,
         )
 
+    def replan_current(
+        self,
+        reason: str,
+        active_chip: str | None = None,
+        active_chip_set: int | None = None,
+    ) -> HermesSupersessionResult:
+        """Create a linked replacement for an unexecuted current-GW decision."""
+        from aifpl.scheduler import DeadlineScheduler
+
+        schedule = DeadlineScheduler(self.root).status()
+        if schedule.missed:
+            raise ValueError(f"GW{schedule.event} has already passed its deadline")
+        if schedule.event <= 1:
+            raise ValueError("A current-gameweek replan requires a prior Hermes state")
+        current = self.latest_decision(
+            season_id=schedule.season_id, gameweek=schedule.event,
+        )
+        base = self.latest_state(
+            season_id=schedule.season_id, gameweek=schedule.event - 1,
+        )
+        return self.supersede_decision(
+            Path(base.decision_path).name,
+            Path(current.decision_path).name,
+            reason,
+            expected_gameweek=schedule.event,
+            expected_season_id=schedule.season_id,
+            active_chip=active_chip,
+            active_chip_set=active_chip_set,
+        )
+
     def _account_objective_mode(self) -> ObjectiveMode | None:
         latest_game_state = getattr(self.backend, "latest_game_state", None)
         if not callable(latest_game_state):
@@ -582,12 +626,16 @@ class HermesManager:
         reason: str,
         expected_gameweek: int,
         expected_season_id: str,
+        active_chip: str | None = None,
+        active_chip_set: int | None = None,
     ) -> HermesSupersessionResult:
         """Append a corrected decision from a known-valid prior state.
 
         This is intentionally explicit: a bad decision remains immutable while the
         replacement is linked to both its valid base state and the bad decision.
         """
+        if (active_chip is None) != (active_chip_set is None):
+            raise ValueError("active_chip and active_chip_set must be provided together")
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
         self._requested_objective_mode = None
@@ -599,13 +647,17 @@ class HermesManager:
                 flock(descriptor, LOCK_EX | LOCK_NB)
             except BlockingIOError as exc:
                 raise RuntimeError("Another Hermes run is already in progress") from exc
-            return self._supersede_decision_unlocked(base_state_id, supersedes_decision_id, reason)
+            return self._supersede_decision_unlocked(
+                base_state_id, supersedes_decision_id, reason,
+                active_chip=active_chip, active_chip_set=active_chip_set,
+            )
         finally:
             flock(descriptor, LOCK_UN)
             os.close(descriptor)
 
     def _supersede_decision_unlocked(
         self, base_state_id: str, supersedes_decision_id: str, reason: str,
+        *, active_chip: str | None = None, active_chip_set: int | None = None,
     ) -> HermesSupersessionResult:
         reason = reason.strip()
         if not reason:
@@ -620,6 +672,13 @@ class HermesManager:
         superseded_state = HermesState.model_validate_json(superseded_state_path.read_text(encoding="utf-8"))
         latest_decision = self.latest_decision(season_id=self._expected_season_id)
         latest_state = self.latest_state(season_id=self._expected_season_id)
+
+        from aifpl.execution import ExecutionConfirmationStore
+
+        if ExecutionConfirmationStore(self.root).latest_for_decision(
+            superseded_decision_path, self._expected_season_id or "", superseded.gameweek,
+        ) is not None:
+            raise ValueError("An executed Hermes decision cannot be superseded")
 
         if Path(base_decision.state_path).name != base_state_path.name:
             raise ValueError("Base decision does not reference the supplied state")
@@ -644,20 +703,30 @@ class HermesManager:
         self._strategy = base_state.strategy
         self._horizon, self._catalog_id = self.backend.horizon_plan(
             base_state.squad, self._strategy, self._expected_gameweek,
+            active_chip=active_chip,
         )
         self._hold_horizon, _ = self.backend.hold_horizon_plan(
             base_state.squad, self._strategy, self._expected_gameweek,
+            active_chip=active_chip,
         )
         self._hold = _hold_week_from_plan(self._hold_horizon, self._expected_gameweek)
-        action = "execute_horizon" if self._horizon.gameweeks[0].transfers_made else "hold"
+        action = (
+            "execute_horizon"
+            if self._horizon.gameweeks[0].transfers_made
+            or active_chip in {"wildcard", "free_hit"}
+            else "hold"
+        )
+        arguments: dict[str, Any] = {
+            "action": action,
+            "explanation": (
+                f"Corrected GW{self._expected_gameweek} recommendation from the committed "
+                f"GW{base_state.gameweek} squad: {reason}"
+            ),
+        }
+        if active_chip is not None:
+            arguments.update({"active_chip": active_chip, "active_chip_set": active_chip_set})
         result = self._commit(
-            {
-                "action": action,
-                "explanation": (
-                    f"Corrected GW{self._expected_gameweek} recommendation from the committed "
-                    f"GW{base_state.gameweek} squad: {reason}"
-                ),
-            },
+            arguments,
             base_state,
             model_name="deterministic_correction",
             state_version=latest_state.version + 1,
@@ -665,6 +734,11 @@ class HermesManager:
             supersedes_decision_path=str(superseded_decision_path),
             supersedes_state_path=str(superseded_state_path),
             correction_reason=reason,
+            allow_recorded_chip_activation=(
+                active_chip is not None
+                and superseded.active_chip == active_chip
+                and superseded.active_chip_set == active_chip_set
+            ),
         )
         correction_path = self.root / "hermes" / "corrections" / f"{Path(result.decision.decision_path).stem}.json"
         write_immutable(correction_path, json_bytes({
@@ -813,6 +887,8 @@ class HermesManager:
             "The get_horizon_plan output is computed for your own current squad: every player named in its out/in lists "
             "is a member of your squad and the transfers are directly actionable. During pre-season, only GW1 "
             "transfers are free; later gameweeks follow normal free-transfer rollover and hit rules. "
+            "If commit_decision confirms Wildcard or Free Hit, the backend re-solves the plan with that chip before saving; "
+            "never rely on normal-week hit numbers when a chip is active. Free Hit restores the underlying squad after its gameweek. "
             "Do not reject a plan because a name looks unfamiliar; "
             "re-read the squad and plan before deciding. "
             "The context includes decision_history with your prior decisions' outcomes; use it as advisory evidence only. "
@@ -1093,11 +1169,33 @@ class HermesManager:
         supersedes_decision_path: str | None = None,
         supersedes_state_path: str | None = None,
         correction_reason: str | None = None,
+        allow_recorded_chip_activation: bool = False,
     ) -> HermesRunResult:
         if self._strategy is None:
             raise ValueError("Hermes must set a strategy before committing")
         action = arguments["action"]
         explanation = str(arguments["explanation"])
+        active_chip = arguments.get("active_chip")
+        active_chip_set = arguments.get("active_chip_set")
+        if active_chip is None and active_chip_set is not None:
+            raise ValueError("active_chip_set requires an active_chip")
+        if active_chip is not None and active_chip not in (
+            "wildcard", "free_hit", "bench_boost", "triple_captain",
+        ):
+            raise ValueError("active_chip must be a supported FPL chip")
+        if active_chip is not None and action in ("execute_horizon", "hold"):
+            if previous is None:
+                raise ValueError("A chip activation requires an existing current squad")
+            target_gameweek = self._expected_gameweek or previous.gameweek + 1
+            # Chip selection happens at commit time.  Re-solve so the persisted
+            # transfer list, costs, and future state use the selected chip.
+            self._horizon, self._catalog_id = self.backend.horizon_plan(
+                previous.squad, self._strategy, target_gameweek, active_chip=active_chip,
+            )
+            self._hold_horizon, _ = self.backend.hold_horizon_plan(
+                previous.squad, self._strategy, target_gameweek, active_chip=active_chip,
+            )
+            self._hold = _hold_week_from_plan(self._hold_horizon, target_gameweek)
         plan_snapshot: HorizonPlanSnapshot | None = None
         vice_captain_id: int | None = None
         bench_ids: list[int] = []
@@ -1128,7 +1226,12 @@ class HermesManager:
                 squad_ids, starting_ids = previous.squad.player_ids, self._hold["starting_ids"]
                 captain_id, bank, outgoing, incoming, gameweek = self._hold["captain_id"], previous.squad.bank, [], [], self._hold["gameweek"]
                 vice_captain_id = self._hold.get("vice_captain_id")
-                free, methodology, purchase_prices = min(5, previous.squad.free_transfers + 1), self._hold["methodology"], previous.squad.purchase_prices
+                free = (
+                    self._hold_horizon.gameweeks[0].free_transfers_after
+                    if self._hold_horizon is not None
+                    else min(5, previous.squad.free_transfers + 1)
+                )
+                methodology, purchase_prices = self._hold["methodology"], previous.squad.purchase_prices
                 bench_ids = [player_id for player_id in squad_ids if player_id not in set(starting_ids)]
             else:
                 week = self._horizon.gameweeks[0]
@@ -1136,7 +1239,9 @@ class HermesManager:
                 starting_ids = [player.player_id for player in week.starting_xi]
                 captain_id, bank, outgoing, incoming, gameweek = week.captain.player_id, week.bank_after, [p.player_id for p in week.outgoing], [p.player_id for p in week.incoming], week.gameweek
                 vice_captain_id = week.vice_captain.player_id if week.vice_captain is not None else None
-                free = min(5, max(0, previous.squad.free_transfers - week.transfers_made) + 1)
+                free = week.free_transfers_after
+                if free is None:
+                    raise ValueError("Horizon plan did not report the next free-transfer balance")
                 methodology = self._horizon.methodology
                 costs = {player.player_id: player.cost for player in week.resulting_squad}
                 purchase_prices = {player_id: previous.squad.purchase_prices.get(player_id, costs[player_id]) for player_id in squad_ids}
@@ -1163,7 +1268,35 @@ class HermesManager:
             raise ValueError(f"Hermes decision is for gameweek {gameweek}, expected {self._expected_gameweek}")
         stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
         decision_path = self.root / "hermes" / "decisions" / f"{stamp}.json"
-        squad = HermesSquadState(player_ids=squad_ids, bank=bank, free_transfers=free, purchase_prices=purchase_prices)
+        squad = HermesSquadState(
+            player_ids=squad_ids, bank=bank, free_transfers=free, purchase_prices=purchase_prices,
+        )
+        state_squad = squad
+        state_captain_id = captain_id
+        state_starting_ids = starting_ids
+        state_vice_captain_id = vice_captain_id
+        state_bench_ids = bench_ids
+        pre_free_hit_squad_ids: list[int] | None = None
+        pre_free_hit_bank: int | None = None
+        pre_free_hit_free_transfers: int | None = None
+        pre_free_hit_purchase_prices: dict[int, int] | None = None
+        if active_chip == "free_hit" and action == "execute_horizon":
+            if previous is None:
+                raise ValueError("Free Hit requires a previous Hermes squad state")
+            pre_free_hit_squad_ids = list(previous.squad.player_ids)
+            pre_free_hit_bank = previous.squad.bank
+            pre_free_hit_free_transfers = previous.squad.free_transfers
+            pre_free_hit_purchase_prices = dict(previous.squad.purchase_prices)
+            # Persist the underlying team after the temporary Free Hit squad
+            # expires; the decision still carries the active-gameweek team.
+            state_squad = previous.squad.model_copy(update={"free_transfers": free})
+            state_captain_id = previous.captain_id
+            state_starting_ids = previous.starting_xi_ids
+            state_vice_captain_id = previous.vice_captain_id
+            state_bench_ids = previous.bench_ids or [
+                player_id for player_id in state_squad.player_ids
+                if player_id not in set(state_starting_ids)
+            ]
         state_path = self.root / "hermes" / "states" / f"{stamp}.json"
         season_id = self._expected_season_id or (previous.season_id if previous else _season_id_for_now(now))
         decision_model = model_name or (self.model.model_name if self.model is not None else previous.model if previous else "unknown")
@@ -1172,18 +1305,21 @@ class HermesManager:
             if latest_game_state is None or not latest_game_state.rank_data_available:
                 raise ValueError("RANK_MODE requires a saved GameState with rank and target rank")
             latest_game_state = latest_game_state.model_copy(update={"objective_mode": "RANK_MODE"})
-        active_chip = arguments.get("active_chip")
-        active_chip_set = arguments.get("active_chip_set")
         if active_chip is not None:
-            if active_chip not in ("wildcard", "free_hit", "bench_boost", "triple_captain"):
-                raise ValueError("active_chip must be a supported FPL chip")
             if active_chip_set not in (1, 2):
                 raise ValueError("active_chip_set must be 1 or 2 when a chip is confirmed")
             from aifpl.chips import ChipStateStore
 
-            ChipStateStore(self.root).validate_activation(
-                season_id, active_chip, active_chip_set, gameweek,
+            chip_store = ChipStateStore(self.root)
+            recorded = any(
+                slot.chip == active_chip
+                and slot.set == active_chip_set
+                and slot.used
+                and slot.used_gw == gameweek
+                for slot in chip_store.latest(season_id).slots
             )
+            if not (allow_recorded_chip_activation and recorded):
+                chip_store.validate_activation(season_id, active_chip, active_chip_set, gameweek)
         decision = HermesDecision(
             action=action, gameweek=gameweek, squad=squad, captain_id=captain_id,
             starting_xi_ids=starting_ids, transfers_out=outgoing, transfers_in=incoming,
@@ -1199,17 +1335,22 @@ class HermesManager:
             bench_ids=bench_ids,
             active_chip=active_chip,
             active_chip_set=active_chip_set,
+            pre_free_hit_squad_ids=pre_free_hit_squad_ids,
+            pre_free_hit_bank=pre_free_hit_bank,
+            pre_free_hit_free_transfers=pre_free_hit_free_transfers,
+            pre_free_hit_purchase_prices=pre_free_hit_purchase_prices,
             game_state=latest_game_state,
         )
         state = HermesState(
-            strategy=self._strategy, squad=squad, captain_id=captain_id, starting_xi_ids=starting_ids,
+            strategy=self._strategy, squad=state_squad, captain_id=state_captain_id,
+            starting_xi_ids=state_starting_ids,
             model=decision_model, updated_at=now,
             version=state_version if state_version is not None else (previous.version + 1 if previous else 1),
             gameweek=gameweek, decision_path=str(decision_path),
             season_id=season_id,
             supersedes_state_path=supersedes_state_path,
-            vice_captain_id=vice_captain_id,
-            bench_ids=bench_ids,
+            vice_captain_id=state_vice_captain_id,
+            bench_ids=state_bench_ids,
             active_chip=active_chip,
             active_chip_set=active_chip_set,
             game_state=latest_game_state,
@@ -1223,8 +1364,8 @@ class HermesManager:
                 raise ValueError("Hermes decision cannot be committed at or after the official deadline")
         write_immutable(state_path, json_bytes(state.model_dump(mode="json"), pretty=True))
         write_immutable(decision_path, json_bytes(decision.model_dump(mode="json"), pretty=True))
-        if active_chip is not None:
-            ChipStateStore(self.root).mark_used(season_id, active_chip, active_chip_set, gameweek)
+        # A Hermes decision is a recommendation.  Chip usage becomes factual
+        # only through execution confirmation or public account history.
         return HermesRunResult(decision=decision, state_path=str(state_path), tool_steps=0)
 
 
@@ -1275,7 +1416,7 @@ def _tools() -> list[dict[str, Any]]:
         _tool("set_strategy", "Set your autonomous strategy before planning; outcome history is advisory and any outcome-driven change is recommendation-only for this new plan. objective_mode selects expected-points or rank-aware optimization. differential_appetite is used only in POINTS_MODE; RANK_MODE uses rank state and cohort ownership leverage.", {"risk_tolerance": {"type": "number", "minimum": 0, "maximum": 1}, "hit_aversion": {"type": "number", "minimum": 0, "maximum": 1}, "differential_appetite": {"type": "number", "minimum": 0, "maximum": 1}, "planning_horizon": {"type": "integer", "minimum": 3, "maximum": 6}, "preferred_players": {"type": "array", "items": {"type": "string"}}, "objective_mode": {"type": "string", "enum": ["POINTS_MODE", "RANK_MODE"]}, "rationale": {"type": "string"}}, ["risk_tolerance", "hit_aversion", "differential_appetite", "planning_horizon", "rationale"]),
         _tool("get_initial_squad", "Get the backend's best multi-gameweek initial squad", {}, []),
         _tool("get_horizon_plan", "Get the backend's transfer plan for the existing squad", {}, []),
-        _tool("commit_decision", "Commit one backend-validated action. Chip fields are optional and mean confirmed activation, never mere advice.", {"action": {"type": "string", "enum": ["adopt_initial", "execute_horizon", "hold"]}, "explanation": {"type": "string"}, "active_chip": {"type": ["string", "null"], "enum": ["wildcard", "free_hit", "bench_boost", "triple_captain", None]}, "active_chip_set": {"type": ["integer", "null"], "enum": [1, 2, None]}}, ["action", "explanation"]),
+        _tool("commit_decision", "Commit one backend-validated action. Chip fields are optional and mean confirmed activation, never mere advice. Selecting Wildcard or Free Hit re-solves the horizon with chip-aware transfer and restoration rules before commit.", {"action": {"type": "string", "enum": ["adopt_initial", "execute_horizon", "hold"]}, "explanation": {"type": "string"}, "active_chip": {"type": ["string", "null"], "enum": ["wildcard", "free_hit", "bench_boost", "triple_captain", None]}, "active_chip_set": {"type": ["integer", "null"], "enum": [1, 2, None]}}, ["action", "explanation"]),
     ]
 
 
@@ -1361,6 +1502,7 @@ def _plan_snapshot(plan: HorizonTransferPlan, catalog_id: str, pre_season: bool)
         objective_value=plan.objective_value,
         objective_components=plan.objective_components,
         objective_mode=plan.objective_mode,
+        active_chip=plan.active_chip,
         weeks=[_week_snapshot(week) for week in plan.gameweeks],
     )
 
@@ -1411,6 +1553,7 @@ def _hold_plan_snapshot(
         objective_value=plan.objective_value,
         objective_components=objective_components,
         objective_mode=plan.objective_mode,
+        active_chip=plan.active_chip,
         weeks=weeks,
     )
 
@@ -1439,6 +1582,7 @@ def _week_snapshot(week: HorizonGameweekPlan) -> HorizonPlanWeekSnapshot:
         sale_value=week.sale_value,
         objective_net_points=week.objective_net_points,
         objective_components=week.objective_components,
+        active_chip=week.active_chip,
     )
 
 
@@ -1448,6 +1592,7 @@ def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
         "objective_mode": plan.objective_mode,
         "objective_value": plan.objective_value,
         "objective_components": plan.objective_components,
+        "active_chip": plan.active_chip,
         "total_net_points": plan.total_net_projected_points,
         "weeks": [
             {
@@ -1458,6 +1603,7 @@ def _horizon_summary(plan: HorizonTransferPlan) -> dict[str, Any]:
                 "free_transfers_before": w.free_transfers_before,
                 "free_transfers_after": w.free_transfers_after,
                 "unlimited_transfers": w.unlimited_transfers,
+                "active_chip": w.active_chip,
                 "hits": w.hit_cost,
                 "bank_after": w.bank_after,
                 "captain": w.captain.player_name,

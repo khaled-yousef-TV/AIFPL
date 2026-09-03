@@ -485,3 +485,50 @@ def test_hermes_supersede_endpoint_uses_the_current_gameweek(monkeypatch, tmp_pa
         2,
         "2026-27",
     )
+
+
+def test_hermes_replan_current_endpoint_passes_chip_selection(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AIFPL_ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setattr(api, "data_dir", lambda: tmp_path)
+    captured: dict[str, object] = {}
+    decision = {
+        "action": "hold", "gameweek": 3,
+        "squad": {
+            "player_ids": list(range(1, 16)), "bank": 0, "free_transfers": 2,
+            "purchase_prices": {str(player_id): 50 for player_id in range(1, 16)},
+        },
+        "captain_id": 1, "starting_xi_ids": list(range(1, 12)),
+        "transfers_out": [], "transfers_in": [], "explanation": "Corrected plan.",
+        "strategy": {
+            "risk_tolerance": 0.5, "hit_aversion": 0.7, "differential_appetite": 0.4,
+            "planning_horizon": 4, "preferred_players": [], "rationale": "Test strategy.",
+        },
+        "model": "deterministic_correction", "created_at": "2026-08-28T08:30:00Z",
+        "backend_methodology": "test", "decision_path": "/tmp/replacement.json",
+        "state_path": "/tmp/replacement-state.json", "season_id": "2026-27",
+    }
+
+    class FakeManager:
+        def __init__(self, root) -> None:
+            assert root == tmp_path
+
+        def replan_current(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"decision": decision, "state_path": "/tmp/replacement-state.json", "correction_path": "/tmp/correction.json"}
+
+    monkeypatch.setattr(api, "HermesManager", FakeManager)
+
+    response = TestClient(api.app).post(
+        "/hermes/replan-current",
+        json={
+            "reason": "Account sync completed after the stale recommendation.",
+            "active_chip": "wildcard",
+            "active_chip_set": 1,
+        },
+        headers={"X-AIFPL-Admin-Key": "test-admin-key"},
+    )
+
+    assert response.status_code == 201
+    assert captured["args"] == ("Account sync completed after the stale recommendation.",)
+    assert captured["kwargs"] == {"active_chip": "wildcard", "active_chip_set": 1}
