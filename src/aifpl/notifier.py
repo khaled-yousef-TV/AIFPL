@@ -194,6 +194,29 @@ def build_recommendation_message(
             f"Rank: {decision.game_state.overall_rank:,} | target {decision.game_state.target_rank:,} "
             f"| {decision.game_state.strategy_status.replace('_', ' ').lower()}"
         )
+    account_sync_status = (
+        decision.game_state.account_sync_status
+        if decision.game_state is not None else "not_configured"
+    )
+    account_sync_warning = (
+        decision.game_state.account_sync_warning
+        if decision.game_state is not None else None
+    )
+    if account_sync_status == "not_configured":
+        try:
+            from aifpl.scheduler import DeadlineScheduler
+
+            tick = DeadlineScheduler(root).latest_tick(season_id, event)
+        except (FileNotFoundError, ValueError):
+            tick = None
+        if tick is not None:
+            account_sync_status = tick.account_sync_status
+            account_sync_warning = tick.account_sync_warning
+    if account_sync_status in {"stale", "unavailable"}:
+        lines.append(
+            f"Warning: rank/account sync {account_sync_status}; "
+            f"{account_sync_warning or 'rank-aware inputs were degraded.'}"
+        )
     if decision.action == "adopt_initial":
         lines.append("Transfers: new squad adopted (pre-season unlimited transfers)")
     elif decision.transfers_in or decision.transfers_out:

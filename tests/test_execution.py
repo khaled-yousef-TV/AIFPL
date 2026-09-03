@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from aifpl.artifacts import json_bytes, write_immutable
+from aifpl.account import latest_internal_squad_context
 from aifpl.chips import ChipStateStore
 from aifpl.execution import ExecutionConfirmationError, ExecutionConfirmationStore
 from aifpl.hermes import HermesDecision, HermesSquadState, HermesStrategy
@@ -63,6 +64,11 @@ def test_confirmation_is_immutable_and_reconciles_to_decision(tmp_path) -> None:
     assert ExecutionConfirmationStore(tmp_path).latest_for_decision(
         decision_path, "2026-27", 1,
     ) == record
+    assert ExecutionConfirmationStore(tmp_path).latest_for_season("2026-27") == record
+    internal_ids, internal_gameweek, source = latest_internal_squad_context(tmp_path, "2026-27")
+    assert internal_ids == squad
+    assert internal_gameweek == 1
+    assert source is not None and source.startswith("execution_confirmation:")
 
 
 def test_confirmation_records_chip_usage_once(tmp_path) -> None:

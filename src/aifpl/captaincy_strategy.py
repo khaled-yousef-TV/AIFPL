@@ -7,7 +7,11 @@ from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.game_state import GameState
 from aifpl.rank_utility import rank_objective_adjustment
 from aifpl.strategy_policy import derive_strategy_policy
-from aifpl.template import PlayerTemplateState, target_cohort_eo
+from aifpl.template import (
+    PlayerTemplateState,
+    ownership_source_confidence,
+    target_cohort_eo,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,8 @@ class CaptaincyOption:
     score: float
     classification: str
     rank_swing_potential: float | None = None
+    ownership_basis: str = "unavailable"
+    ownership_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +54,8 @@ def choose_captain(
     template_states = template_states or {}
     options: list[CaptaincyOption] = []
     for player in starters:
-        field_eo, _ = target_cohort_eo(player.player_id, template_states.get(player.player_id), player.selected_by_percent)
+        field_eo, basis = _player_cohort_eo(player, template_states.get(player.player_id))
+        confidence = ownership_source_confidence(basis) if field_eo is not None else None
         own_exposure = 300.0 if triple_captain else 200.0
         net = round(own_exposure - field_eo, 4) if field_eo is not None else None
         score = player.projected_points + rank_objective_adjustment(
@@ -56,7 +63,10 @@ def choose_captain(
             triple_captain=triple_captain, policy=policy,
         )
         classification = _classification(policy.status, field_eo, net)
-        swing = round(abs(net) * player.projected_points / 100, 4) if net is not None else None
+        swing = (
+            round(abs(net) * player.projected_points / 100 * (confidence or 0.0), 4)
+            if net is not None else None
+        )
         options.append(CaptaincyOption(
             player_id=player.player_id,
             projected_points=player.projected_points,
@@ -66,6 +76,8 @@ def choose_captain(
             score=round(score, 4),
             classification=classification,
             rank_swing_potential=swing,
+            ownership_basis=basis,
+            ownership_confidence=confidence,
         ))
     options.sort(key=lambda option: (-option.score, -option.projected_points, option.player_id))
     by_id = {player.player_id: player for player in starters}
@@ -85,3 +97,17 @@ def _classification(status: str, field_eo: float | None, net: float | None) -> s
     if status == "BEHIND_TARGET" and field_eo < 70:
         return "AGGRESSIVE_LEVERAGE"
     return "BALANCED_LEVERAGE"
+
+
+def _player_cohort_eo(
+    player: CurrentPlayerProjection,
+    template: PlayerTemplateState | None,
+) -> tuple[float | None, str]:
+    if player.effective_ownership_pct is not None:
+        return player.effective_ownership_pct, "effective_ownership"
+    return target_cohort_eo(
+        player.player_id,
+        template,
+        player.selected_by_percent,
+        player.expected_captaincy,
+    )

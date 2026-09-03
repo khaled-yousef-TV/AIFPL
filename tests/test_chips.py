@@ -10,7 +10,9 @@ from aifpl.chips import (
     ChipState,
     ChipStateStore,
     ChipSlot,
+    chip_history_events,
     detect_schedule,
+    remaining_chip_counts,
 )
 from aifpl.config import ChipSettings
 from aifpl.fixtures import CurrentFixture
@@ -295,6 +297,40 @@ def test_state_store_marks_used_immutably(tmp_path) -> None:
 def test_state_store_validates_chip_names(tmp_path) -> None:
     with pytest.raises(ValueError, match="chip must be one of"):
         ChipStateStore(tmp_path).mark_used("2026-27", "wildcardd", 1, 5)
+
+
+def test_chip_history_is_gameweek_aware_across_the_two_sets() -> None:
+    used = [
+        {"name": "bench_boost", "event": 5},
+        {"name": "wildcard", "event": 20},
+    ]
+
+    assert chip_history_events(used) == {5: "bench_boost", 20: "wildcard"}
+    assert remaining_chip_counts(used, 5)["bench_boost"] == 0
+    assert remaining_chip_counts(used, 20)["bench_boost"] == 1
+    assert remaining_chip_counts(used, 20)["wildcard"] == 0
+    assert remaining_chip_counts(used, 20)["free_hit"] == 1
+
+
+def test_unused_first_half_chip_does_not_create_two_slots_after_expiry() -> None:
+    remaining = remaining_chip_counts([], 20)
+
+    assert remaining["bench_boost"] == 1
+    assert remaining["triple_captain"] == 1
+
+
+def test_chip_state_reconciliation_marks_public_use_without_replacing_local_state(tmp_path) -> None:
+    store = ChipStateStore(tmp_path)
+    state = store.mark_used("2026-27", "wildcard", 1, 5)
+
+    reconciled = store.reconcile_public_history(
+        "2026-27", {5: "wildcard", 20: "bench_boost"},
+    )
+
+    assert next(slot for slot in reconciled.slots if slot.chip == "wildcard" and slot.set == 1).used_gw == 5
+    assert next(slot for slot in reconciled.slots if slot.chip == "bench_boost" and slot.set == 2).used_gw == 20
+    assert next(slot for slot in reconciled.slots if slot.chip == "triple_captain" and slot.set == 1).used is False
+    assert state != reconciled
 
 
 def test_free_hit_is_unavailable_in_gw1(tmp_path) -> None:

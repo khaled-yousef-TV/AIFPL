@@ -439,17 +439,27 @@ def _rank_inputs(
     root: Path, hermes_state: object | None,
 ) -> tuple[str, GameState | None, dict[int, PlayerTemplateState]]:
     strategy = getattr(hermes_state, "strategy", None)
-    objective_mode = getattr(strategy, "objective_mode", "POINTS_MODE")
+    objective_mode = getattr(strategy, "objective_mode", None)
+    season_id = getattr(hermes_state, "season_id", None) or current_season_id(root)
+    if objective_mode is None:
+        try:
+            account_state = GameStateStore(root).latest(season_id=season_id)
+        except FileNotFoundError:
+            account_state = None
+        if account_state is not None and account_state.rank_data_available:
+            objective_mode = "RANK_MODE"
+        else:
+            objective_mode = "POINTS_MODE"
     if objective_mode == "POINTS_MODE":
         return objective_mode, None, {}
     game_state = getattr(hermes_state, "game_state", None)
     if game_state is None:
         try:
-            game_state = GameStateStore(root).latest()
-        except FileNotFoundError as exc:
-            raise ValueError("RANK_MODE requires a saved GameState") from exc
+            game_state = GameStateStore(root).latest(season_id=season_id)
+        except FileNotFoundError:
+            return "POINTS_MODE", None, {}
     if not game_state.rank_data_available:
-        raise ValueError("RANK_MODE requires a GameState with rank and target rank")
+        return "POINTS_MODE", None, {}
     game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     return objective_mode, game_state, _latest_template_states(
         root, game_state.season_id, game_state.gameweek,

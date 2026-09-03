@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.live_calibration import UncertaintyProfile
+from aifpl.template import ownership_source_confidence
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class PlayerDecisionMetrics:
     uncertainty_lower: float | None
     uncertainty_upper: float | None
     confidence: str
+    ownership_confidence: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -95,8 +97,11 @@ def player_metrics(player: CurrentPlayerProjection, uncertainty: UncertaintyProf
         minutes_basis="projection" if _value(player, "expected_minutes") is not None else "availability_assumption",
         availability_probability=round(_bounded_number(_value(player, "availability_multiplier", 1.0), 0.0, 1.0), 4),
         ownership_pct=round(ownership, 4),
-        ownership_basis="effective_ownership" if effective_ownership is not None else "selected_by_percent",
+        ownership_basis="effective_ownership" if effective_ownership is not None else "selected_by_percent_proxy",
         effective_ownership_pct=round(effective_ownership, 4) if effective_ownership is not None else None,
+        ownership_confidence=ownership_source_confidence(
+            "effective_ownership" if effective_ownership is not None else "selected_by_percent_proxy",
+        ),
         # xPts already incorporates expected minutes where the projection model provides them.
         differential_score=round(float(_value(player, "projected_points", 0.0)) * (1 - min(100.0, max(0.0, differential_ownership)) / 100), 4),
         uncertainty_lower=lower,

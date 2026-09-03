@@ -5,7 +5,7 @@ from typing import Mapping
 
 from aifpl.game_state import GameState
 from aifpl.strategy_policy import StrategyPolicy, derive_strategy_policy
-from aifpl.template import PlayerTemplateState, target_cohort_eo
+from aifpl.template import PlayerTemplateState, ownership_source_confidence, target_cohort_eo
 
 RANK_OBJECTIVE_SCALE = 0.25
 
@@ -56,19 +56,26 @@ def player_rank_adjustment(
     projected = max(0.0, _number(player, "projected_points", 0.0))
     raw_ownership = _number_or_none(player, "selected_by_percent")
     effective_ownership = _number_or_none(player, "effective_ownership_pct")
-    field_eo, _ = target_cohort_eo(
-        0,
-        template,
-        effective_ownership if effective_ownership is not None else raw_ownership,
-    )
+    if effective_ownership is not None:
+        field_eo, basis = effective_ownership, "effective_ownership"
+    else:
+        field_eo, basis = target_cohort_eo(
+            0,
+            template,
+            raw_ownership,
+            _number_or_none(player, "expected_captaincy"),
+        )
     if field_eo is None:
+        return 0.0
+    reliability = ownership_source_confidence(basis)
+    if reliability <= 0:
         return 0.0
     own_exposure = 300.0 if triple_captain else 200.0 if captain else 100.0
     exposure_gap = own_exposure - field_eo
     quality = min(1.0, projected / 8.0)
-    strategic_upside = projected * max(0.0, exposure_gap) / 100.0 * quality
-    template_fade_risk = projected * max(0.0, -exposure_gap) / 100.0 * quality
-    template_protection = projected * min(max(0.0, field_eo), own_exposure) / 100.0 * quality
+    strategic_upside = projected * max(0.0, exposure_gap) / 100.0 * quality * reliability
+    template_fade_risk = projected * max(0.0, -exposure_gap) / 100.0 * quality * reliability
+    template_protection = projected * min(max(0.0, field_eo), own_exposure) / 100.0 * quality * reliability
     variance = _variance_proxy(player, projected)
     if policy.status == "PROTECT_POSITION":
         value = template_protection - 0.25 * policy.template_fade_risk_weight * template_fade_risk

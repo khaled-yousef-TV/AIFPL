@@ -41,7 +41,7 @@ services:
       - key: AIFPL_ACCOUNT_TARGET_RANK
         sync: false
       - key: AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS
-        value: "1"
+        value: "0"
       - key: AIFPL_SCHEDULER_LEAD_MINUTES
         value: "150"
       - key: AIFPL_SCHEDULER_TIMEZONE

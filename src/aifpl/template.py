@@ -13,6 +13,17 @@ from aifpl.game_state import ExposureState
 
 TemplateStatus = Literal["CORE_TEMPLATE", "TEMPLATE", "SEMI_TEMPLATE", "DIFFERENTIAL", "PUNT"]
 
+OWNERSHIP_SOURCE_CONFIDENCE = {
+    "effective_ownership": 1.0,
+    "ownership_plus_captaincy_proxy": 0.70,
+    "engaged_ownership_proxy": 0.40,
+    "top_10k_ownership_proxy": 0.35,
+    "top_100k_ownership_proxy": 0.30,
+    "overall_ownership_proxy": 0.25,
+    "selected_by_percent_proxy": 0.15,
+    "unavailable": 0.0,
+}
+
 
 class OwnershipLandscape(BaseModel):
     """A timestamped ownership input; raw ownership is not treated as EO."""
@@ -41,6 +52,7 @@ class PlayerTemplateState(BaseModel):
     template_score: float = Field(ge=0, le=100)
     template_status: TemplateStatus
     ownership_basis: str = "unavailable"
+    ownership_confidence: float = Field(default=0.0, ge=0, le=1)
 
 
 class TemplateCatalog(BaseModel):
@@ -79,13 +91,11 @@ def build_template_states(
         total_weight = sum(weight for _, mapping, weight in weights if player_id in mapping)
         if total_weight:
             score = sum(weighted) / total_weight
-            basis = "cohort_ownership"
         elif player_id in landscape.effective_ownership:
             score = min(100.0, float(landscape.effective_ownership[player_id]))
-            basis = "effective_ownership"
         else:
             score = 0.0
-            basis = "unavailable"
+        basis = _ownership_basis(landscape, player_id)
         states.append(PlayerTemplateState(
             player_id=player_id,
             overall_ownership=_value(landscape.overall_ownership, player_id, 100),
@@ -97,6 +107,7 @@ def build_template_states(
             template_score=round(max(0.0, min(100.0, score)), 4),
             template_status=template_status(score),
             ownership_basis=basis,
+            ownership_confidence=ownership_source_confidence(basis),
         ))
     return states
 
@@ -131,20 +142,33 @@ def target_cohort_eo(
     player_id: int,
     state: PlayerTemplateState | None,
     raw_ownership: float | None = None,
+    expected_captaincy: float | None = None,
 ) -> tuple[float | None, str]:
     if state is not None and state.effective_ownership is not None:
         return state.effective_ownership, "effective_ownership"
     if state is not None and state.expected_captaincy is not None:
-        base = state.engaged_ownership or state.overall_ownership
+        base = state.engaged_ownership
+        if base is None:
+            base = state.overall_ownership
         if base is not None:
             return min(300.0, base + state.expected_captaincy), "ownership_plus_captaincy_proxy"
+    if expected_captaincy is not None and raw_ownership is not None:
+        return min(300.0, raw_ownership + expected_captaincy), "ownership_plus_captaincy_proxy"
     if state is not None and state.engaged_ownership is not None:
         return state.engaged_ownership, "engaged_ownership_proxy"
+    if state is not None and state.top_10k_ownership is not None:
+        return state.top_10k_ownership, "top_10k_ownership_proxy"
+    if state is not None and state.top_100k_ownership is not None:
+        return state.top_100k_ownership, "top_100k_ownership_proxy"
     if state is not None and state.overall_ownership is not None:
         return state.overall_ownership, "overall_ownership_proxy"
     if raw_ownership is not None:
         return raw_ownership, "selected_by_percent_proxy"
     return None, "unavailable"
+
+
+def ownership_source_confidence(basis: str) -> float:
+    return OWNERSHIP_SOURCE_CONFIDENCE.get(basis, 0.0)
 
 
 def build_exposure_states(
@@ -162,13 +186,26 @@ def build_exposure_states(
             continue
         raw_ownership = _optional_float(_read(player, "selected_by_percent", None))
         template = template_states.get(player_id)
-        field_eo, basis = target_cohort_eo(player_id, template, raw_ownership)
+        effective_ownership = _optional_float(_read(player, "effective_ownership_pct", None))
+        if effective_ownership is not None:
+            field_eo, basis = effective_ownership, "effective_ownership"
+        else:
+            field_eo, basis = target_cohort_eo(
+                player_id,
+                template,
+                raw_ownership,
+                _optional_float(_read(player, "expected_captaincy", None)),
+            )
+        confidence = ownership_source_confidence(basis) if field_eo is not None else None
         my_exposure = 100.0 if player_id in squad_ids else 0.0
         if player_id == captain_id and player_id in squad_ids:
             my_exposure += 200.0 if triple_captain else 100.0
         net = round(my_exposure - field_eo, 4) if field_eo is not None else None
         projected = _optional_float(_read(player, "projected_points", None))
-        swing = round(abs(net) * projected / 100, 4) if net is not None and projected is not None else None
+        swing = (
+            round(abs(net) * projected / 100 * (confidence or 0.0), 4)
+            if net is not None and projected is not None else None
+        )
         captaincy = template.expected_captaincy if template is not None else None
         exposures.append(ExposureState(
             player_id=player_id,
@@ -178,6 +215,7 @@ def build_exposure_states(
             rank_swing_potential=swing,
             captaincy_eo=captaincy,
             basis=basis,
+            ownership_confidence=confidence,
         ))
     return exposures
 
@@ -244,6 +282,25 @@ def _value(values: Mapping[int, float], player_id: int, cap: float) -> float | N
     if not math.isfinite(value) or not 0 <= value <= cap:
         raise ValueError(f"Ownership value for player {player_id} is outside 0..{cap}")
     return round(value, 4)
+
+
+def _ownership_basis(landscape: OwnershipLandscape, player_id: int) -> str:
+    if player_id in landscape.effective_ownership:
+        return "effective_ownership"
+    base = landscape.engaged_ownership.get(player_id)
+    if base is None:
+        base = landscape.overall_ownership.get(player_id)
+    if player_id in landscape.expected_captaincy and base is not None:
+        return "ownership_plus_captaincy_proxy"
+    if player_id in landscape.engaged_ownership:
+        return "engaged_ownership_proxy"
+    if player_id in landscape.top_10k_ownership:
+        return "top_10k_ownership_proxy"
+    if player_id in landscape.top_100k_ownership:
+        return "top_100k_ownership_proxy"
+    if player_id in landscape.overall_ownership:
+        return "overall_ownership_proxy"
+    return "unavailable"
 
 
 def _read(value: object, name: str, default: object) -> object:

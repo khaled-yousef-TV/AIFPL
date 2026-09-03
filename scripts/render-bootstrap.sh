@@ -76,7 +76,12 @@ run_command aifpl refresh-current-data \
   --end-gameweek "${AIFPL_RENDER_BOOTSTRAP_END_GAMEWEEK:-6}" \
   --budget "${AIFPL_RENDER_BOOTSTRAP_BUDGET:-1000}"
 if [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "true" ] || [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "1" ] || [ "${AIFPL_ACCOUNT_AUTO_SYNC:-false}" = "yes" ]; then
-  run_command aifpl sync-account-state
+  if run_command aifpl sync-account-state; then
+    echo "Public account sync completed."
+  else
+    account_sync_status=$?
+    echo "Warning: public account sync failed (status $account_sync_status); continuing with core planning."
+  fi
 fi
 # Reinitialization is backend-gated: it rebuilds the pre-season opening squad
 # automatically whenever the committed plan's planner_version is stale, and is

@@ -20,6 +20,7 @@ from aifpl.account import (
     AccountSnapshot,
     AccountSnapshotStore,
     fetch_and_build_account_state,
+    latest_internal_squad_context,
 )
 from aifpl.chips import ChipAdvice, ChipAdviceStore, ChipState, ChipStateStore
 from aifpl.captaincy_strategy import choose_captain
@@ -188,8 +189,9 @@ class AccountStateRequest(BaseModel):
     season_id: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
     target_rank: int = Field(gt=0)
     free_transfers: int | None = Field(default=None, ge=0, le=5)
-    initial_free_transfers: int = Field(default=1, ge=1, le=5)
+    initial_free_transfers: int = Field(default=0, ge=0, le=5)
     gameweek: int | None = Field(default=None, ge=1, le=38)
+    decision_gameweek: int | None = Field(default=None, ge=1, le=38)
     chips_remaining: dict[str, int] | None = None
 
 
@@ -273,6 +275,9 @@ def save_game_state(state: GameState) -> GameState:
 @app.post("/game-state/account", response_model=GameState, status_code=201)
 def import_account_game_state(request: AccountStateRequest) -> GameState:
     try:
+        internal_squad_ids, internal_gameweek, reconciliation_source = latest_internal_squad_context(
+            data_dir(), request.season_id,
+        )
         snapshot, state = asyncio.run(fetch_and_build_account_state(
             FplClient(),
             entry_id=request.entry_id,
@@ -282,6 +287,10 @@ def import_account_game_state(request: AccountStateRequest) -> GameState:
             initial_free_transfers=request.initial_free_transfers,
             chips_remaining=request.chips_remaining,
             gameweek=request.gameweek,
+            decision_gameweek=request.decision_gameweek,
+            internal_squad_ids=internal_squad_ids,
+            internal_gameweek=internal_gameweek,
+            reconciliation_source=reconciliation_source,
         ))
         AccountSnapshotStore(data_dir()).save(snapshot)
         GameStateStore(data_dir()).save(state)
@@ -413,6 +422,8 @@ def captaincy_plan(
                 "score": option.score,
                 "classification": option.classification,
                 "rank_swing_potential": option.rank_swing_potential,
+                "ownership_basis": option.ownership_basis,
+                "ownership_confidence": option.ownership_confidence,
             }
             for option in choice.options
         ],

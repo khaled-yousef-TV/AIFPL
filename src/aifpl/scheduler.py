@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 from hashlib import sha256
@@ -16,10 +17,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
-from aifpl.account import AccountSnapshotStore, fetch_and_build_account_state
+from aifpl.account import AccountSnapshotStore, fetch_and_build_account_state, latest_internal_squad_context
 from aifpl.config import SchedulerSettings, account_sync_settings, scheduler_settings
 from aifpl.fpl import FplClient
-from aifpl.game_state import GameStateStore
+from aifpl.game_state import AccountSyncStatus, GameState, GameStateStore
 from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
 from aifpl.scoring import CompletedDecisionScorer
 from aifpl.security import redact_secrets
@@ -61,6 +62,8 @@ class SchedulerTickResult(BaseModel):
     telegram_notified: bool | None = None
     telegram_error: str | None = None
     notification_update_for: str | None = None
+    account_sync_status: AccountSyncStatus = "not_configured"
+    account_sync_warning: str | None = None
     error: str | None = None
     output_path: str
 
@@ -69,6 +72,13 @@ class SchedulerTickError(RuntimeError):
     def __init__(self, result: SchedulerTickResult) -> None:
         super().__init__(result.error or "Scheduled refresh failed")
         self.result = result
+
+
+@dataclass(frozen=True)
+class AccountSyncReport:
+    status: AccountSyncStatus
+    warning: str | None = None
+    state: GameState | None = None
 
 
 class DeadlineScheduler:
@@ -145,21 +155,20 @@ class DeadlineScheduler:
             "scored_decision_paths": scored_decision_paths,
             "scoring_error": scoring_error,
         }
+        account_sync = AccountSyncReport("not_configured")
         if not schedule.completed and not schedule.missed and (schedule.due or force):
-            try:
-                self._sync_account_state_if_enabled(schedule.season_id)
-            except Exception as exc:
-                result = self._persist_tick(
-                    output_path,
-                    schedule,
-                    "failed",
-                    force,
-                    error=redact_secrets(f"{type(exc).__name__}: {exc}"),
-                    **scorecard_kwargs,
-                )
-                raise SchedulerTickError(result) from exc
+            account_sync = self._sync_account_state_if_enabled(
+                schedule.season_id, decision_gameweek=schedule.event,
+            )
+        account_sync_kwargs = {
+            "account_sync_status": account_sync.status,
+            "account_sync_warning": account_sync.warning,
+        }
         if not schedule.completed and not schedule.missed and not self._before_deadline(schedule.deadline, checked_at):
-            return self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
+            return self._persist_tick(
+                output_path, schedule, "missed", force,
+                **scorecard_kwargs, **account_sync_kwargs,
+            )
         if schedule.completed:
             if (
                 not schedule.missed
@@ -171,7 +180,8 @@ class DeadlineScheduler:
                     decision_path = self._run_hermes_for_event(schedule.event, schedule.season_id)
                     result = self._persist_tick(
                         output_path, schedule, "already_completed", force,
-                        hermes_decision_path=decision_path, **scorecard_kwargs,
+                        hermes_decision_path=decision_path,
+                        **scorecard_kwargs, **account_sync_kwargs,
                     )
                     write_immutable(
                         self._hermes_completion_write_path(schedule.season_id, schedule.event, schedule.checked_at),
@@ -182,20 +192,35 @@ class DeadlineScheduler:
                     return self._persist_tick(
                         output_path, schedule, "already_completed", force,
                         hermes_error=redact_secrets(f"{type(exc).__name__}: {exc}"),
-                        **scorecard_kwargs,
+                        **scorecard_kwargs, **account_sync_kwargs,
                     )
-            return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
+            return self._persist_tick(
+                output_path, schedule, "already_completed", force,
+                **scorecard_kwargs, **account_sync_kwargs,
+            )
         if schedule.missed:
-            return self._persist_tick(output_path, schedule, "missed", force, **scorecard_kwargs)
+            return self._persist_tick(
+                output_path, schedule, "missed", force,
+                **scorecard_kwargs, **account_sync_kwargs,
+            )
         if not schedule.due and not force:
-            return self._persist_tick(output_path, schedule, "not_due", force, **scorecard_kwargs)
+            return self._persist_tick(
+                output_path, schedule, "not_due", force,
+                **scorecard_kwargs, **account_sync_kwargs,
+            )
         claim = self._claim(schedule)
         if claim is None:
             status = "already_completed" if self._completion_exists(schedule.season_id, schedule.event) else "in_progress"
-            return self._persist_tick(output_path, schedule, status, force, **scorecard_kwargs)
+            return self._persist_tick(
+                output_path, schedule, status, force,
+                **scorecard_kwargs, **account_sync_kwargs,
+            )
         try:
             if self._completion_exists(schedule.season_id, schedule.event):
-                return self._persist_tick(output_path, schedule, "already_completed", force, **scorecard_kwargs)
+                return self._persist_tick(
+                    output_path, schedule, "already_completed", force,
+                    **scorecard_kwargs, **account_sync_kwargs,
+                )
             end_gameweek = min(38, schedule.event + self.settings.horizon_gameweeks - 1)
             refresh = self.refresh_job.run(schedule.event, end_gameweek, self.settings.budget)
             hermes_decision_path = None
@@ -205,7 +230,7 @@ class DeadlineScheduler:
                     output_path, schedule, "failed", force,
                     refresh_job_path=refresh.output_path,
                     error="Refresh completed at or after the official deadline; Hermes was not run.",
-                    **scorecard_kwargs,
+                    **scorecard_kwargs, **account_sync_kwargs,
                 )
                 raise SchedulerTickError(result)
             if os.environ.get("AIFPL_HERMES_AUTO_RUN", "false").lower() in ("1", "true", "yes"):
@@ -217,7 +242,7 @@ class DeadlineScheduler:
                 output_path, schedule, "succeeded", force, refresh_job_path=refresh.output_path,
                 hermes_decision_path=hermes_decision_path,
                 hermes_error=hermes_error,
-                **scorecard_kwargs,
+                **scorecard_kwargs, **account_sync_kwargs,
             )
             write_immutable(
                 self._completion_write_path(schedule.season_id, schedule.event, result.checked_at),
@@ -236,26 +261,75 @@ class DeadlineScheduler:
             result = self._persist_tick(
                 output_path, schedule, "failed", force,
                 refresh_job_path=refresh_path, error=redact_secrets(f"{type(exc).__name__}: {exc}"),
-                **scorecard_kwargs,
+                **scorecard_kwargs, **account_sync_kwargs,
             )
             raise SchedulerTickError(result) from exc
         finally:
             self._release_claim(claim)
 
-    def _sync_account_state_if_enabled(self, season_id: str) -> None:
-        settings = account_sync_settings()
-        if not settings.enabled:
-            return
-        assert settings.entry_id is not None and settings.target_rank is not None
-        snapshot, state = asyncio.run(fetch_and_build_account_state(
-            FplClient(),
-            entry_id=settings.entry_id,
-            season_id=season_id,
-            target_rank=settings.target_rank,
-            initial_free_transfers=settings.initial_free_transfers,
-        ))
-        AccountSnapshotStore(self.root).save(snapshot)
-        GameStateStore(self.root).save(state)
+    def _sync_account_state_if_enabled(
+        self, season_id: str, decision_gameweek: int | None = None,
+    ) -> AccountSyncReport:
+        configured_entry_id: int | None = None
+        try:
+            settings = account_sync_settings()
+            if not settings.enabled:
+                return AccountSyncReport("not_configured")
+            assert settings.entry_id is not None and settings.target_rank is not None
+            configured_entry_id = settings.entry_id
+            internal_squad_ids, internal_gameweek, reconciliation_source = latest_internal_squad_context(
+                self.root, season_id,
+            )
+            snapshot, state = asyncio.run(fetch_and_build_account_state(
+                FplClient(),
+                entry_id=settings.entry_id,
+                season_id=season_id,
+                target_rank=settings.target_rank,
+                initial_free_transfers=settings.initial_free_transfers,
+                decision_gameweek=decision_gameweek,
+                internal_squad_ids=internal_squad_ids,
+                internal_gameweek=internal_gameweek,
+                reconciliation_source=reconciliation_source,
+            ))
+            AccountSnapshotStore(self.root).save(snapshot)
+            try:
+                from aifpl.chips import ChipStateStore
+
+                ChipStateStore(self.root).reconcile_public_history(season_id, snapshot.chip_history)
+            except (OSError, ValueError):
+                pass
+            GameStateStore(self.root).save(state)
+            return AccountSyncReport("ready", state=state)
+        except Exception as exc:
+            warning = redact_secrets(f"Account sync degraded: {type(exc).__name__}: {exc}")
+            try:
+                state = GameStateStore(self.root).latest(season_id=season_id)
+            except (FileNotFoundError, ValueError):
+                state = None
+            if state is not None and configured_entry_id is not None and state.account_id not in (None, configured_entry_id):
+                state = None
+            if state is None:
+                return AccountSyncReport("unavailable", warning=warning)
+            status: AccountSyncStatus = "stale" if state.rank_data_available else "unavailable"
+            fallback_gameweek = decision_gameweek or state.decision_gameweek or state.gameweek
+            updates = {
+                "gameweek": fallback_gameweek,
+                "decision_gameweek": fallback_gameweek,
+                "gameweeks_remaining": max(0, 38 - fallback_gameweek),
+                "account_sync_status": status,
+                "account_sync_warning": warning,
+                "updated_at": datetime.now(timezone.utc),
+            }
+            if status == "stale":
+                updates["objective_mode"] = "RANK_MODE"
+            else:
+                updates["objective_mode"] = "POINTS_MODE"
+            degraded = state.model_copy(update=updates)
+            try:
+                GameStateStore(self.root).save(degraded)
+            except (OSError, ValueError):
+                pass
+            return AccountSyncReport(status, warning=warning, state=degraded)
 
     def run_forever(self, stop_event: Event | None = None) -> None:
         while stop_event is None or not stop_event.is_set():
@@ -265,6 +339,8 @@ class DeadlineScheduler:
                     f"[{result.checked_at.isoformat()}] tick={result.status} "
                     f"event={result.event} deadline={result.deadline} "
                     f"refresh_at={result.refresh_at} forced={result.forced} "
+                    f"account_sync={result.account_sync_status} "
+                    f"account_warning={result.account_sync_warning or 'none'} "
                     f"scorecards={len(result.scored_decision_paths)} "
                     f"hermes={result.hermes_decision_path or result.hermes_error or 'skipped'}",
                     flush=True,
@@ -452,6 +528,8 @@ class DeadlineScheduler:
         hermes_error: str | None = None,
         scored_decision_paths: list[str] | None = None,
         scoring_error: str | None = None,
+        account_sync_status: AccountSyncStatus = "not_configured",
+        account_sync_warning: str | None = None,
     ) -> SchedulerTickResult:
         result = SchedulerTickResult(
             status=status, checked_at=schedule.checked_at, event=schedule.event,
@@ -462,9 +540,30 @@ class DeadlineScheduler:
             hermes_error=hermes_error,
             scored_decision_paths=scored_decision_paths or [],
             scoring_error=scoring_error,
+            account_sync_status=account_sync_status,
+            account_sync_warning=account_sync_warning,
         )
         write_immutable(path, json_bytes(result.model_dump(mode="json"), pretty=True))
         return result
+
+    def latest_tick(
+        self, season_id: str | None = None, event: int | None = None,
+    ) -> SchedulerTickResult | None:
+        directory = self.root / "scheduler" / "ticks"
+        paths = sorted(directory.glob("*.json"), reverse=True) if directory.exists() else []
+        for path in paths:
+            try:
+                result = SchedulerTickResult.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if result.notification_update_for is not None:
+                continue
+            if season_id is not None and result.season_id != season_id:
+                continue
+            if event is not None and result.event != event:
+                continue
+            return result
+        return None
 
     def _persist_notification_update(self, result: SchedulerTickResult) -> SchedulerTickResult:
         stamp = result.checked_at.strftime("%Y%m%dT%H%M%S%fZ")

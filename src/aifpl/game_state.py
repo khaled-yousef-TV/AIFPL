@@ -11,6 +11,8 @@ from aifpl.artifacts import complete_artifact_paths, json_bytes, verify_artifact
 
 ObjectiveMode = Literal["POINTS_MODE", "RANK_MODE"]
 StrategyStatus = Literal["BEHIND_TARGET", "ON_TRACK", "PROTECT_POSITION", "UNKNOWN"]
+AccountSyncStatus = Literal["not_configured", "ready", "stale", "unavailable"]
+ReconciliationStatus = Literal["not_checked", "matched", "mismatch", "not_comparable"]
 
 
 class RankSnapshot(BaseModel):
@@ -28,6 +30,12 @@ class ExposureState(BaseModel):
     rank_swing_potential: float | None = Field(default=None, ge=0)
     captaincy_eo: float | None = Field(default=None, ge=0, le=100)
     basis: str = "unavailable"
+    ownership_confidence: float | None = Field(default=None, ge=0, le=1)
+
+    @computed_field
+    @property
+    def ownership_basis(self) -> str:
+        return self.basis
 
 
 class GameState(BaseModel):
@@ -36,6 +44,8 @@ class GameState(BaseModel):
     season_id: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
     account_id: int | None = Field(default=None, gt=0)
     gameweek: int = Field(ge=1, le=38)
+    rank_as_of_gameweek: int | None = Field(default=None, ge=1, le=38)
+    decision_gameweek: int | None = Field(default=None, ge=1, le=38)
     overall_rank: int | None = Field(default=None, gt=0)
     target_rank: int | None = Field(default=None, gt=0)
     rank_history: list[RankSnapshot] = Field(default_factory=list)
@@ -49,13 +59,38 @@ class GameState(BaseModel):
     captain_template_coverage: float | None = Field(default=None, ge=0, le=1)
     objective_mode: ObjectiveMode = "POINTS_MODE"
     exposures: list[ExposureState] = Field(default_factory=list)
+    account_sync_status: AccountSyncStatus = "not_configured"
+    account_sync_warning: str | None = None
+    account_reconciliation_status: ReconciliationStatus = "not_checked"
+    account_reconciliation_source: str | None = None
+    account_reconciliation_warning: str | None = None
+    internal_squad_ids: list[int] | None = None
+    internal_squad_gameweek: int | None = Field(default=None, ge=1, le=38)
+    reconciliation_missing_player_ids: list[int] = Field(default_factory=list)
+    reconciliation_unexpected_player_ids: list[int] = Field(default_factory=list)
     source: str = "manual"
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")
     def derive_defaults(self) -> "GameState":
+        if self.rank_as_of_gameweek is None:
+            self.rank_as_of_gameweek = self.gameweek
+        if self.decision_gameweek is None:
+            self.decision_gameweek = self.gameweek
+        if self.rank_as_of_gameweek > self.decision_gameweek:
+            raise ValueError("rank_as_of_gameweek cannot be after decision_gameweek")
+        if self.internal_squad_ids is not None:
+            if len(self.internal_squad_ids) != 15 or len(set(self.internal_squad_ids)) != 15:
+                raise ValueError("internal_squad_ids must contain 15 unique players")
+            if any(player_id <= 0 for player_id in self.internal_squad_ids):
+                raise ValueError("internal_squad_ids must contain positive player IDs")
+            if self.internal_squad_gameweek is None:
+                raise ValueError("internal_squad_gameweek is required with internal_squad_ids")
+        elif self.internal_squad_gameweek is not None:
+            raise ValueError("internal_squad_gameweek requires internal_squad_ids")
+        self.gameweek = self.decision_gameweek
         if self.gameweeks_remaining is None:
-            self.gameweeks_remaining = max(0, 38 - self.gameweek)
+            self.gameweeks_remaining = max(0, 38 - self.decision_gameweek)
         if self.strategy_status == "UNKNOWN" and self.overall_rank is not None and self.target_rank is not None:
             self.strategy_status = derive_strategy_status(self.overall_rank, self.target_rank)
         if self.objective_mode == "RANK_MODE" and not self.rank_data_available:
@@ -102,8 +137,13 @@ class GameStateStore:
             parameters={
                 "season_id": state.season_id,
                 "gameweek": state.gameweek,
+                "rank_as_of_gameweek": state.rank_as_of_gameweek,
+                "decision_gameweek": state.decision_gameweek,
                 "objective_mode": state.objective_mode,
                 "rank_data_available": state.rank_data_available,
+                "account_sync_status": state.account_sync_status,
+                "account_reconciliation_status": state.account_reconciliation_status,
+                "internal_squad_gameweek": state.internal_squad_gameweek,
             },
         )
         return path

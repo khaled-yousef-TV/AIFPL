@@ -7,7 +7,7 @@ import pytest
 
 import aifpl.scheduler as scheduler_module
 from aifpl.config import AccountSyncSettings, SchedulerSettings
-from aifpl.game_state import GameStateStore
+from aifpl.game_state import GameState, GameStateStore
 from aifpl.refresh import RefreshJobError, RefreshJobResult
 from aifpl.scheduler import CLAIM_LEASE_SECONDS, DeadlineScheduler, SchedulerTickError
 from aifpl.snapshots import SnapshotStore
@@ -115,13 +115,76 @@ def test_scheduler_auto_syncs_configured_account_state(tmp_path, monkeypatch) ->
     )
     monkeypatch.setattr(scheduler_module, "FplClient", FakeFplClient)
 
-    scheduler_module.DeadlineScheduler(tmp_path)._sync_account_state_if_enabled("2026-27")
+    report = scheduler_module.DeadlineScheduler(tmp_path)._sync_account_state_if_enabled(
+        "2026-27", decision_gameweek=3,
+    )
 
     state = GameStateStore(tmp_path).latest()
+    assert report.status == "ready"
     assert state.account_id == 123
     assert state.objective_mode == "RANK_MODE"
+    assert state.rank_as_of_gameweek == 2
+    assert state.decision_gameweek == 3
     assert state.free_transfers == 1
     assert state.chips_remaining["wildcard"] == 1
+
+
+def test_scheduler_account_sync_failure_is_nonfatal_and_uses_stale_rank_state(tmp_path, monkeypatch) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+    GameStateStore(tmp_path).save(GameState(
+        season_id="2026-27", gameweek=1, rank_as_of_gameweek=1, decision_gameweek=1,
+        overall_rank=184_000, target_rank=50_000, free_transfers=1, bank=83,
+        objective_mode="RANK_MODE",
+    ))
+
+    class BrokenFplClient:
+        async def fetch_entry_history(self, entry_id):
+            raise RuntimeError("account endpoint unavailable")
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "account_sync_settings",
+        lambda: AccountSyncSettings(True, 123, 50_000, 0),
+    )
+    monkeypatch.setattr(scheduler_module, "FplClient", BrokenFplClient)
+    monkeypatch.setenv("AIFPL_HERMES_AUTO_RUN", "false")
+
+    result = scheduler(tmp_path, FakeRefreshJob(tmp_path)).tick(
+        datetime(2026, 8, 15, 10, 30, tzinfo=timezone.utc),
+    )
+
+    assert result.status == "succeeded"
+    assert result.account_sync_status == "stale"
+    assert "account endpoint unavailable" in (result.account_sync_warning or "")
+    state = GameStateStore(tmp_path).latest()
+    assert state.gameweek == 1
+    assert state.decision_gameweek == 1
+    assert state.rank_as_of_gameweek == 1
+    assert state.objective_mode == "RANK_MODE"
+
+
+def test_scheduler_account_sync_failure_without_rank_state_still_runs_core_tick(tmp_path, monkeypatch) -> None:
+    SnapshotStore(tmp_path).save_bootstrap(bootstrap("2026-08-15T12:00:00Z"), datetime(2026, 8, 1, tzinfo=timezone.utc))
+
+    class BrokenFplClient:
+        async def fetch_entry_history(self, entry_id):
+            raise ValueError("empty account history")
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "account_sync_settings",
+        lambda: AccountSyncSettings(True, 123, 50_000, 0),
+    )
+    monkeypatch.setattr(scheduler_module, "FplClient", BrokenFplClient)
+    monkeypatch.setenv("AIFPL_HERMES_AUTO_RUN", "false")
+
+    result = scheduler(tmp_path, FakeRefreshJob(tmp_path)).tick(
+        datetime(2026, 8, 15, 10, 30, tzinfo=timezone.utc),
+    )
+
+    assert result.status == "succeeded"
+    assert result.account_sync_status == "unavailable"
+    assert "empty account history" in (result.account_sync_warning or "")
 
 
 def test_scheduler_scores_completed_teams_before_hermes_runs(tmp_path, monkeypatch) -> None:

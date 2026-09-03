@@ -69,6 +69,25 @@ def test_game_state_derives_status_and_remaining_gameweeks() -> None:
     assert state.rank_gap_ratio == 3.68
 
 
+def test_game_state_separates_completed_rank_gameweek_from_decision_gameweek() -> None:
+    state = GameState(
+        season_id="2026-27",
+        gameweek=3,
+        rank_as_of_gameweek=3,
+        decision_gameweek=4,
+        overall_rank=100_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+
+    assert state.gameweek == 4
+    assert state.rank_as_of_gameweek == 3
+    assert state.decision_gameweek == 4
+    assert state.gameweeks_remaining == 34
+
+
 def test_rank_mode_requires_rank_and_target() -> None:
     with pytest.raises(ValueError, match="overall_rank and target_rank"):
         GameState(
@@ -92,6 +111,8 @@ def test_template_uses_cohort_ownership_and_exposure_math() -> None:
 
     assert target_cohort_eo(1, states[1]) == (155.0, "effective_ownership")
     assert target_cohort_eo(2, states[2]) == (20.0, "engaged_ownership_proxy")
+    assert states[1].ownership_confidence == 1.0
+    assert states[2].ownership_confidence == 0.4
     exposure = build_exposure_states(
         [projection(1, "MID", 8.0), projection(2, "MID", 7.0)],
         {1},
@@ -103,6 +124,10 @@ def test_template_uses_cohort_ownership_and_exposure_math() -> None:
     assert exposure[0].net_exposure == 45.0
     assert exposure[1].my_exposure == 0.0
     assert exposure[1].net_exposure == -20.0
+    assert exposure[0].ownership_basis == "effective_ownership"
+    assert exposure[0].ownership_confidence == 1.0
+    assert exposure[1].ownership_confidence == 0.4
+    assert exposure[1].rank_swing_potential == 0.56
 
 
 def test_template_catalog_store_round_trips_output_path_and_manifest(tmp_path) -> None:
@@ -148,6 +173,21 @@ def test_rank_adjustment_is_zero_without_rank_data() -> None:
     points_state = GameState(season_id="2026-27", gameweek=1, free_transfers=1, bank=0)
 
     assert rank_objective_adjustment(player, points_state, template(1, 150.0)) == 0.0
+
+
+def test_rank_adjustment_weights_public_ownership_below_true_effective_ownership() -> None:
+    state = rank_state(2_000_000, 50_000)
+    proxy = projection(1, "MID", 8.0, ownership=65.0)
+    true_eo = CurrentPlayerProjection(
+        **{**proxy.__dict__, "effective_ownership_pct": 65.0},
+    )
+
+    proxy_adjustment = rank_objective_adjustment(proxy, state)
+    true_adjustment = rank_objective_adjustment(true_eo, state)
+
+    assert proxy_adjustment != 0.0
+    assert true_adjustment != 0.0
+    assert abs(true_adjustment) > abs(proxy_adjustment)
 
 
 def test_rank_optimizer_returns_rank_mode_and_rank_aware_captain() -> None:

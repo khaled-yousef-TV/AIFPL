@@ -95,7 +95,9 @@ def _urgency(gameweeks_remaining: int | None) -> float:
 
 
 def _chip_advantage(chips_remaining: dict[str, int]) -> float:
-    return _clamp(sum(max(0, int(value)) for value in chips_remaining.values()) / 8.0)
+    # Account reconstruction reports the active set only; the expired set is
+    # intentionally not available to the strategy policy.
+    return _clamp(sum(max(0, int(value)) for value in chips_remaining.values()) / 4.0)
 
 
 def _clamp(value: float) -> float:

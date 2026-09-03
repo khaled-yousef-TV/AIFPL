@@ -32,7 +32,7 @@ from aifpl.current_projections import CurrentPlayerProjection
 from aifpl.rules import SquadPlayer, SquadRequest, select_best_lineup
 from aifpl.retry import retry_sync
 from aifpl.security import redact_secrets
-from aifpl.template import PlayerTemplateState, TemplateCatalogStore
+from aifpl.template import PlayerTemplateState, TemplateCatalogStore, ownership_source_confidence
 
 
 class HermesModel(Protocol):
@@ -215,6 +215,7 @@ class HermesDecisionBackend:
             "chip_advice": self._chip_advice(),
             "game_state": state.model_dump(mode="json") if state else None,
             "account_snapshot": account.model_dump(mode="json") if account else None,
+            "account_sync": self._account_sync_context(state),
             "template_summary": self._template_summary(state),
         }
 
@@ -274,10 +275,30 @@ class HermesDecisionBackend:
                     "template_status": row.template_status,
                     "effective_ownership": row.effective_ownership,
                     "expected_captaincy": row.expected_captaincy,
+                    "ownership_basis": row.ownership_basis,
+                    "ownership_confidence": row.ownership_confidence,
                 }
                 for row in top
             ],
         }
+
+    def _account_sync_context(self, state: GameState | None) -> dict[str, object]:
+        if state is not None:
+            return {
+                "status": state.account_sync_status,
+                "warning": state.account_sync_warning,
+                "reconciliation_status": state.account_reconciliation_status,
+                "reconciliation_warning": state.account_reconciliation_warning,
+            }
+        try:
+            from aifpl.scheduler import DeadlineScheduler
+
+            tick = DeadlineScheduler(self.root).latest_tick()
+        except (FileNotFoundError, ValueError):
+            tick = None
+        if tick is None:
+            return {"status": "not_configured", "warning": None}
+        return {"status": tick.account_sync_status, "warning": tick.account_sync_warning}
 
     def _rank_inputs(
         self, strategy: HermesStrategy,
@@ -506,12 +527,12 @@ class HermesManager:
         deadline_clock: datetime | None = None,
         objective_mode: ObjectiveMode | None = None,
     ) -> HermesRunResult:
-        if objective_mode is None:
-            objective_mode = self._account_objective_mode()
         self._expected_gameweek = expected_gameweek
         self._expected_season_id = expected_season_id
         self._deadline = deadline
         self._deadline_clock = deadline_clock
+        if objective_mode is None:
+            objective_mode = self._account_objective_mode()
         self._requested_objective_mode = objective_mode
         lock_path = self.root / "hermes" / "run.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -542,11 +563,17 @@ class HermesManager:
     def _account_objective_mode(self) -> ObjectiveMode | None:
         latest_game_state = getattr(self.backend, "latest_game_state", None)
         if not callable(latest_game_state):
-            return None
+            return "POINTS_MODE"
         state = latest_game_state()
+        if (
+            state is not None
+            and self._expected_season_id is not None
+            and state.season_id != self._expected_season_id
+        ):
+            return "POINTS_MODE"
         if state is not None and state.objective_mode == "RANK_MODE" and state.rank_data_available:
             return "RANK_MODE"
-        return None
+        return "POINTS_MODE"
 
     def supersede_decision(
         self,
@@ -694,6 +721,14 @@ class HermesManager:
             if not force and self._opening_plan_is_current():
                 return None
             self._strategy = previous.strategy
+            if (
+                self._account_objective_mode() == "POINTS_MODE"
+                and previous.strategy.objective_mode == "RANK_MODE"
+            ):
+                self._strategy = previous.strategy.model_copy(update={
+                    "objective_mode": "POINTS_MODE",
+                    "rationale": "Rank data is unavailable; fall back to expected points for this planning cycle.",
+                })
             self._initial, self._initial_gameweek, self._initial_snapshot = self.backend.initial_squad(self._strategy)
             return self._commit(
                 {
@@ -756,6 +791,15 @@ class HermesManager:
         self._hold_horizon = None
         self._initial_gameweek = None
         self._strategy = previous.strategy if previous else None
+        if (
+            previous is not None
+            and self._requested_objective_mode == "POINTS_MODE"
+            and previous.strategy.objective_mode == "RANK_MODE"
+        ):
+            self._strategy = previous.strategy.model_copy(update={
+                "objective_mode": "POINTS_MODE",
+                "rationale": "Rank data is unavailable; fall back to expected points for this planning cycle.",
+            })
         objective_instruction = ""
         if self._requested_objective_mode is not None:
             objective_instruction = (
@@ -775,8 +819,10 @@ class HermesManager:
             "Any outcome-driven strategy change is recommendation-only for a new planning cycle, never an automatic mutation "
             "of an already computed plan; set and finalize strategy before requesting a plan. "
             "POINTS_MODE optimizes expected points. RANK_MODE is only valid when the context contains a current rank, "
-            "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
-            " A public account snapshot is read-only evidence; never treat it as transfer execution confirmation or invent purchase prices."
+             "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
+             " If account sync is stale or unavailable, use POINTS_MODE when no usable rank state exists and still commit a recommendation; "
+             "the account_sync warning is operational context, not a reason to stop planning."
+             " A public account snapshot is read-only evidence; never treat it as transfer execution confirmation or invent purchase prices."
             + objective_instruction
         )
         messages: list[dict[str, Any]] = [
@@ -1280,6 +1326,14 @@ def _squad_summary(squad: OptimizedSquad) -> dict[str, Any]:
                 "effective_ownership": p.effective_ownership_pct,
                 "expected_captaincy": p.expected_captaincy,
                 "template_status": p.template_status,
+                "ownership_basis": (
+                    "effective_ownership" if p.effective_ownership_pct is not None
+                    else "selected_by_percent_proxy"
+                ),
+                "ownership_confidence": ownership_source_confidence(
+                    "effective_ownership" if p.effective_ownership_pct is not None
+                    else "selected_by_percent_proxy"
+                ),
             }
             for p in squad.players
         ],

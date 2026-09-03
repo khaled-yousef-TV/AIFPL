@@ -19,6 +19,7 @@ from aifpl.template import (
     TemplateCatalogStore,
     build_exposure_states,
     coverage as template_coverage,
+    ownership_source_confidence,
     target_cohort_eo,
 )
 
@@ -57,6 +58,8 @@ class DashboardPlayer(BaseModel):
     my_exposure: float | None = None
     net_exposure: float | None = None
     rank_swing_potential: float | None = None
+    ownership_basis: str = "unavailable"
+    ownership_confidence: float | None = None
 
 
 class DashboardTransfer(BaseModel):
@@ -80,6 +83,10 @@ class DashboardMove(BaseModel):
     in_ownership: float | None = None
     out_effective_ownership: float | None = None
     in_effective_ownership: float | None = None
+    out_ownership_basis: str = "unavailable"
+    in_ownership_basis: str = "unavailable"
+    out_ownership_confidence: float | None = None
+    in_ownership_confidence: float | None = None
     template_exposure_delta: float | None = None
     strategy_classification: str | None = None
 
@@ -95,6 +102,8 @@ class DashboardCaptainOption(BaseModel):
     net_exposure_if_captained: float | None = None
     strategy_classification: str | None = None
     rank_swing_potential: float | None = None
+    ownership_basis: str = "unavailable"
+    ownership_confidence: float | None = None
 
 
 class DashboardHorizonPoint(BaseModel):
@@ -180,6 +189,13 @@ class CurrentDashboard(BaseModel):
     template_coverage: float | None = None
     captain_template_coverage: float | None = None
     rank_gap_ratio: float | None = None
+    rank_as_of_gameweek: int | None = None
+    decision_gameweek: int | None = None
+    account_sync_status: str = "not_configured"
+    account_sync_warning: str | None = None
+    account_reconciliation_status: str = "not_checked"
+    account_reconciliation_source: str | None = None
+    account_reconciliation_warning: str | None = None
 
 
 def build_current_dashboard(root: Path) -> CurrentDashboard:
@@ -297,6 +313,13 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         if committed is not None:
             robustness = committed.robustness_score
     account_state = game_state or decision.game_state
+    account_sync_status = account_state.account_sync_status if account_state is not None else "not_configured"
+    account_sync_warning = account_state.account_sync_warning if account_state is not None else None
+    if account_state is None or account_sync_status == "not_configured":
+        tick = DeadlineScheduler(root).latest_tick(schedule.season_id, schedule.event)
+        if tick is not None:
+            account_sync_status = tick.account_sync_status
+            account_sync_warning = tick.account_sync_warning
     rank_state = account_state if decision.strategy.objective_mode == "RANK_MODE" else None
     if rank_state is not None and rank_state.objective_mode != "RANK_MODE":
         rank_state = rank_state.model_copy(update={"objective_mode": "RANK_MODE"})
@@ -348,6 +371,19 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         DashboardInput(name="Odds projections", status="ready", detail=f"{len(projections)} projection records loaded"),
         DashboardInput(name="Hermes decision", status="ready", detail=f"GW {decision.gameweek} committed"),
     ]
+    inputs.append(DashboardInput(
+        name="Account sync",
+        status=account_sync_status,
+        detail=account_sync_warning or "Latest public account state loaded",
+    ))
+    reconciliation_status = account_state.account_reconciliation_status if account_state is not None else "not_checked"
+    reconciliation_warning = account_state.account_reconciliation_warning if account_state is not None else None
+    if reconciliation_status != "not_checked":
+        inputs.append(DashboardInput(
+            name="Squad reconciliation",
+            status="warning" if reconciliation_status != "matched" else "ready",
+            detail=reconciliation_warning or reconciliation_status,
+        ))
     if plan_snapshot is not None and plan_snapshot.projection_catalog:
         inputs.append(
             DashboardInput(name="Projection catalog", status="ready", detail=plan_snapshot.projection_catalog),
@@ -398,6 +434,15 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
             else _captain_template_coverage(template_states.get(decision.captain_id))
         ),
         rank_gap_ratio=account_state.rank_gap_ratio if account_state is not None else None,
+        rank_as_of_gameweek=account_state.rank_as_of_gameweek if account_state is not None else None,
+        decision_gameweek=account_state.decision_gameweek if account_state is not None else decision.gameweek,
+        account_sync_status=account_sync_status,
+        account_sync_warning=account_sync_warning,
+        account_reconciliation_status=reconciliation_status,
+        account_reconciliation_source=(
+            account_state.account_reconciliation_source if account_state is not None else None
+        ),
+        account_reconciliation_warning=reconciliation_warning,
     )
 
 
@@ -490,8 +535,8 @@ def _dashboard_moves(
             )
             out_row = projections_by_key.get((out_id, week.gameweek))
             in_row = projections_by_key.get((in_id, week.gameweek))
-            out_eo = _row_cohort_eo(out_row, out_id, template_states)
-            in_eo = _row_cohort_eo(in_row, in_id, template_states)
+            out_eo, out_basis, out_confidence = _row_ownership_info(out_row, out_id, template_states)
+            in_eo, in_basis, in_confidence = _row_ownership_info(in_row, in_id, template_states)
             moves.append(DashboardMove(
                 out_id=out_id, out_name=names.get(out_id), in_id=in_id, in_name=names.get(in_id, f"#{in_id}"),
                 gameweek=week.gameweek, horizon_gain=round(gain, 4), hit_cost=week.hit_cost,
@@ -500,6 +545,10 @@ def _dashboard_moves(
                 in_ownership=in_row.selected_by_percent if in_row is not None else None,
                 out_effective_ownership=out_eo,
                 in_effective_ownership=in_eo,
+                out_ownership_basis=out_basis,
+                in_ownership_basis=in_basis,
+                out_ownership_confidence=out_confidence,
+                in_ownership_confidence=in_confidence,
                 template_exposure_delta=round(in_eo - out_eo, 4) if in_eo is not None and out_eo is not None else None,
                 strategy_classification=_move_classification(game_state, out_eo, in_eo),
             ))
@@ -543,6 +592,12 @@ def _dashboard_captain_options(
             ),
             strategy_classification=option_by_id[player_id].classification if player_id in option_by_id else None,
             rank_swing_potential=option_by_id[player_id].rank_swing_potential if player_id in option_by_id else None,
+            ownership_basis=option_by_id[player_id].ownership_basis if player_id in option_by_id else _row_ownership_info(
+                row, player_id, template_states,
+            )[1],
+            ownership_confidence=option_by_id[player_id].ownership_confidence if player_id in option_by_id else _row_ownership_info(
+                row, player_id, template_states,
+            )[2],
         )
         for player_id, row in candidates[:3]
     ]
@@ -585,6 +640,12 @@ def _dashboard_player(
 ) -> DashboardPlayer:
     projected_points = float(getattr(projection, "projected_points", 0.0))
     ownership = player.selected_by_percent
+    _, ownership_basis, ownership_confidence = _row_ownership_info(
+        projection, player.id, {template.player_id: template} if template is not None else None,
+    )
+    if exposure is not None:
+        ownership_basis = getattr(exposure, "basis", ownership_basis)
+        ownership_confidence = getattr(exposure, "ownership_confidence", ownership_confidence)
     return DashboardPlayer(
         id=player.id,
         name=player.name,
@@ -616,6 +677,8 @@ def _dashboard_player(
         my_exposure=getattr(exposure, "my_exposure", None),
         net_exposure=getattr(exposure, "net_exposure", None),
         rank_swing_potential=getattr(exposure, "rank_swing_potential", None),
+        ownership_basis=ownership_basis,
+        ownership_confidence=ownership_confidence,
     )
 
 
@@ -637,14 +700,29 @@ def _row_cohort_eo(
     player_id: int,
     template_states: dict[int, PlayerTemplateState] | None,
 ) -> float | None:
-    if row is not None and row.effective_ownership_pct is not None:
-        return row.effective_ownership_pct
-    value, _ = target_cohort_eo(
+    value, _, _ = _row_ownership_info(row, player_id, template_states)
+    return value
+
+
+def _row_ownership_info(
+    row: OddsAdjustedGameweekProjection | object | None,
+    player_id: int,
+    template_states: dict[int, PlayerTemplateState] | None,
+) -> tuple[float | None, str, float | None]:
+    if row is not None and getattr(row, "effective_ownership_pct", None) is not None:
+        return (
+            float(getattr(row, "effective_ownership_pct")),
+            "effective_ownership",
+            ownership_source_confidence("effective_ownership"),
+        )
+    value, basis = target_cohort_eo(
         player_id,
         (template_states or {}).get(player_id),
-        row.selected_by_percent if row is not None else None,
+        getattr(row, "selected_by_percent", None) if row is not None else None,
+        getattr(row, "expected_captaincy", None) if row is not None else None,
     )
-    return value
+    confidence = ownership_source_confidence(basis) if value is not None else None
+    return value, basis, confidence
 
 
 def _captain_net_exposure(

@@ -24,6 +24,71 @@ from aifpl.security import redact_secrets
 from aifpl.template import PlayerTemplateState
 
 CHIP_NAMES = ("wildcard", "free_hit", "bench_boost", "triple_captain")
+CHIPS_PER_SET = 1
+
+
+def chip_set_for_gameweek(gameweek: int) -> int:
+    if not 1 <= gameweek <= 38:
+        raise ValueError("gameweek must be within 1..38")
+    return 1 if gameweek <= chip_settings().set1_end_gw else 2
+
+
+def normalize_chip_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    aliases = {
+        "freehit": "free_hit",
+        "benchboost": "bench_boost",
+        "triplecaptain": "triple_captain",
+    }
+    name = aliases.get(value.casefold(), value.casefold())
+    return name if name in CHIP_NAMES else None
+
+
+def chip_history_events(used_chips: object) -> dict[int, str]:
+    """Extract chip activations keyed by their finalized gameweek."""
+    if not isinstance(used_chips, list):
+        return {}
+    events: dict[int, str] = {}
+    for item in used_chips:
+        if not isinstance(item, Mapping):
+            continue
+        name = normalize_chip_name(item.get("name") or item.get("chip"))
+        event = item.get("event", item.get("gameweek"))
+        try:
+            gameweek = int(event)
+        except (TypeError, ValueError):
+            continue
+        if name is not None and 1 <= gameweek <= 38:
+            events[gameweek] = name
+    return events
+
+
+def remaining_chip_counts(
+    used_chips: object,
+    decision_gameweek: int,
+    *,
+    extra_events: Mapping[int, str] | None = None,
+) -> dict[str, int]:
+    """Return the single available slot for each chip type in the active set."""
+    active_set = chip_set_for_gameweek(decision_gameweek)
+    events = chip_history_events(used_chips)
+    for gameweek, chip in (extra_events or {}).items():
+        try:
+            normalized_gameweek = int(gameweek)
+        except (TypeError, ValueError):
+            continue
+        normalized_chip = normalize_chip_name(chip)
+        if normalized_chip is not None and 1 <= normalized_gameweek <= 38:
+            events[normalized_gameweek] = normalized_chip
+    used_slots = {
+        (name, chip_set_for_gameweek(gameweek))
+        for gameweek, name in events.items()
+    }
+    return {
+        name: CHIPS_PER_SET - int((name, active_set) in used_slots)
+        for name in CHIP_NAMES
+    }
 
 
 class ChipSlot(BaseModel):
@@ -110,6 +175,48 @@ class ChipStateStore:
             raise ChipStateError("Chip state belongs to a different season")
         _validate_chip_state(state)
         return state
+
+    def reconcile_public_history(
+        self,
+        season_id: str,
+        chip_events: Mapping[int, str],
+    ) -> ChipState:
+        """Merge finalized public chip use without replacing local confirmations."""
+        current = self.latest(season_id)
+        normalized_updates: dict[tuple[str, int], int] = {}
+        for gameweek, chip in chip_events.items():
+            name = normalize_chip_name(chip)
+            if name is not None:
+                normalized_updates[(name, chip_set_for_gameweek(gameweek))] = gameweek
+        if not normalized_updates:
+            return current
+        changed = False
+        slots: list[ChipSlot] = []
+        for slot in current.slots:
+            if (slot.chip, slot.set) in normalized_updates and not slot.used:
+                changed = True
+                slots.append(slot.model_copy(update={
+                    "used": True,
+                    "used_gw": normalized_updates[(slot.chip, slot.set)],
+                }))
+            else:
+                slots.append(slot)
+        if not changed:
+            return current
+        updated = current.model_copy(update={"slots": slots, "updated_at": datetime.now(timezone.utc)})
+        stamp = updated.updated_at.strftime("%Y%m%dT%H%M%S%fZ")
+        path = self.root / "chips" / "state" / season_id / f"{stamp}.json"
+        write_immutable(path, json_bytes(updated.model_dump(mode="json"), pretty=True))
+        write_manifest(
+            self.root,
+            path,
+            artifact_type="chip_state",
+            created_at=updated.updated_at.isoformat(),
+            record_count=len(updated.slots),
+            sources={},
+            parameters={"source": "fpl_public_account", "events": dict(chip_events)},
+        )
+        return updated
 
     def mark_used(self, season_id: str, chip: str, chip_set: int, gameweek: int) -> ChipState:
         lock_path = self.root / "chips" / "state" / season_id / ".lock"

@@ -54,7 +54,7 @@ Backend optional:
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
 - `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
-- `AIFPL_ACCOUNT_AUTO_SYNC=true`, `AIFPL_ACCOUNT_ENTRY_ID`, and `AIFPL_ACCOUNT_TARGET_RANK`: enable hands-off public account/rank refreshes before each deadline plan. `AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS` seeds the first gameweek's transfer count (default `1`); later free transfers and two-set chip counts are derived from public history.
+- `AIFPL_ACCOUNT_AUTO_SYNC=true`, `AIFPL_ACCOUNT_ENTRY_ID`, and `AIFPL_ACCOUNT_TARGET_RANK`: enable hands-off public account/rank refreshes before each deadline plan. `AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS` seeds the first gameweek's transfer count (default `0`); later free transfers and gameweek-aware two-set chip counts are derived from public history. Account-sync failures degrade to a stale rank state or `POINTS_MODE` rather than blocking the core planner.
 - `AIFPL_DEPLOYED_COMMIT`: optional deployment SHA included in calibration model identity.
 - `AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS`: keep `false` unless transcript and debug reads are intentionally public.
 - `AIFPL_EFFECTIVE_OWNERSHIP_FILE`: optional JSON mapping of player IDs to externally-derived effective ownership percentages; raw `selected_by_percent` is never silently treated as EO when this is configured.
@@ -84,7 +84,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **321 passing tests**. Commands below assume the
+The current suite contains **338 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests

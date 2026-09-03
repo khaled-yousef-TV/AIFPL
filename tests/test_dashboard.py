@@ -132,6 +132,19 @@ def test_dashboard_player_carries_participation_evidence() -> None:
     assert row.differential_score == 4.8
 
 
+def test_dashboard_player_exposes_ownership_basis_and_confidence() -> None:
+    player = CurrentPlayer(1, "Test", "MID", 1, "Arsenal", 100, "a", None, 0, 5, 100, 1900, 25, 5, 4, 9, 20, selected_by_percent=65.0)
+    projection = OddsAdjustedGameweekProjection(
+        1, "Test", "MID", "Arsenal", 100, 1, 1, 1, 6.0,
+        effective_ownership_pct=65.0,
+    )
+
+    row = _dashboard_player(player, projection, True, False)
+
+    assert row.ownership_basis == "effective_ownership"
+    assert row.ownership_confidence == 1.0
+
+
 def test_dashboard_moves_compute_horizon_gain_from_pinned_rows() -> None:
     snapshot = HorizonPlanSnapshot(
         projection_catalog="c.json", pre_season=False, solver_status="OPTIMAL", methodology="m",

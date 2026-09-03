@@ -97,8 +97,8 @@ def test_account_import_derives_free_transfers_and_chips_from_history() -> None:
     assert remaining == {
         "wildcard": 1,
         "free_hit": 1,
-        "bench_boost": 2,
-        "triple_captain": 2,
+        "bench_boost": 1,
+        "triple_captain": 1,
     }
 
 
@@ -119,4 +119,71 @@ def test_account_import_uses_derived_account_values_when_not_overridden() -> Non
     assert snapshot.free_transfers == 1
     assert state.free_transfers == 1
     assert snapshot.chips_remaining["wildcard"] == 1
-    assert snapshot.chips_remaining["free_hit"] == 2
+    assert snapshot.chips_remaining["free_hit"] == 1
+
+
+def test_free_transfer_reconstruction_handles_gw1_roll_and_consecutive_rolls() -> None:
+    records = [
+        {"event": 1, "event_transfers": 0},
+        {"event": 2, "event_transfers": 0},
+        {"event": 3, "event_transfers": 0},
+    ]
+
+    assert derive_free_transfers(records, 1) == 1
+    assert derive_free_transfers(records, 2) == 2
+    assert derive_free_transfers(records, 3) == 3
+
+
+def test_free_transfer_reconstruction_handles_paid_transfers_and_hits() -> None:
+    records = [
+        {"event": 1, "event_transfers": 0},
+        {"event": 2, "event_transfers": 3},
+    ]
+
+    assert derive_free_transfers(records, 2) == 1
+
+
+@pytest.mark.parametrize("chip", ["wildcard", "free_hit"])
+def test_free_transfer_reconstruction_preserves_banked_transfer_on_chip(chip: str) -> None:
+    records = [
+        {"event": 1, "event_transfers": 0},
+        {"event": 2, "event_transfers": 12},
+    ]
+
+    assert derive_free_transfers(records, 2, chip_events={2: chip}) == 2
+
+
+def test_free_transfer_reconstruction_caps_at_five() -> None:
+    records = [{"event": event, "event_transfers": 0} for event in range(1, 8)]
+
+    assert derive_free_transfers(records, 7) == 5
+
+
+def test_account_reconciliation_keeps_internal_squad_separate_from_public_state() -> None:
+    public_ids = list(range(1, 16))
+    internal_ids = [*range(1, 15), 16]
+    snapshot, state = build_account_snapshot(
+        history(), picks(), entry_id=123, season_id="2026-27", target_rank=50_000,
+        free_transfers=2, internal_squad_ids=internal_ids, internal_gameweek=3,
+        reconciliation_source="execution_confirmation:test.json",
+    )
+
+    assert snapshot.squad_ids == public_ids
+    assert snapshot.internal_squad_ids == internal_ids
+    assert snapshot.reconciliation_status == "not_comparable"
+    assert state.internal_squad_ids == internal_ids
+    assert state.internal_squad_gameweek == 3
+
+
+def test_account_reconciliation_flags_same_gameweek_mismatch() -> None:
+    internal_ids = [*range(1, 15), 16]
+    snapshot, state = build_account_snapshot(
+        history(), picks(), entry_id=123, season_id="2026-27", target_rank=50_000,
+        free_transfers=2, internal_squad_ids=internal_ids, internal_gameweek=2,
+        reconciliation_source="execution_confirmation:test.json",
+    )
+
+    assert snapshot.reconciliation_status == "mismatch"
+    assert snapshot.reconciliation_missing_player_ids == [16]
+    assert snapshot.reconciliation_unexpected_player_ids == [15]
+    assert state.account_reconciliation_status == "mismatch"

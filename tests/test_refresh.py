@@ -5,7 +5,8 @@ from fcntl import LOCK_EX, LOCK_UN, flock
 import pytest
 
 from aifpl.fpl import FplSourceError
-from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError, _current_hermes_state
+from aifpl.game_state import GameState, GameStateStore
+from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError, _current_hermes_state, _rank_inputs
 
 
 class FailingFplClient:
@@ -103,6 +104,28 @@ def test_current_hermes_state_reads_the_nested_squad_player_ids(tmp_path, monkey
     state = _current_hermes_state(tmp_path, fake_players)
     assert state is not None
     assert state.squad.player_ids == list(range(1, 16))
+
+
+def test_refresh_falls_back_to_points_mode_without_usable_rank_state(tmp_path) -> None:
+    objective_mode, state, templates = _rank_inputs(tmp_path, None)
+
+    assert objective_mode == "POINTS_MODE"
+    assert state is None
+    assert templates == {}
+
+
+def test_refresh_uses_saved_rank_state_when_no_hermes_state_exists(tmp_path) -> None:
+    GameStateStore(tmp_path).save(GameState(
+        season_id="2026-27", gameweek=3, rank_as_of_gameweek=3, decision_gameweek=3,
+        overall_rank=100_000, target_rank=50_000, free_transfers=1, bank=80,
+        objective_mode="RANK_MODE",
+    ))
+
+    objective_mode, state, templates = _rank_inputs(tmp_path, None)
+
+    assert objective_mode == "RANK_MODE"
+    assert state is not None and state.rank_data_available
+    assert templates == {}
 
 
 def test_research_owned_players_derives_season_from_bootstrap(tmp_path, monkeypatch) -> None:

@@ -45,9 +45,9 @@ def account_sync_settings() -> AccountSyncSettings:
     raw_target_rank = os.environ.get("AIFPL_ACCOUNT_TARGET_RANK")
     entry_id = _optional_positive_int(raw_entry_id, "AIFPL_ACCOUNT_ENTRY_ID")
     target_rank = _optional_positive_int(raw_target_rank, "AIFPL_ACCOUNT_TARGET_RANK")
-    initial_free_transfers = int(os.environ.get("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS", "1"))
-    if not 1 <= initial_free_transfers <= 5:
-        raise ValueError("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS must be within 1..5")
+    initial_free_transfers = int(os.environ.get("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS", "0"))
+    if not 0 <= initial_free_transfers <= 5:
+        raise ValueError("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS must be within 0..5")
     if enabled and (entry_id is None or target_rank is None):
         raise ValueError(
             "AIFPL_ACCOUNT_ENTRY_ID and AIFPL_ACCOUNT_TARGET_RANK are required when account auto-sync is enabled",

@@ -199,6 +199,30 @@ class ExecutionConfirmationStore:
                 continue
         return None
 
+    def latest_for_season(self, season_id: str) -> ExecutionConfirmation | None:
+        """Return the latest confirmed team, independent of the public FPL state."""
+        directory = self.root / "execution" / "confirmations" / season_id
+        paths = sorted(directory.glob("gw*/*.json")) if directory.exists() else []
+        confirmations: list[ExecutionConfirmation] = []
+        for path in paths:
+            try:
+                gameweek = int(path.parent.name.removeprefix("gw"))
+                confirmation = self._read(path, season_id, gameweek)
+            except (OSError, ValueError):
+                continue
+            if confirmation is not None:
+                confirmations.append(confirmation)
+        if not confirmations:
+            return None
+        return max(
+            confirmations,
+            key=lambda item: (
+                item.gameweek,
+                _aware(item.confirmed_at),
+                item.output_path,
+            ),
+        )
+
     def latest_for_decision(
         self, decision_path: Path | str, season_id: str, gameweek: int,
     ) -> ExecutionConfirmation | None:
@@ -279,6 +303,10 @@ class ExecutionConfirmationStore:
 
 def _unique(values: list[int] | None) -> list[int]:
     return list(dict.fromkeys(int(value) for value in (values or [])))
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def _validate_team(

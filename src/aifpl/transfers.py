@@ -12,7 +12,7 @@ from aifpl.game_state import GameState, ObjectiveMode
 from aifpl.optimizer import SquadOptimizationError
 from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
 from aifpl.rules import SquadPlayer, SquadRequest, club_key, validate_squad
-from aifpl.template import PlayerTemplateState, target_cohort_eo
+from aifpl.template import PlayerTemplateState, ownership_source_confidence, target_cohort_eo
 
 
 class CurrentSquadState(BaseModel):
@@ -39,6 +39,10 @@ class TransferImpact:
     template_exposure_delta: float | None
     strategy_classification: str
     recommendation: str
+    out_ownership_basis: str = "unavailable"
+    in_ownership_basis: str = "unavailable"
+    out_ownership_confidence: float | None = None
+    in_ownership_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -256,8 +260,8 @@ def _transfer_impacts(
             0,
         )
         outgoing_player = remaining_out.pop(match) if remaining_out else None
-        out_eo = _cohort_eo(outgoing_player, templates)
-        in_eo = _cohort_eo(player, templates)
+        out_eo, out_basis, out_confidence = _cohort_info(outgoing_player, templates)
+        in_eo, in_basis, in_confidence = _cohort_info(player, templates)
         impacts.append(TransferImpact(
             out_id=outgoing_player.player_id if outgoing_player is not None else None,
             in_id=player.player_id,
@@ -267,6 +271,10 @@ def _transfer_impacts(
             ),
             out_effective_ownership=out_eo,
             in_effective_ownership=in_eo,
+            out_ownership_basis=out_basis,
+            in_ownership_basis=in_basis,
+            out_ownership_confidence=out_confidence,
+            in_ownership_confidence=in_confidence,
             template_exposure_delta=round(in_eo - out_eo, 4) if in_eo is not None and out_eo is not None else None,
             strategy_classification=classification,
             recommendation=recommendation,
@@ -278,12 +286,23 @@ def _cohort_eo(
     player: CurrentPlayerProjection | None,
     template_states: Mapping[int, PlayerTemplateState],
 ) -> float | None:
+    return _cohort_info(player, template_states)[0]
+
+
+def _cohort_info(
+    player: CurrentPlayerProjection | None,
+    template_states: Mapping[int, PlayerTemplateState],
+) -> tuple[float | None, str, float | None]:
     if player is None:
-        return None
-    value, _ = target_cohort_eo(
+        return None, "unavailable", None
+    if player.effective_ownership_pct is not None:
+        basis = "effective_ownership"
+        return player.effective_ownership_pct, basis, ownership_source_confidence(basis)
+    value, basis = target_cohort_eo(
         player.player_id, template_states.get(player.player_id), player.selected_by_percent,
+        player.expected_captaincy,
     )
-    return value
+    return value, basis, ownership_source_confidence(basis) if value is not None else None
 
 
 def _validate_current_squad(players: list[CurrentPlayerProjection], bank: int) -> None:
