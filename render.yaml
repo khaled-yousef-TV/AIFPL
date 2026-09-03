@@ -42,6 +42,8 @@ services:
         sync: false
       - key: AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS
         value: "0"
+      - key: AIFPL_MAX_STALE_RANK_GAMEWEEKS
+        value: "1"
       - key: AIFPL_SCHEDULER_LEAD_MINUTES
         value: "150"
       - key: AIFPL_SCHEDULER_TIMEZONE

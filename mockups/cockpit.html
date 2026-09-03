@@ -774,8 +774,14 @@
       ? String(dashboard.strategy_status || "unknown").replaceAll("_", " ")
       : "rank unavailable";
     const chipText = dashboard.active_chip ? ` \u00b7 chip ${dashboard.active_chip.replaceAll("_", " ")}` : "";
+    const rankAge = dashboard.rank_data_age_gameweeks != null
+      ? ` \u00b7 rank age ${dashboard.rank_data_age_gameweeks} GW`
+      : "";
+    const rankFreshness = dashboard.rank_mode_degraded
+      ? " \u00b7 rank mode degraded to POINTS_MODE"
+      : dashboard.rank_data_stale ? " \u00b7 stale rank fallback" : "";
     document.getElementById("rank-state-note").textContent = rankAvailable
-      ? `Target #${dashboard.target_rank.toLocaleString()} \u00b7 ${dashboard.gameweeks_remaining ?? "--"} GWs left \u00b7 ${dashboard.objective_mode}${chipText}`
+      ? `Target #${dashboard.target_rank.toLocaleString()} \u00b7 ${dashboard.gameweeks_remaining ?? "--"} GWs left \u00b7 ${dashboard.objective_mode}${chipText}${rankAge}${rankFreshness}`
       : `Objective ${dashboard.objective_mode || "POINTS_MODE"} \u00b7 add rank and target to enable game utility`;
     renderLineup(dashboard, teams);
     renderBench(dashboard, teams);

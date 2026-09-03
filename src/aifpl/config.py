@@ -37,6 +37,14 @@ class AccountSyncSettings:
     entry_id: int | None
     target_rank: int | None
     initial_free_transfers: int
+    max_stale_rank_gameweeks: int = 1
+
+
+def max_stale_rank_gameweeks() -> int:
+    value = int(os.environ.get("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "1"))
+    if value < 0:
+        raise ValueError("AIFPL_MAX_STALE_RANK_GAMEWEEKS must not be negative")
+    return value
 
 
 def account_sync_settings() -> AccountSyncSettings:
@@ -46,6 +54,7 @@ def account_sync_settings() -> AccountSyncSettings:
     entry_id = _optional_positive_int(raw_entry_id, "AIFPL_ACCOUNT_ENTRY_ID")
     target_rank = _optional_positive_int(raw_target_rank, "AIFPL_ACCOUNT_TARGET_RANK")
     initial_free_transfers = int(os.environ.get("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS", "0"))
+    stale_rank_limit = max_stale_rank_gameweeks()
     if not 0 <= initial_free_transfers <= 5:
         raise ValueError("AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS must be within 0..5")
     if enabled and (entry_id is None or target_rank is None):
@@ -57,6 +66,7 @@ def account_sync_settings() -> AccountSyncSettings:
         entry_id=entry_id,
         target_rank=target_rank,
         initial_free_transfers=initial_free_transfers,
+        max_stale_rank_gameweeks=stale_rank_limit,
     )
 
 

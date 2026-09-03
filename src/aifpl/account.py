@@ -386,7 +386,8 @@ def derive_free_transfers(
             available = min(5, available + event - previous_gameweek - 1)
         transfers = _nonnegative_int(record.get("event_transfers"), "event transfers")
         if events.get(event) in {"wildcard", "free_hit"}:
-            available = min(5, available + 1)
+            # Chip-week transfers are unlimited and do not alter the banked FT balance.
+            pass
         else:
             available = min(5, max(0, available - transfers) + 1)
         previous_gameweek = event

@@ -18,7 +18,7 @@ from aifpl.config import minimum_odds_fixture_coverage, partial_odds_fixture_cov
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient
-from aifpl.game_state import GameState, GameStateStore
+from aifpl.game_state import GameState, GameStateStore, rank_data_is_usable
 from aifpl.health import SourceHealthChecker
 from aifpl.live_calibration import current_season_id
 from aifpl.odds import OddsSnapshotStore, TheOddsApiClient
@@ -227,7 +227,9 @@ class CurrentDataRefreshJob:
             if health.overall_status != "healthy":
                 raise ValueError("Refusing recommendation because refreshed source health is degraded")
 
-            objective_mode, rank_state, template_states = _rank_inputs(self.root, hermes_state)
+            objective_mode, rank_state, template_states = _rank_inputs(
+                self.root, hermes_state, decision_gameweek=start_gameweek,
+            )
             recommendation = optimize_squad(
                 load_projection_candidates(
                     self.root, ProjectionSource.ODDS, Path(odds_projection.output_path).name,
@@ -332,7 +334,9 @@ def _research_transfer_candidates(
         max_transfers=2,
     )
     try:
-        objective_mode, rank_state, template_states = _rank_inputs(root, state)
+        objective_mode, rank_state, template_states = _rank_inputs(
+            root, state, decision_gameweek=start_gameweek,
+        )
         transfer_plan = plan_transfers(
             candidates, squad_state, objective_mode=objective_mode,
             game_state=rank_state, template_states=template_states,
@@ -392,6 +396,9 @@ def _build_chip_advice(
             intel = ChipIntel(fetched_at=datetime.now(timezone.utc), stale=True)
     state_store = ChipStateStore(root)
     chip_state = state_store.latest(season_id)
+    _, rank_state, rank_templates = _rank_inputs(
+        root, state, decision_gameweek=start_gameweek,
+    )
     advice = ChipAdvisor(settings).evaluate(
         season_id,
         start_gameweek,
@@ -402,12 +409,8 @@ def _build_chip_advice(
         list(state.starting_xi_ids),
         [player.player_id for player in best_squad.players],
         intel,
-        game_state=getattr(state, "game_state", None),
-        template_states=_latest_template_states(
-            root,
-            getattr(getattr(state, "game_state", None), "season_id", None),
-            getattr(getattr(state, "game_state", None), "gameweek", None),
-        ),
+        game_state=rank_state,
+        template_states=rank_templates,
     )
     saved = ChipAdviceStore(root).save(advice)
     return Path(saved.output_path)
@@ -436,31 +439,26 @@ def _latest_template_states(
 
 
 def _rank_inputs(
-    root: Path, hermes_state: object | None,
+    root: Path, hermes_state: object | None, decision_gameweek: int | None = None,
 ) -> tuple[str, GameState | None, dict[int, PlayerTemplateState]]:
     strategy = getattr(hermes_state, "strategy", None)
-    objective_mode = getattr(strategy, "objective_mode", None)
     season_id = getattr(hermes_state, "season_id", None) or current_season_id(root)
+    try:
+        account_state = GameStateStore(root).latest(season_id=season_id)
+    except FileNotFoundError:
+        account_state = None
+    embedded_state = getattr(hermes_state, "game_state", None)
+    state = account_state or embedded_state
+    objective_mode = getattr(strategy, "objective_mode", None)
+    rank_usable = rank_data_is_usable(state, decision_gameweek=decision_gameweek)
     if objective_mode is None:
-        try:
-            account_state = GameStateStore(root).latest(season_id=season_id)
-        except FileNotFoundError:
-            account_state = None
-        if account_state is not None and account_state.rank_data_available:
-            objective_mode = "RANK_MODE"
-        else:
-            objective_mode = "POINTS_MODE"
+        objective_mode = "RANK_MODE" if rank_usable else "POINTS_MODE"
     if objective_mode == "POINTS_MODE":
         return objective_mode, None, {}
-    game_state = getattr(hermes_state, "game_state", None)
-    if game_state is None:
-        try:
-            game_state = GameStateStore(root).latest(season_id=season_id)
-        except FileNotFoundError:
-            return "POINTS_MODE", None, {}
-    if not game_state.rank_data_available:
+    if not rank_usable:
         return "POINTS_MODE", None, {}
-    game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
-    return objective_mode, game_state, _latest_template_states(
-        root, game_state.season_id, game_state.gameweek,
+    state = state.model_copy(update={"objective_mode": "RANK_MODE"})
+    template_gameweek = decision_gameweek or state.decision_gameweek or state.gameweek
+    return objective_mode, state, _latest_template_states(
+        root, state.season_id, template_gameweek,
     )

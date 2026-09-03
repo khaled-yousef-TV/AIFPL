@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from aifpl.game_state import GameState, ObjectiveMode, StrategyStatus
+from aifpl.game_state import GameState, ObjectiveMode, StrategyStatus, rank_data_is_usable
 
 
 class StrategyPolicy(BaseModel):
@@ -26,6 +26,8 @@ def derive_strategy_policy(
     mode = requested_mode or state.objective_mode
     if mode == "RANK_MODE" and not state.rank_data_available:
         raise ValueError("RANK_MODE requires an overall rank and target rank")
+    if mode == "RANK_MODE" and not rank_data_is_usable(state):
+        raise ValueError("RANK_MODE requires rank data within the configured age limit")
     status = state.strategy_status
     gap_ratio = state.rank_gap_ratio
     urgency = _urgency(state.gameweeks_remaining)

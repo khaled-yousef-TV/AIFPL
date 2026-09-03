@@ -4,7 +4,7 @@ import pytest
 
 from aifpl.captaincy_strategy import choose_captain
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.game_state import GameState, GameStateStore
+from aifpl.game_state import GameState, GameStateStore, rank_data_is_usable
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
 from aifpl.optimizer import optimize_squad
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
@@ -86,6 +86,26 @@ def test_game_state_separates_completed_rank_gameweek_from_decision_gameweek() -
     assert state.rank_as_of_gameweek == 3
     assert state.decision_gameweek == 4
     assert state.gameweeks_remaining == 34
+
+
+def test_game_state_calculates_rank_age_from_the_decision_gameweek() -> None:
+    state = GameState(
+        season_id="2026-27",
+        gameweek=3,
+        rank_as_of_gameweek=2,
+        decision_gameweek=3,
+        overall_rank=100_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+
+    assert state.rank_data_age_gameweeks == 1
+    assert state.rank_data_stale is False
+    assert state.rank_mode_degraded is False
+    assert rank_data_is_usable(state, max_age_gameweeks=1)
+    assert not rank_data_is_usable(state, max_age_gameweeks=0)
 
 
 def test_rank_mode_requires_rank_and_target() -> None:
@@ -211,6 +231,63 @@ def test_rank_optimizer_returns_rank_mode_and_rank_aware_captain() -> None:
 
     assert result.objective_mode == "RANK_MODE"
     assert result.captain.player_id == 8
+
+
+def test_rank_optimizer_rejects_stale_rank_older_than_the_limit(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "1")
+    stale = GameState(
+        season_id="2026-27",
+        gameweek=27,
+        rank_as_of_gameweek=25,
+        decision_gameweek=27,
+        overall_rank=20_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+    candidates = [projection(player_id, position, 5.0) for player_id, position in
+                  [(1, "GK"), (2, "GK"), (3, "DEF"), (4, "DEF"), (5, "DEF"), (6, "DEF"), (7, "DEF"),
+                   (8, "MID"), (9, "MID"), (10, "MID"), (11, "MID"), (12, "MID"),
+                   (13, "FWD"), (14, "FWD"), (15, "FWD")]]
+
+    with pytest.raises(ValueError, match="configured age limit"):
+        optimize_squad(candidates, budget=1000, objective_mode="RANK_MODE", game_state=stale)
+
+
+def test_rank_horizon_rejects_stale_rank_older_than_the_limit(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "1")
+    stale = GameState(
+        season_id="2026-27",
+        gameweek=27,
+        rank_as_of_gameweek=25,
+        decision_gameweek=27,
+        overall_rank=20_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+    rows = [
+        OddsAdjustedGameweekProjection(
+            player_id, f"Player {player_id}", position, club, 50, gameweek, 1, 1, 5.0,
+        )
+        for gameweek in (27, 28, 29)
+        for player_id, position, club in [
+            (1, "GK", "A"), (2, "GK", "B"),
+            (3, "DEF", "A"), (4, "DEF", "B"), (5, "DEF", "C"), (6, "DEF", "D"), (7, "DEF", "E"),
+            (8, "MID", "A"), (9, "MID", "B"), (10, "MID", "C"), (11, "MID", "D"), (12, "MID", "E"),
+            (13, "FWD", "F"), (14, "FWD", "G"), (15, "FWD", "H"),
+        ]
+    ]
+
+    with pytest.raises(ValueError, match="configured age limit"):
+        plan_horizon_transfers(
+            rows,
+            HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+            objective_mode="RANK_MODE",
+            game_state=stale,
+        )
 
 
 def test_rank_horizon_reports_rank_breakdown_and_rank_aware_vice_captain() -> None:

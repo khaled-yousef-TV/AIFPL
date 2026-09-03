@@ -53,7 +53,7 @@ from aifpl.template import PlayerTemplateState
 # Bump when plan-generation semantics change (accounting, objective, captain
 # selection, robustness, ...). Committed plans record their version so stale
 # opening squads can be regenerated deterministically.
-PLANNER_VERSION = "v8-chip-aware-horizon"
+PLANNER_VERSION = "v9-chip-ft-rank-freshness"
 
 
 class HorizonSquadState(BaseModel):
@@ -353,9 +353,9 @@ def plan_horizon_transfers(
             # Opening-squad transfers expire at the GW1 deadline.
             model.add(free == 1)
         elif active_chip in {"wildcard", "free_hit"} and week_index == 1:
-            # Wildcard and Free Hit preserve the free transfer used to enter
-            # the active gameweek, then add the normal next-week rollover.
-            model.add_min_equality(free, [free_transfers[week_index - 1] + 1, 5])
+            # Wildcard and Free Hit preserve the FT bank used to enter the
+            # active gameweek; unlimited chip-week transfers do not consume it.
+            model.add(free == free_transfers[week_index - 1])
         else:
             remaining = model.new_int_var(0, 15, f"remaining_free_{gameweeks[week_index - 1]}")
             model.add_max_equality(remaining, [free_transfers[week_index - 1] - transfer_counts[week_index - 1], 0])
@@ -435,9 +435,12 @@ def plan_horizon_transfers(
         model.add_hint(free_by_week[week_index], held_free_transfers)
         model.add_hint(excess_transfers[week_index], 0)
         model.add_hint(banks[week_index], state.bank)
-        held_free_transfers = (
-            1 if pre_season and week_index == 0
-            else min(5, max(0, held_free_transfers) + 1)
+        held_free_transfers = horizon_free_transfers_after(
+            held_free_transfers,
+            0,
+            active_chip=active_chip,
+            pre_season=pre_season,
+            week_index=week_index,
         )
 
     objective = []

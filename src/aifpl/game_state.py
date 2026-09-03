@@ -48,6 +48,9 @@ class GameState(BaseModel):
     decision_gameweek: int | None = Field(default=None, ge=1, le=38)
     overall_rank: int | None = Field(default=None, gt=0)
     target_rank: int | None = Field(default=None, gt=0)
+    rank_data_age_gameweeks: int | None = Field(default=None, ge=0)
+    rank_data_stale: bool = False
+    rank_mode_degraded: bool = False
     rank_history: list[RankSnapshot] = Field(default_factory=list)
     gameweeks_remaining: int | None = Field(default=None, ge=0, le=38)
     free_transfers: int = Field(ge=0, le=5)
@@ -79,6 +82,10 @@ class GameState(BaseModel):
             self.decision_gameweek = self.gameweek
         if self.rank_as_of_gameweek > self.decision_gameweek:
             raise ValueError("rank_as_of_gameweek cannot be after decision_gameweek")
+        self.rank_data_age_gameweeks = calculate_rank_data_age(
+            self.rank_as_of_gameweek if self.rank_data_available else None,
+            self.decision_gameweek,
+        )
         if self.internal_squad_ids is not None:
             if len(self.internal_squad_ids) != 15 or len(set(self.internal_squad_ids)) != 15:
                 raise ValueError("internal_squad_ids must contain 15 unique players")
@@ -111,6 +118,36 @@ class GameState(BaseModel):
         return round(self.overall_rank / self.target_rank, 6)
 
 
+def calculate_rank_data_age(
+    rank_as_of_gameweek: int | None,
+    decision_gameweek: int | None,
+) -> int | None:
+    if rank_as_of_gameweek is None or decision_gameweek is None:
+        return None
+    return max(0, decision_gameweek - rank_as_of_gameweek)
+
+
+def rank_data_is_usable(
+    state: GameState | None,
+    *,
+    decision_gameweek: int | None = None,
+    max_age_gameweeks: int | None = None,
+) -> bool:
+    if state is None or not state.rank_data_available:
+        return False
+    if max_age_gameweeks is None:
+        from aifpl.config import max_stale_rank_gameweeks
+
+        max_age_gameweeks = max_stale_rank_gameweeks()
+    if max_age_gameweeks < 0:
+        raise ValueError("max_age_gameweeks must not be negative")
+    age = calculate_rank_data_age(
+        state.rank_as_of_gameweek,
+        decision_gameweek or state.decision_gameweek or state.gameweek,
+    )
+    return age is not None and age <= max_age_gameweeks
+
+
 def derive_strategy_status(overall_rank: int, target_rank: int) -> StrategyStatus:
     if overall_rank <= target_rank * 0.75:
         return "PROTECT_POSITION"
@@ -139,6 +176,9 @@ class GameStateStore:
                 "gameweek": state.gameweek,
                 "rank_as_of_gameweek": state.rank_as_of_gameweek,
                 "decision_gameweek": state.decision_gameweek,
+                "rank_data_age_gameweeks": state.rank_data_age_gameweeks,
+                "rank_data_stale": state.rank_data_stale,
+                "rank_mode_degraded": state.rank_mode_degraded,
                 "objective_mode": state.objective_mode,
                 "rank_data_available": state.rank_data_available,
                 "account_sync_status": state.account_sync_status,

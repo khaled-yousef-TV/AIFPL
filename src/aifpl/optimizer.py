@@ -7,7 +7,7 @@ from ortools.sat.python import cp_model
 
 from aifpl.config import bench_min_projection, bench_weight, minimum_bank_tenths
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.game_state import GameState, ObjectiveMode
+from aifpl.game_state import GameState, ObjectiveMode, rank_data_is_usable
 from aifpl.objective_accounting import (
     DEAD_BENCH_ALLOWANCE,
     bench_coefficient,
@@ -63,6 +63,8 @@ def optimize_squad(
         raise ValueError("differential_appetite must be within 0..1")
     if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
         raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and not rank_data_is_usable(game_state):
+        raise ValueError("RANK_MODE requires rank data within the configured age limit")
     if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
         game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     if len({candidate.player_id for candidate in candidates}) != len(candidates):

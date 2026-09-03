@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from aifpl.game_state import GameState
+from aifpl.game_state import GameState, rank_data_is_usable
 from aifpl.strategy_policy import StrategyPolicy, derive_strategy_policy
 from aifpl.template import PlayerTemplateState, ownership_source_confidence, target_cohort_eo
 
@@ -50,7 +50,11 @@ def player_rank_adjustment(
     triple_captain: bool = False,
     policy: StrategyPolicy | None = None,
 ) -> float:
-    if state is None or state.objective_mode != "RANK_MODE" or not state.rank_data_available:
+    if (
+        state is None
+        or state.objective_mode != "RANK_MODE"
+        or not rank_data_is_usable(state)
+    ):
         return 0.0
     policy = policy or derive_strategy_policy(state, "RANK_MODE")
     projected = max(0.0, _number(player, "projected_points", 0.0))

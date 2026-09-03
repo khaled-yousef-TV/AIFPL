@@ -22,7 +22,7 @@ from aifpl.current_projections import CurrentPlayerProjection, CurrentProjection
 from aifpl.fixture_projections import FixtureProjectionStore
 from aifpl.fixtures import CurrentFixtureCatalogStore
 from aifpl.fpl import FplClient, FplSourceError
-from aifpl.game_state import GameState, GameStateStore, ObjectiveMode
+from aifpl.game_state import GameState, GameStateStore, ObjectiveMode, rank_data_is_usable
 from aifpl.historical import HistoricalSeasonImporter, HistoricalSourceError
 from aifpl.health import SourceHealthChecker
 from aifpl.hermes import HermesManager
@@ -59,6 +59,13 @@ def _rank_context(objective_mode: ObjectiveMode) -> tuple[GameState | None, dict
         raise ValueError("RANK_MODE requires a saved GameState") from exc
     if not state.rank_data_available:
         raise ValueError("RANK_MODE requires a GameState with rank and target rank")
+    if not rank_data_is_usable(state):
+        from aifpl.config import max_stale_rank_gameweeks
+
+        raise ValueError(
+            "RANK_MODE requires rank data within the configured age limit; "
+            f"age={state.rank_data_age_gameweeks}, limit={max_stale_rank_gameweeks()}"
+        )
     try:
         templates = {
             row.player_id: row

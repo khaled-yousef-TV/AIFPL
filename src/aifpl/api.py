@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from aifpl.config import cors_origins, data_dir
+from aifpl.config import cors_origins, data_dir, max_stale_rank_gameweeks
 from aifpl.calibration import CalibrationReport, ErrorMetrics, compare_prediction_runs, fit_walk_forward_calibration
 from aifpl.account import (
     AccountSnapshot,
@@ -28,7 +28,13 @@ from aifpl.current import CurrentPlayer, CurrentPlayerCatalog, CurrentPlayerCata
 from aifpl.current_projections import CurrentPlayerProjection, CurrentProjectionStore, ProjectionCatalog
 from aifpl.dashboard import CurrentDashboard, build_current_dashboard
 from aifpl.execution import ExecutionConfirmation, ExecutionConfirmationError, ExecutionConfirmationStore
-from aifpl.game_state import ExposureState, GameState, GameStateStore, ObjectiveMode
+from aifpl.game_state import (
+    ExposureState,
+    GameState,
+    GameStateStore,
+    ObjectiveMode,
+    rank_data_is_usable,
+)
 from aifpl.fixture_projections import FixtureGameweekProjection, FixtureProjectionCatalog, FixtureProjectionStore, build_fixture_gameweek_projections
 from aifpl.fixtures import CurrentFixture, CurrentFixtureCatalogStore, FixtureCatalog
 from aifpl.fpl import FplClient, FplSourceError
@@ -242,6 +248,14 @@ def _rank_context(
         raise HTTPException(status_code=422, detail="RANK_MODE requires a saved GameState") from exc
     if not state.rank_data_available:
         raise HTTPException(status_code=422, detail="RANK_MODE requires a GameState with rank and target rank")
+    if not rank_data_is_usable(state):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "RANK_MODE requires rank data within the configured age limit; "
+                f"age={state.rank_data_age_gameweeks}, limit={max_stale_rank_gameweeks()}"
+            ),
+        )
     try:
         templates = {
             row.player_id: row
@@ -980,7 +994,8 @@ def debug_env(request: Request) -> dict[str, object]:
     keys = (
         "AIFPL_DATA_DIR", "AIFPL_CORS_ORIGINS", "AIFPL_RENDER_BOOTSTRAP",
         "AIFPL_HERMES_AUTO_RUN", "AIFPL_ACCOUNT_AUTO_SYNC", "AIFPL_ACCOUNT_ENTRY_ID",
-        "AIFPL_ACCOUNT_TARGET_RANK", "ODDS_API_KEY", "HERMES_API_KEY", "HERMES_MODEL",
+        "AIFPL_ACCOUNT_TARGET_RANK", "AIFPL_MAX_STALE_RANK_GAMEWEEKS", "ODDS_API_KEY",
+        "HERMES_API_KEY", "HERMES_MODEL",
     )
     return {
         "present": {key: bool(os.environ.get(key)) for key in keys},

@@ -18,9 +18,21 @@ from pydantic import BaseModel, Field
 
 from aifpl.artifacts import json_bytes, write_immutable
 from aifpl.account import AccountSnapshotStore, fetch_and_build_account_state, latest_internal_squad_context
-from aifpl.config import SchedulerSettings, account_sync_settings, scheduler_settings
+from aifpl.config import (
+    SchedulerSettings,
+    account_sync_settings,
+    max_stale_rank_gameweeks,
+    scheduler_settings,
+)
 from aifpl.fpl import FplClient
-from aifpl.game_state import AccountSyncStatus, GameState, GameStateStore
+from aifpl.game_state import (
+    AccountSyncStatus,
+    GameState,
+    GameStateStore,
+    ObjectiveMode,
+    calculate_rank_data_age,
+    rank_data_is_usable,
+)
 from aifpl.refresh import CurrentDataRefreshJob, RefreshJobError
 from aifpl.scoring import CompletedDecisionScorer
 from aifpl.security import redact_secrets
@@ -66,6 +78,12 @@ class SchedulerTickResult(BaseModel):
     account_sync_warning: str | None = None
     error: str | None = None
     output_path: str
+    objective_mode: ObjectiveMode = "POINTS_MODE"
+    rank_as_of_gameweek: int | None = None
+    decision_gameweek: int | None = None
+    rank_data_age_gameweeks: int | None = None
+    rank_data_stale: bool = False
+    rank_mode_degraded: bool = False
 
 
 class SchedulerTickError(RuntimeError):
@@ -160,9 +178,16 @@ class DeadlineScheduler:
             account_sync = self._sync_account_state_if_enabled(
                 schedule.season_id, decision_gameweek=schedule.event,
             )
+        account_state = account_sync.state
         account_sync_kwargs = {
             "account_sync_status": account_sync.status,
             "account_sync_warning": account_sync.warning,
+            "objective_mode": account_state.objective_mode if account_state is not None else "POINTS_MODE",
+            "rank_as_of_gameweek": account_state.rank_as_of_gameweek if account_state is not None else None,
+            "decision_gameweek": account_state.decision_gameweek if account_state is not None else None,
+            "rank_data_age_gameweeks": account_state.rank_data_age_gameweeks if account_state is not None else None,
+            "rank_data_stale": account_state.rank_data_stale if account_state is not None else False,
+            "rank_mode_degraded": account_state.rank_mode_degraded if account_state is not None else False,
         }
         if not schedule.completed and not schedule.missed and not self._before_deadline(schedule.deadline, checked_at):
             return self._persist_tick(
@@ -271,8 +296,10 @@ class DeadlineScheduler:
         self, season_id: str, decision_gameweek: int | None = None,
     ) -> AccountSyncReport:
         configured_entry_id: int | None = None
+        stale_rank_limit = 1
         try:
             settings = account_sync_settings()
+            stale_rank_limit = settings.max_stale_rank_gameweeks
             if not settings.enabled:
                 return AccountSyncReport("not_configured")
             assert settings.entry_id is not None and settings.target_rank is not None
@@ -301,7 +328,11 @@ class DeadlineScheduler:
             GameStateStore(self.root).save(state)
             return AccountSyncReport("ready", state=state)
         except Exception as exc:
-            warning = redact_secrets(f"Account sync degraded: {type(exc).__name__}: {exc}")
+            base_warning = redact_secrets(f"Account sync degraded: {type(exc).__name__}: {exc}")
+            try:
+                stale_rank_limit = max_stale_rank_gameweeks()
+            except ValueError:
+                pass
             try:
                 state = GameStateStore(self.root).latest(season_id=season_id)
             except (FileNotFoundError, ValueError):
@@ -309,21 +340,48 @@ class DeadlineScheduler:
             if state is not None and configured_entry_id is not None and state.account_id not in (None, configured_entry_id):
                 state = None
             if state is None:
-                return AccountSyncReport("unavailable", warning=warning)
-            status: AccountSyncStatus = "stale" if state.rank_data_available else "unavailable"
+                return AccountSyncReport("unavailable", warning=base_warning)
             fallback_gameweek = decision_gameweek or state.decision_gameweek or state.gameweek
+            rank_age = calculate_rank_data_age(
+                state.rank_as_of_gameweek if state.rank_data_available else None,
+                fallback_gameweek,
+            )
+            rank_usable = rank_data_is_usable(
+                state,
+                decision_gameweek=fallback_gameweek,
+                max_age_gameweeks=stale_rank_limit,
+            )
+            if rank_usable:
+                status: AccountSyncStatus = "stale"
+                objective_mode: ObjectiveMode = "RANK_MODE"
+                warning = (
+                    f"{base_warning} Using rank from GW{state.rank_as_of_gameweek} for "
+                    f"GW{fallback_gameweek} planning; rank age is {rank_age} gameweek(s), "
+                    f"within the configured limit of {stale_rank_limit}."
+                )
+            elif state.rank_data_available:
+                status = "unavailable"
+                objective_mode = "POINTS_MODE"
+                warning = (
+                    f"{base_warning} Latest rank is {rank_age} Gameweeks old, exceeding the "
+                    f"configured limit of {stale_rank_limit}. Falling back to POINTS_MODE."
+                )
+            else:
+                status = "unavailable"
+                objective_mode = "POINTS_MODE"
+                warning = f"{base_warning} No usable rank state is available; falling back to POINTS_MODE."
             updates = {
                 "gameweek": fallback_gameweek,
                 "decision_gameweek": fallback_gameweek,
+                "rank_data_age_gameweeks": rank_age,
+                "rank_data_stale": state.rank_data_available,
+                "rank_mode_degraded": not rank_usable,
                 "gameweeks_remaining": max(0, 38 - fallback_gameweek),
                 "account_sync_status": status,
                 "account_sync_warning": warning,
+                "objective_mode": objective_mode,
                 "updated_at": datetime.now(timezone.utc),
             }
-            if status == "stale":
-                updates["objective_mode"] = "RANK_MODE"
-            else:
-                updates["objective_mode"] = "POINTS_MODE"
             degraded = state.model_copy(update=updates)
             try:
                 GameStateStore(self.root).save(degraded)
@@ -530,6 +588,12 @@ class DeadlineScheduler:
         scoring_error: str | None = None,
         account_sync_status: AccountSyncStatus = "not_configured",
         account_sync_warning: str | None = None,
+        objective_mode: ObjectiveMode = "POINTS_MODE",
+        rank_as_of_gameweek: int | None = None,
+        decision_gameweek: int | None = None,
+        rank_data_age_gameweeks: int | None = None,
+        rank_data_stale: bool = False,
+        rank_mode_degraded: bool = False,
     ) -> SchedulerTickResult:
         result = SchedulerTickResult(
             status=status, checked_at=schedule.checked_at, event=schedule.event,
@@ -542,6 +606,12 @@ class DeadlineScheduler:
             scoring_error=scoring_error,
             account_sync_status=account_sync_status,
             account_sync_warning=account_sync_warning,
+            objective_mode=objective_mode,
+            rank_as_of_gameweek=rank_as_of_gameweek,
+            decision_gameweek=decision_gameweek,
+            rank_data_age_gameweeks=rank_data_age_gameweeks,
+            rank_data_stale=rank_data_stale,
+            rank_mode_degraded=rank_mode_degraded,
         )
         write_immutable(path, json_bytes(result.model_dump(mode="json"), pretty=True))
         return result

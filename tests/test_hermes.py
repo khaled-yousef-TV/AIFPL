@@ -188,6 +188,53 @@ def test_hermes_automatically_uses_rank_mode_from_account_state(tmp_path) -> Non
     assert result.decision.strategy.objective_mode == "RANK_MODE"
 
 
+def test_account_objective_mode_respects_saved_points_mode(tmp_path) -> None:
+    state = GameState(
+        season_id="2026-27",
+        gameweek=2,
+        rank_as_of_gameweek=2,
+        decision_gameweek=2,
+        overall_rank=100_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="POINTS_MODE",
+    )
+    manager = HermesManager(
+        tmp_path,
+        model=FakeModel(),
+        backend=RankAwareFakeBackend(state),
+    )
+    manager._expected_gameweek = 3
+    manager._expected_season_id = "2026-27"
+
+    assert manager._account_objective_mode() == "POINTS_MODE"
+
+
+def test_account_objective_mode_rejects_rank_older_than_the_limit(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "1")
+    state = GameState(
+        season_id="2026-27",
+        gameweek=1,
+        rank_as_of_gameweek=1,
+        decision_gameweek=1,
+        overall_rank=100_000,
+        target_rank=50_000,
+        free_transfers=1,
+        bank=0,
+        objective_mode="RANK_MODE",
+    )
+    manager = HermesManager(
+        tmp_path,
+        model=FakeModel(),
+        backend=RankAwareFakeBackend(state),
+    )
+    manager._expected_gameweek = 3
+    manager._expected_season_id = "2026-27"
+
+    assert manager._account_objective_mode() == "POINTS_MODE"
+
+
 def test_latest_decision_found_when_working_directory_differs(tmp_path, monkeypatch) -> None:
     manager = HermesManager(tmp_path, model=FakeModel(), backend=FakeBackend())
     result = manager.run()
@@ -298,6 +345,7 @@ def test_hermes_commit_replans_a_free_hit_and_persists_the_restored_state(tmp_pa
     assert state.squad.player_ids == previous.squad.player_ids
     assert state.squad.bank == previous.squad.bank
     assert state.squad.free_transfers == decision.horizon_plan.weeks[0].free_transfers_after
+    assert state.squad.free_transfers == previous.squad.free_transfers
     from aifpl.chips import ChipStateStore
 
     slot = next(

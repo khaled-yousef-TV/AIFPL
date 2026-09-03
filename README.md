@@ -54,7 +54,7 @@ Backend optional:
 - `HERMES_BASE_URL` and `HERMES_MODEL`: defaults are `https://api.deepseek.com` and `deepseek-v4-flash`.
 - `AIFPL_HERMES_AUTO_RUN`: keep `false` until the scheduler workflow is configured.
 - `AIFPL_SCHEDULER_ENABLED`: defaults to `true`; set it to `false` to disable automatic deadline refreshes.
-- `AIFPL_ACCOUNT_AUTO_SYNC=true`, `AIFPL_ACCOUNT_ENTRY_ID`, and `AIFPL_ACCOUNT_TARGET_RANK`: enable hands-off public account/rank refreshes before each deadline plan. `AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS` seeds the first gameweek's transfer count (default `0`); later free transfers and gameweek-aware two-set chip counts are derived from public history. Account-sync failures degrade to a stale rank state or `POINTS_MODE` rather than blocking the core planner.
+- `AIFPL_ACCOUNT_AUTO_SYNC=true`, `AIFPL_ACCOUNT_ENTRY_ID`, and `AIFPL_ACCOUNT_TARGET_RANK`: enable hands-off public account/rank refreshes before each deadline plan. `AIFPL_ACCOUNT_INITIAL_FREE_TRANSFERS` seeds the first gameweek's transfer count (default `0`); later free transfers and gameweek-aware two-set chip counts are derived from public history. `AIFPL_MAX_STALE_RANK_GAMEWEEKS` (default `1`) limits how far a failed account sync may reuse a historical rank. Account-sync failures degrade to a stale rank state within that limit or `POINTS_MODE` when it is exceeded, rather than blocking the core planner.
 - `AIFPL_DEPLOYED_COMMIT`: optional deployment SHA included in calibration model identity.
 - `AIFPL_ALLOW_ANONYMOUS_SENSITIVE_READS`: keep `false` unless transcript and debug reads are intentionally public.
 - `AIFPL_EFFECTIVE_OWNERSHIP_FILE`: optional JSON mapping of player IDs to externally-derived effective ownership percentages; raw `selected_by_percent` is never silently treated as EO when this is configured.
@@ -66,7 +66,7 @@ Frontend required:
 
 `AIFPL_DATA_DIR=/var/data` is already configured in the Blueprint. The persistent disk matters because snapshots, projections, Hermes state, and scorecards are not disposable deployment files.
 
-The Blueprint runs `scripts/render-bootstrap.sh` during pre-deploy, before the API starts. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. When account auto-sync is enabled, bootstrap and each deadline cycle refresh the configured public account before Hermes plans, and a rank state automatically selects `RANK_MODE`. During pre-season, the opening squad is regenerated automatically whenever the committed plan's `planner_version` is stale relative to the deployed code (each plan-generating change bumps the version), so optimizer fixes reach the live squad on every redeployment without manual commands; regeneration is a no-op after the GW1 deadline. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The deadline scheduler runs as a managed API thread rather than a second Python process, keeping refresh memory lower on the Starter plan.
+The Blueprint runs `scripts/render-bootstrap.sh` during pre-deploy, before the API starts. On a new persistent disk the bootstrap imports the previous season's results (for transfer awareness), downloads current data, builds projections, and creates the first Hermes decision automatically; it skips the work on later deploys once a decision exists for the deployed commit. When account auto-sync is enabled, bootstrap and each deadline cycle refresh the configured public account before Hermes plans, and a fresh or acceptably stale rank state automatically selects `RANK_MODE`; older rank data falls back to `POINTS_MODE` with an audit warning. During pre-season, the opening squad is regenerated automatically whenever the committed plan's `planner_version` is stale relative to the deployed code (each plan-generating change bumps the version), so optimizer fixes reach the live squad on every redeployment without manual commands; regeneration is a no-op after the GW1 deadline. Set `AIFPL_RENDER_BOOTSTRAP=false` if you prefer to initialize manually. The deadline scheduler runs as a managed API thread rather than a second Python process, keeping refresh memory lower on the Starter plan.
 
 If your existing Render service still uses a custom start command, set **Start Command** to `sh scripts/render-start.sh` or use its Render Shell once:
 
@@ -95,7 +95,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **345 passing tests**. Commands below assume the
+The current suite contains **370 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests
@@ -445,7 +445,9 @@ Those settings alter backend objective penalties and tie-breakers, but cannot
 bypass FPL constraints or invent projections.
 
 Hermes can operate in `POINTS_MODE` or `RANK_MODE`. Rank mode requires a saved
-`GameState` containing current and target rank; template/EO data is treated as an
+`GameState` containing current and target rank whose age is within
+`AIFPL_MAX_STALE_RANK_GAMEWEEKS`; stale fallback preserves `rank_as_of_gameweek`
+and records the decision-gameweek age. Template/EO data is treated as an
 explicit external input and is never fabricated from public ownership. The
 rank-aware backend returns signed exposure, strategy classification, and an
 objective decomposition for Hermes to explain.

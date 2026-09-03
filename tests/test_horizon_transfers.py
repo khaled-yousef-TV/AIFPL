@@ -176,8 +176,8 @@ def test_wildcard_makes_transfers_unlimited_and_preserves_free_transfer() -> Non
     assert first.unlimited_transfers is True
     assert first.hit_cost == 0
     assert first.objective_components["churn_penalty"] == 0.0
-    assert first.free_transfers_after == 2
-    assert plan.gameweeks[1].free_transfers_before == 2
+    assert first.free_transfers_after == 1
+    assert plan.gameweeks[1].free_transfers_before == 1
     assert plan.total_hit_cost == 0
 
 
@@ -197,13 +197,36 @@ def test_free_hit_restores_squad_bank_and_transfer_balance_for_next_week() -> No
     assert first.transfers_made > state.free_transfers
     assert first.unlimited_transfers is True
     assert first.hit_cost == 0
-    assert first.free_transfers_after == 2
-    assert second.free_transfers_before == 2
+    assert first.free_transfers_after == 1
+    assert second.free_transfers_before == 1
     assert second.incoming == []
     assert second.outgoing == []
     assert {player.player_id for player in second.resulting_squad} == set(state.player_ids)
     assert second.bank_before == state.bank
     assert second.bank_after == state.bank
+
+
+@pytest.mark.parametrize("chip", ["wildcard", "free_hit"])
+@pytest.mark.parametrize("entering_free_transfers", [1, 2, 3, 5])
+def test_horizon_chip_preserves_each_entry_free_transfer_balance(
+    chip: str, entering_free_transfers: int,
+) -> None:
+    rows = pool() + [
+        row(16, "MID", "F", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ] + [
+        row(17, "DEF", "I", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ] + [
+        row(18, "FWD", "J", gameweek, 40.0) for gameweek in (1, 2, 3)
+    ]
+    state = HorizonSquadState(
+        player_ids=list(range(1, 16)), bank=250, free_transfers=entering_free_transfers,
+    )
+
+    plan = plan_horizon_transfers(rows, state, churn_penalty=10.0, active_chip=chip)
+
+    assert plan.gameweeks[0].hit_cost == 0
+    assert plan.gameweeks[0].free_transfers_after == entering_free_transfers
+    assert plan.gameweeks[1].free_transfers_before == entering_free_transfers
 
 
 def test_horizon_planner_builds_an_initial_squad_from_scratch() -> None:

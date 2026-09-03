@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 from aifpl.account import AccountSnapshot, AccountSnapshotStore
 from aifpl.artifacts import json_bytes, sha256_path, write_immutable
 from aifpl.config import HermesSettings, hermes_settings
-from aifpl.game_state import GameState, GameStateStore, ObjectiveMode
+from aifpl.game_state import (
+    GameState,
+    GameStateStore,
+    ObjectiveMode,
+    rank_data_is_usable,
+)
 from aifpl.health import SourceHealthChecker
 from aifpl.horizon_transfers import (
     HorizonGameweekPlan,
@@ -291,6 +296,12 @@ class HermesDecisionBackend:
     def _account_sync_context(self, state: GameState | None) -> dict[str, object]:
         if state is not None:
             return {
+                "objective_mode": state.objective_mode,
+                "rank_as_of_gameweek": state.rank_as_of_gameweek,
+                "decision_gameweek": state.decision_gameweek,
+                "rank_data_age_gameweeks": state.rank_data_age_gameweeks,
+                "rank_data_stale": state.rank_data_stale,
+                "rank_mode_degraded": state.rank_mode_degraded,
                 "status": state.account_sync_status,
                 "warning": state.account_sync_warning,
                 "reconciliation_status": state.account_reconciliation_status,
@@ -307,16 +318,19 @@ class HermesDecisionBackend:
         return {"status": tick.account_sync_status, "warning": tick.account_sync_warning}
 
     def _rank_inputs(
-        self, strategy: HermesStrategy,
+        self, strategy: HermesStrategy, decision_gameweek: int | None = None,
     ) -> tuple[GameState | None, dict[int, PlayerTemplateState]]:
         state = self.latest_game_state()
         if strategy.objective_mode == "RANK_MODE":
-            if state is None or not state.rank_data_available:
-                raise ValueError("RANK_MODE requires a saved GameState with rank and target rank")
+            target_gameweek = decision_gameweek or self._expected_gameweek
+            if not rank_data_is_usable(state, decision_gameweek=target_gameweek):
+                raise ValueError(
+                    "RANK_MODE requires a saved GameState with usable rank data within the configured age limit"
+                )
             state = state.model_copy(update={"objective_mode": "RANK_MODE"})
         return state, self.template_states(
             season_id=state.season_id if state is not None else None,
-            gameweek=state.gameweek if state is not None else None,
+            gameweek=(decision_gameweek or state.decision_gameweek) if state is not None else decision_gameweek,
         )
 
     def _chip_advice(self) -> dict[str, object] | None:
@@ -396,7 +410,7 @@ class HermesDecisionBackend:
 
     def initial_squad(self, strategy: HermesStrategy) -> tuple[OptimizedSquad, int, HorizonPlanSnapshot]:
         rows, catalog_id = self._horizon_rows(1, strategy.planning_horizon)
-        game_state, templates = self._rank_inputs(strategy)
+        game_state, templates = self._rank_inputs(strategy, decision_gameweek=1)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         plan = plan_horizon_transfers(
             rows, HorizonSquadState(player_ids=[], bank=0, free_transfers=0),
@@ -424,7 +438,7 @@ class HermesDecisionBackend:
         active_chip: str | None = None,
     ) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
-        game_state, templates = self._rank_inputs(strategy)
+        game_state, templates = self._rank_inputs(strategy, decision_gameweek=target_gameweek)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_horizon_transfers(rows, HorizonSquadState(
@@ -444,7 +458,7 @@ class HermesDecisionBackend:
         active_chip: str | None = None,
     ) -> tuple[HorizonTransferPlan, str]:
         rows, catalog_id = self._horizon_rows(target_gameweek, strategy.planning_horizon)
-        game_state, templates = self._rank_inputs(strategy)
+        game_state, templates = self._rank_inputs(strategy, decision_gameweek=target_gameweek)
         preferred = {row.player_id for row in rows if row.player_name.casefold() in {name.casefold() for name in strategy.preferred_players}}
         pre_season = target_gameweek == 1
         return plan_hold_horizon_transfers(
@@ -628,7 +642,11 @@ class HermesManager:
             and state.season_id != self._expected_season_id
         ):
             return "POINTS_MODE"
-        if state is not None and state.objective_mode == "RANK_MODE" and state.rank_data_available:
+        if (
+            state is not None
+            and state.objective_mode == "RANK_MODE"
+            and rank_data_is_usable(state, decision_gameweek=self._expected_gameweek)
+        ):
             return "RANK_MODE"
         return "POINTS_MODE"
 
@@ -817,7 +835,7 @@ class HermesManager:
             ):
                 self._strategy = previous.strategy.model_copy(update={
                     "objective_mode": "POINTS_MODE",
-                    "rationale": "Rank data is unavailable; fall back to expected points for this planning cycle.",
+                    "rationale": "Rank data is unavailable or too old; fall back to expected points for this planning cycle.",
                 })
             self._initial, self._initial_gameweek, self._initial_snapshot = self.backend.initial_squad(self._strategy)
             return self._commit(
@@ -883,12 +901,12 @@ class HermesManager:
         self._strategy = previous.strategy if previous else None
         if (
             previous is not None
-            and self._requested_objective_mode == "POINTS_MODE"
+            and self._account_objective_mode() == "POINTS_MODE"
             and previous.strategy.objective_mode == "RANK_MODE"
         ):
             self._strategy = previous.strategy.model_copy(update={
                 "objective_mode": "POINTS_MODE",
-                "rationale": "Rank data is unavailable; fall back to expected points for this planning cycle.",
+                "rationale": "Rank data is unavailable or too old; fall back to expected points for this planning cycle.",
             })
         objective_instruction = ""
         if self._requested_objective_mode is not None:
@@ -911,8 +929,10 @@ class HermesManager:
             "Any outcome-driven strategy change is recommendation-only for a new planning cycle, never an automatic mutation "
             "of an already computed plan; set and finalize strategy before requesting a plan. "
             "POINTS_MODE optimizes expected points. RANK_MODE is only valid when the context contains a current rank, "
-             "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
-             " If account sync is stale or unavailable, use POINTS_MODE when no usable rank state exists and still commit a recommendation; "
+              "target rank, and ownership/template inputs; in RANK_MODE use the backend's rank-aware captain and transfer policy."
+              " Rank age, stale, and degraded fields are authoritative; if rank data exceeds the configured age limit, use POINTS_MODE "
+              "and explain that rank-aware optimization was disabled. If account sync is stale but the rank remains within the limit, "
+              "RANK_MODE is still allowed. If account sync is unavailable, use POINTS_MODE when no usable rank state exists and still commit a recommendation; "
              "the account_sync warning is operational context, not a reason to stop planning."
              " A public account snapshot is read-only evidence; never treat it as transfer execution confirmation or invent purchase prices."
             + objective_instruction
@@ -1318,8 +1338,10 @@ class HermesManager:
         decision_model = model_name or (self.model.model_name if self.model is not None else previous.model if previous else "unknown")
         latest_game_state = self.backend.latest_game_state() if hasattr(self.backend, "latest_game_state") else None
         if self._strategy.objective_mode == "RANK_MODE":
-            if latest_game_state is None or not latest_game_state.rank_data_available:
-                raise ValueError("RANK_MODE requires a saved GameState with rank and target rank")
+            if not rank_data_is_usable(latest_game_state, decision_gameweek=gameweek):
+                raise ValueError(
+                    "RANK_MODE requires a saved GameState with usable rank data within the configured age limit"
+                )
             latest_game_state = latest_game_state.model_copy(update={"objective_mode": "RANK_MODE"})
         if active_chip is not None:
             if active_chip_set not in (1, 2):
@@ -1534,7 +1556,9 @@ def _hold_plan_snapshot(
 
     planned = weeks[0]
     gameweek = int(hold["gameweek"])
-    free_after = 1 if gameweek == 1 else min(5, previous.squad.free_transfers + 1)
+    free_after = planned.free_transfers_after
+    if free_after is None:
+        free_after = 1 if gameweek == 1 else min(5, previous.squad.free_transfers + 1)
     held = planned.model_copy(update={
         "gameweek": gameweek,
         "transfers_made": 0,

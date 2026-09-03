@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from aifpl.config import paid_transfer_safety_cap
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.game_state import GameState, ObjectiveMode
+from aifpl.game_state import GameState, ObjectiveMode, rank_data_is_usable
 from aifpl.optimizer import SquadOptimizationError
 from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
 from aifpl.rules import SquadPlayer, SquadRequest, club_key, validate_squad
@@ -78,6 +78,8 @@ def plan_transfers(
     candidate_by_id = {candidate.player_id: candidate for candidate in candidates}
     if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
         raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and not rank_data_is_usable(game_state):
+        raise ValueError("RANK_MODE requires rank data within the configured age limit")
     if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
         game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     if len(candidate_by_id) != len(candidates):

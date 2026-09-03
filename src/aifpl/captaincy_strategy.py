@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from aifpl.current_projections import CurrentPlayerProjection
-from aifpl.game_state import GameState
+from aifpl.game_state import GameState, rank_data_is_usable
 from aifpl.rank_utility import rank_objective_adjustment
 from aifpl.strategy_policy import derive_strategy_policy
 from aifpl.template import (
@@ -44,7 +44,11 @@ def choose_captain(
 ) -> CaptaincyChoice:
     if len(starters) < 2:
         raise ValueError("Captaincy requires at least two starters")
-    if state is None or state.objective_mode != "RANK_MODE" or not state.rank_data_available:
+    if (
+        state is None
+        or state.objective_mode != "RANK_MODE"
+        or not rank_data_is_usable(state)
+    ):
         ordered = sorted(starters, key=lambda player: (-player.projected_points, player.player_id))
         return CaptaincyChoice(ordered[0], ordered[1], [
             CaptaincyOption(player.player_id, player.projected_points, None, 300.0 if triple_captain else 200.0, None, player.projected_points, "points")

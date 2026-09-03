@@ -17,7 +17,7 @@ from aifpl.config import (
     transfer_penalty,
 )
 from aifpl.rules import DEFAULT_BUDGET_TENTHS, SquadPlayer, SquadRequest, legal_formations, validate_squad
-from aifpl.game_state import GameState, ObjectiveMode
+from aifpl.game_state import GameState, ObjectiveMode, rank_data_is_usable
 from aifpl.rank_utility import rank_adjustment_coefficient, rank_objective_adjustment
 from aifpl.template import PlayerTemplateState
 
@@ -137,7 +137,7 @@ def horizon_free_transfers_after(
     if pre_season and week_index == 0:
         return 1
     if horizon_week_chip(active_chip, week_index) in {"wildcard", "free_hit"}:
-        return min(5, free_before + 1)
+        return free_before
     return min(5, max(0, free_before - transfers_made) + 1)
 
 
@@ -158,6 +158,8 @@ def horizon_objective_settings(
 ) -> HorizonObjectiveSettings:
     if objective_mode == "RANK_MODE" and (game_state is None or not game_state.rank_data_available):
         raise ValueError("RANK_MODE requires a GameState with an overall rank and target rank")
+    if objective_mode == "RANK_MODE" and not rank_data_is_usable(game_state):
+        raise ValueError("RANK_MODE requires rank data within the configured age limit")
     if objective_mode == "RANK_MODE" and game_state is not None and game_state.objective_mode != "RANK_MODE":
         game_state = game_state.model_copy(update={"objective_mode": "RANK_MODE"})
     return HorizonObjectiveSettings(

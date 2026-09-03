@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 from aifpl.current import CurrentPlayer, CurrentPlayerCatalogStore
 from aifpl.captaincy_strategy import choose_captain
-from aifpl.game_state import GameStateStore
+from aifpl.game_state import (
+    GameStateStore,
+    calculate_rank_data_age,
+    rank_data_is_usable,
+)
 from aifpl.hermes import HermesDecision, HermesManager, HorizonPlanSnapshot, HorizonPlanWeekSnapshot
 from aifpl.live_calibration import calibrated_odds_rows
 from aifpl.odds_projections import OddsAdjustedGameweekProjection, OddsProjectionStore
@@ -191,6 +195,9 @@ class CurrentDashboard(BaseModel):
     rank_gap_ratio: float | None = None
     rank_as_of_gameweek: int | None = None
     decision_gameweek: int | None = None
+    rank_data_age_gameweeks: int | None = None
+    rank_data_stale: bool = False
+    rank_mode_degraded: bool = False
     account_sync_status: str = "not_configured"
     account_sync_warning: str | None = None
     account_reconciliation_status: str = "not_checked"
@@ -320,7 +327,16 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         if tick is not None:
             account_sync_status = tick.account_sync_status
             account_sync_warning = tick.account_sync_warning
-    rank_state = account_state if decision.strategy.objective_mode == "RANK_MODE" else None
+    rank_state = None
+    effective_objective_mode = decision.strategy.objective_mode
+    rank_mode_degraded = account_state.rank_mode_degraded if account_state is not None else False
+    if decision.strategy.objective_mode == "RANK_MODE" and rank_data_is_usable(
+        account_state, decision_gameweek=decision.gameweek,
+    ):
+        rank_state = account_state
+    elif decision.strategy.objective_mode == "RANK_MODE":
+        effective_objective_mode = "POINTS_MODE"
+        rank_mode_degraded = True
     if rank_state is not None and rank_state.objective_mode != "RANK_MODE":
         rank_state = rank_state.model_copy(update={"objective_mode": "RANK_MODE"})
     moves = (
@@ -419,7 +435,7 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         chip_advice=_dashboard_chip_advice(root, decision.season_id),
         active_chip=decision.active_chip,
         active_chip_set=decision.active_chip_set,
-        objective_mode=decision.strategy.objective_mode,
+        objective_mode=effective_objective_mode,
         overall_rank=account_state.overall_rank if account_state is not None else None,
         target_rank=account_state.target_rank if account_state is not None else None,
         gameweeks_remaining=account_state.gameweeks_remaining if account_state is not None else None,
@@ -436,6 +452,16 @@ def build_current_dashboard(root: Path) -> CurrentDashboard:
         rank_gap_ratio=account_state.rank_gap_ratio if account_state is not None else None,
         rank_as_of_gameweek=account_state.rank_as_of_gameweek if account_state is not None else None,
         decision_gameweek=account_state.decision_gameweek if account_state is not None else decision.gameweek,
+        rank_data_age_gameweeks=(
+            calculate_rank_data_age(
+                account_state.rank_as_of_gameweek,
+                decision.gameweek,
+            )
+            if account_state is not None and account_state.rank_data_available
+            else None
+        ),
+        rank_data_stale=account_state.rank_data_stale if account_state is not None else False,
+        rank_mode_degraded=rank_mode_degraded,
         account_sync_status=account_sync_status,
         account_sync_warning=account_sync_warning,
         account_reconciliation_status=reconciliation_status,

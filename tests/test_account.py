@@ -150,7 +150,25 @@ def test_free_transfer_reconstruction_preserves_banked_transfer_on_chip(chip: st
         {"event": 2, "event_transfers": 12},
     ]
 
-    assert derive_free_transfers(records, 2, chip_events={2: chip}) == 2
+    assert derive_free_transfers(records, 2, chip_events={2: chip}) == 1
+
+
+@pytest.mark.parametrize("chip", ["wildcard", "free_hit"])
+@pytest.mark.parametrize("entering_free_transfers", [1, 2, 3, 5])
+def test_free_transfer_reconstruction_preserves_each_chip_entry_balance(
+    chip: str, entering_free_transfers: int,
+) -> None:
+    records = [
+        {"event": 1, "event_transfers": 0},
+        {"event": 2, "event_transfers": 15},
+    ]
+
+    assert derive_free_transfers(
+        records,
+        2,
+        initial_free_transfers=entering_free_transfers - 1,
+        chip_events={2: chip},
+    ) == entering_free_transfers
 
 
 def test_free_transfer_reconstruction_caps_at_five() -> None:

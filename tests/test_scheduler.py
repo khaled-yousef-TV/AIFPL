@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 import aifpl.scheduler as scheduler_module
-from aifpl.config import AccountSyncSettings, SchedulerSettings
+from aifpl.config import AccountSyncSettings, SchedulerSettings, account_sync_settings, max_stale_rank_gameweeks
 from aifpl.game_state import GameState, GameStateStore
 from aifpl.refresh import RefreshJobError, RefreshJobResult
 from aifpl.scheduler import CLAIM_LEASE_SECONDS, DeadlineScheduler, SchedulerTickError
@@ -125,6 +125,7 @@ def test_scheduler_auto_syncs_configured_account_state(tmp_path, monkeypatch) ->
     assert state.objective_mode == "RANK_MODE"
     assert state.rank_as_of_gameweek == 2
     assert state.decision_gameweek == 3
+    assert state.rank_data_age_gameweeks == 1
     assert state.free_transfers == 1
     assert state.chips_remaining["wildcard"] == 1
 
@@ -160,7 +161,12 @@ def test_scheduler_account_sync_failure_is_nonfatal_and_uses_stale_rank_state(tm
     assert state.gameweek == 1
     assert state.decision_gameweek == 1
     assert state.rank_as_of_gameweek == 1
+    assert state.rank_data_age_gameweeks == 0
     assert state.objective_mode == "RANK_MODE"
+    assert state.rank_data_stale is True
+    assert state.rank_mode_degraded is False
+    assert result.objective_mode == "RANK_MODE"
+    assert result.rank_data_age_gameweeks == 0
 
 
 def test_scheduler_account_sync_failure_without_rank_state_still_runs_core_tick(tmp_path, monkeypatch) -> None:
@@ -185,6 +191,92 @@ def test_scheduler_account_sync_failure_without_rank_state_still_runs_core_tick(
     assert result.status == "succeeded"
     assert result.account_sync_status == "unavailable"
     assert "empty account history" in (result.account_sync_warning or "")
+
+
+def test_scheduler_account_sync_failure_uses_rank_within_stale_limit(tmp_path, monkeypatch) -> None:
+    GameStateStore(tmp_path).save(GameState(
+        season_id="2026-27", gameweek=2, rank_as_of_gameweek=2, decision_gameweek=2,
+        overall_rank=184_000, target_rank=50_000, free_transfers=1, bank=83,
+        objective_mode="RANK_MODE",
+    ))
+
+    class BrokenFplClient:
+        async def fetch_entry_history(self, entry_id):
+            raise RuntimeError("account endpoint unavailable")
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "account_sync_settings",
+        lambda: AccountSyncSettings(True, 123, 50_000, 0, 1),
+    )
+    monkeypatch.setattr(scheduler_module, "FplClient", BrokenFplClient)
+
+    report = DeadlineScheduler(tmp_path)._sync_account_state_if_enabled(
+        "2026-27", decision_gameweek=3,
+    )
+
+    assert report.status == "stale"
+    assert report.state is not None
+    assert report.state.objective_mode == "RANK_MODE"
+    assert report.state.rank_as_of_gameweek == 2
+    assert report.state.decision_gameweek == 3
+    assert report.state.rank_data_age_gameweeks == 1
+    assert report.state.rank_data_stale is True
+    assert report.state.rank_mode_degraded is False
+    assert "within the configured limit of 1" in (report.warning or "")
+
+
+def test_scheduler_account_sync_failure_rejects_rank_older_than_limit(tmp_path, monkeypatch) -> None:
+    GameStateStore(tmp_path).save(GameState(
+        season_id="2026-27", gameweek=1, rank_as_of_gameweek=1, decision_gameweek=1,
+        overall_rank=184_000, target_rank=50_000, free_transfers=1, bank=83,
+        objective_mode="RANK_MODE",
+    ))
+
+    class BrokenFplClient:
+        async def fetch_entry_history(self, entry_id):
+            raise RuntimeError("account endpoint unavailable")
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "account_sync_settings",
+        lambda: AccountSyncSettings(True, 123, 50_000, 0, 1),
+    )
+    monkeypatch.setattr(scheduler_module, "FplClient", BrokenFplClient)
+
+    report = DeadlineScheduler(tmp_path)._sync_account_state_if_enabled(
+        "2026-27", decision_gameweek=3,
+    )
+
+    assert report.status == "unavailable"
+    assert report.state is not None
+    assert report.state.objective_mode == "POINTS_MODE"
+    assert report.state.rank_as_of_gameweek == 1
+    assert report.state.decision_gameweek == 3
+    assert report.state.rank_data_age_gameweeks == 2
+    assert report.state.rank_data_stale is True
+    assert report.state.rank_mode_degraded is True
+    assert "2 Gameweeks old" in (report.warning or "")
+    assert "limit of 1" in (report.warning or "")
+    assert "POINTS_MODE" in (report.warning or "")
+
+
+def test_stale_rank_limit_configuration_allows_zero_and_two_gameweeks(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_ACCOUNT_AUTO_SYNC", "false")
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "0")
+    assert max_stale_rank_gameweeks() == 0
+    assert account_sync_settings().max_stale_rank_gameweeks == 0
+
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "2")
+    assert max_stale_rank_gameweeks() == 2
+    assert account_sync_settings().max_stale_rank_gameweeks == 2
+
+
+def test_stale_rank_limit_configuration_rejects_negative_values(monkeypatch) -> None:
+    monkeypatch.setenv("AIFPL_MAX_STALE_RANK_GAMEWEEKS", "-1")
+
+    with pytest.raises(ValueError, match="must not be negative"):
+        max_stale_rank_gameweeks()
 
 
 def test_scheduler_scores_completed_teams_before_hermes_runs(tmp_path, monkeypatch) -> None:
