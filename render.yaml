@@ -35,7 +35,7 @@ services:
       - key: AIFPL_HERMES_AUTO_RUN
         value: "true"
       - key: AIFPL_ACCOUNT_AUTO_SYNC
-        value: "false"
+        value: "true"
       - key: AIFPL_ACCOUNT_ENTRY_ID
         sync: false
       - key: AIFPL_ACCOUNT_TARGET_RANK
