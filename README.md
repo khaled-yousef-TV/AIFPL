@@ -95,7 +95,7 @@ The refresh command consumes `ODDS_API_KEY`; `hermes-run` consumes `HERMES_API_K
 pytest
 ```
 
-The current suite contains **344 passing tests**. Commands below assume the
+The current suite contains **345 passing tests**. Commands below assume the
 repository root and exercise network or persistent operations.
 
 ### Operations and smoke tests

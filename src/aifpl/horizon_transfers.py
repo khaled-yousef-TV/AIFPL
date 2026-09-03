@@ -640,13 +640,19 @@ def plan_horizon_transfers(
             active_chip=week_chip,
         ))
         account_bank = bank_after
-    solver_objective = solver.objective_value
-    if callable(solver_objective):
-        solver_objective = solver_objective()
-    model_objective = round(float(solver_objective))
-    reported_objective = round(sum(plan.objective_net_points for plan in plans) * OBJECTIVE_SCALE)
-    if abs(model_objective - reported_objective) > 1:
-        raise SquadOptimizationError("Solver objective and reported objective differ")
+    # A feasible incumbent may be post-processed with the deterministic
+    # points-mode captain rule, so its raw solver objective is not authoritative.
+    if status == cp_model.OPTIMAL:
+        solver_objective = solver.objective_value
+        if callable(solver_objective):
+            solver_objective = solver_objective()
+        model_objective = round(float(solver_objective))
+        reported_objective = round(sum(plan.objective_net_points for plan in plans) * OBJECTIVE_SCALE)
+        if abs(model_objective - reported_objective) > 1:
+            raise SquadOptimizationError(
+                "Solver objective and reported objective differ: "
+                f"model={model_objective}, reported={reported_objective}"
+            )
     hold_plans = _hold_plans(
         rows, state, gameweeks, by_player_gameweek, current_ids, pre_season,
         bench_floor, bank_scale, objective_settings, week_weights,

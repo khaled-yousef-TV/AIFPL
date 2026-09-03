@@ -3,6 +3,7 @@ from itertools import combinations
 
 import pytest
 
+import aifpl.horizon_transfers as horizon_module
 from aifpl.horizon_transfers import HorizonSquadState, plan_horizon_transfers
 from aifpl.objective_accounting import HorizonPlanValidationError, validate_horizon_plan
 from aifpl.odds_projections import OddsAdjustedGameweekProjection
@@ -302,6 +303,34 @@ def test_horizon_objective_is_reported_as_a_complete_decomposition() -> None:
         assert 0 < components["forecast_distance_weight"] <= 1
     assert plan.objective_value == round(sum(week.objective_net_points for week in plan.gameweeks), 4)
     assert plan.objective_components["total"] == plan.objective_value
+
+
+def test_feasible_solver_accepts_valid_reported_postprocessing(monkeypatch) -> None:
+    real_solver = horizon_module.cp_model.CpSolver
+
+    class FeasibleIncumbentSolver:
+        def __init__(self) -> None:
+            self._solver = real_solver()
+
+        def __getattr__(self, name):
+            return getattr(self._solver, name)
+
+        def solve(self, model):
+            status = self._solver.solve(model)
+            assert status in (horizon_module.cp_model.OPTIMAL, horizon_module.cp_model.FEASIBLE)
+            return horizon_module.cp_model.FEASIBLE
+
+        @property
+        def objective_value(self):
+            return self._solver.objective_value + 10_000
+
+    monkeypatch.setattr(horizon_module.cp_model, "CpSolver", FeasibleIncumbentSolver)
+
+    plan = plan_horizon_transfers(
+        pool(), HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1),
+    )
+
+    assert plan.solver_status == "FEASIBLE"
 
 
 def test_post_solve_validator_rejects_tampered_bank_accounting() -> None:
