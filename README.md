@@ -660,21 +660,23 @@ hits, free-transfer rollover up to five, and bank balance. The solver is seeded
 with a legal hold strategy and uses `AIFPL_HORIZON_SOLVER_MAX_SECONDS`; the
 result reports `OPTIMAL` when proven or `FEASIBLE` when it is the best plan
 found before the configured limit. Each planned transfer also costs
-`AIFPL_TRANSFER_PENALTY` projected points (default 1.0) so needless churn is
-discouraged without blocking worthwhile moves; Hermes scales that baseline by
-its own risk tolerance (`+ 2 × (1 − risk_tolerance)`) so cautious strategies
-churn less, and the API/CLI accept a `churn_penalty` override. The hold
-fallback compares plans with the same full objective (hits, churn, bank
-shortfall, and dead-bench penalties) so it only fires when holding genuinely
-beats the optimizer. Every week reports a `robustness_score` (0-100) combining
+`AIFPL_TRANSFER_PENALTY` projected points (default 1.0) in normal weeks so
+needless churn is discouraged without blocking worthwhile moves; Hermes scales
+that baseline by its own risk tolerance (`+ 2 × (1 − risk_tolerance)`) so
+cautious strategies churn less, and the API/CLI accept a `churn_penalty`
+override. Active Wildcard and Free Hit weeks do not apply this model churn
+penalty because their purpose is deliberate unlimited-transfer rebuilding;
+later normal weeks still do. The hold fallback compares plans with the same
+full objective (hits, churn, bank shortfall, and dead-bench penalties) so it
+only fires when holding genuinely beats the optimizer. Every week reports a `robustness_score` (0-100) combining
 expected minutes, bench strength, bank flexibility, rotation risk, and planned
 transfers. As with the single-week planner, unauthenticated inputs use current
 prices as selling values until account integration is added.
 
-Outside the unlimited GW1 opening-squad window, the horizon planner caps each
-gameweek at two transfers. The second transfer remains optional and must beat
-the model's hit and churn penalties; wildcard and Free Hit chips are never
-assumed or spent automatically.
+Outside the unlimited GW1 opening-squad window, normal gameweeks enforce the
+configured free-transfer plus paid-transfer safety cap. Active Wildcard and
+Free Hit weeks allow a full legal squad rebuild without hit or churn penalties;
+chips are never assumed or spent automatically.
 
 ## Fixture-aware projections
 

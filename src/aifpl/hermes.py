@@ -588,6 +588,8 @@ class HermesManager:
             raise ValueError(f"GW{schedule.event} has already passed its deadline")
         if schedule.event <= 1:
             raise ValueError("A current-gameweek replan requires a prior Hermes state")
+        self._expected_gameweek = schedule.event
+        self._expected_season_id = schedule.season_id
         current = self.latest_decision(
             season_id=schedule.season_id, gameweek=schedule.event,
         )
@@ -602,7 +604,18 @@ class HermesManager:
             expected_season_id=schedule.season_id,
             active_chip=active_chip,
             active_chip_set=active_chip_set,
+            strategy_override=self._replan_strategy(current.strategy),
         )
+
+    def _replan_strategy(self, current: HermesStrategy) -> HermesStrategy:
+        objective_mode = self._account_objective_mode()
+        if objective_mode is None or objective_mode == current.objective_mode:
+            return current
+        if objective_mode == "RANK_MODE":
+            rationale = "Current account rank data is available; preserve strategy settings with rank-aware optimization."
+        else:
+            rationale = "Current account rank data is unavailable; fall back to expected-points optimization for this correction."
+        return current.model_copy(update={"objective_mode": objective_mode, "rationale": rationale})
 
     def _account_objective_mode(self) -> ObjectiveMode | None:
         latest_game_state = getattr(self.backend, "latest_game_state", None)
@@ -628,6 +641,7 @@ class HermesManager:
         expected_season_id: str,
         active_chip: str | None = None,
         active_chip_set: int | None = None,
+        strategy_override: HermesStrategy | None = None,
     ) -> HermesSupersessionResult:
         """Append a corrected decision from a known-valid prior state.
 
@@ -650,6 +664,7 @@ class HermesManager:
             return self._supersede_decision_unlocked(
                 base_state_id, supersedes_decision_id, reason,
                 active_chip=active_chip, active_chip_set=active_chip_set,
+                strategy_override=strategy_override,
             )
         finally:
             flock(descriptor, LOCK_UN)
@@ -658,6 +673,7 @@ class HermesManager:
     def _supersede_decision_unlocked(
         self, base_state_id: str, supersedes_decision_id: str, reason: str,
         *, active_chip: str | None = None, active_chip_set: int | None = None,
+        strategy_override: HermesStrategy | None = None,
     ) -> HermesSupersessionResult:
         reason = reason.strip()
         if not reason:
@@ -700,7 +716,7 @@ class HermesManager:
         if self._expected_gameweek != base_state.gameweek + 1 or superseded.gameweek != self._expected_gameweek:
             raise ValueError("Correction must advance exactly one gameweek from its base state")
 
-        self._strategy = base_state.strategy
+        self._strategy = strategy_override if strategy_override is not None else base_state.strategy
         self._horizon, self._catalog_id = self.backend.horizon_plan(
             base_state.squad, self._strategy, self._expected_gameweek,
             active_chip=active_chip,

@@ -232,6 +232,13 @@ def churn_coefficient(week_weight: float, settings: HorizonObjectiveSettings) ->
     return objective_scaled(settings.churn_penalty * week_weight)
 
 
+def horizon_churn_coefficient(
+    week_weight: float, settings: HorizonObjectiveSettings, unlimited_transfers: bool,
+) -> int:
+    """Do not penalize deliberate transfers made during an unlimited week."""
+    return 0 if unlimited_transfers else churn_coefficient(week_weight, settings)
+
+
 def bank_shortfall_coefficient(week_weight: float, settings: HorizonObjectiveSettings) -> int:
     return objective_scaled(settings.bank_shortfall_penalty * week_weight)
 
@@ -295,7 +302,9 @@ def horizon_objective_breakdown(
     strategy_penalty = -objective_float(
         excess_transfers * strategy_hit_coefficient(week.week_weight, settings, unlimited_transfers)
     )
-    churn = -objective_float(transfers_made * churn_coefficient(week.week_weight, settings))
+    churn = -objective_float(
+        transfers_made * horizon_churn_coefficient(week.week_weight, settings, unlimited_transfers)
+    )
     shortfall = max(0, settings.minimum_bank_tenths - bank_after)
     shortfall_penalty = -objective_float(
         shortfall * bank_shortfall_coefficient(week.week_weight, settings)
@@ -509,7 +518,9 @@ def _audit_objective_breakdown(
     strategy_hit_penalty = -excess_transfers * q(
         0 if unlimited_transfers else settings.strategy_hit_penalty * week.week_weight
     )
-    churn_penalty_value = -transfers_made * q(settings.churn_penalty * week.week_weight)
+    churn_penalty_value = -objective_float(
+        transfers_made * horizon_churn_coefficient(week.week_weight, settings, unlimited_transfers)
+    )
     shortfall = max(0, settings.minimum_bank_tenths - bank_after)
     bank_shortfall_value = -shortfall * q(settings.bank_shortfall_penalty * week.week_weight)
     dead_bench_value = -dead_excess * q(settings.dead_bench_penalty * week.week_weight)

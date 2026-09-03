@@ -167,7 +167,7 @@ def test_wildcard_makes_transfers_unlimited_and_preserves_free_transfer() -> Non
     ]
     state = HorizonSquadState(player_ids=list(range(1, 16)), bank=250, free_transfers=1)
 
-    plan = plan_horizon_transfers(rows, state, churn_penalty=0.0, active_chip="wildcard")
+    plan = plan_horizon_transfers(rows, state, churn_penalty=10.0, active_chip="wildcard")
 
     first = plan.gameweeks[0]
     assert plan.active_chip == "wildcard"
@@ -175,6 +175,7 @@ def test_wildcard_makes_transfers_unlimited_and_preserves_free_transfer() -> Non
     assert first.transfers_made > state.free_transfers
     assert first.unlimited_transfers is True
     assert first.hit_cost == 0
+    assert first.objective_components["churn_penalty"] == 0.0
     assert first.free_transfers_after == 2
     assert plan.gameweeks[1].free_transfers_before == 2
     assert plan.total_hit_cost == 0

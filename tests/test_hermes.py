@@ -464,10 +464,21 @@ def test_hermes_replans_the_current_unexecuted_decision_from_prior_state(tmp_pat
         "status",
         lambda self: SimpleNamespace(event=2, season_id="2026-27", missed=False),
     )
+    monkeypatch.setattr(
+        backend,
+        "latest_game_state",
+        lambda: GameState(
+            season_id="2026-27", gameweek=2, overall_rank=100_000,
+            target_rank=50_000, free_transfers=1, bank=0, objective_mode="RANK_MODE",
+        ),
+    )
 
     corrected = manager.replan_current("Fresh account state superseded the stale recommendation.")
 
     assert corrected.decision.gameweek == 2
+    assert corrected.decision.strategy.objective_mode == "RANK_MODE"
+    assert corrected.decision.horizon_plan is not None
+    assert corrected.decision.horizon_plan.objective_mode == "RANK_MODE"
     assert corrected.decision.base_state_path == gw1.state_path
     assert corrected.decision.supersedes_decision_path == bad.decision.decision_path
     assert manager.latest_decision() == corrected.decision

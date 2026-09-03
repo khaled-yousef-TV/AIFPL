@@ -23,11 +23,11 @@ from aifpl.objective_accounting import (
     bank_shortfall_coefficient,
     bench_coefficient,
     captain_coefficient,
-    churn_coefficient,
     dead_bench_coefficient,
     differential_coefficient,
     HorizonObjectiveSettings,
     HorizonWeekWeight,
+    horizon_churn_coefficient,
     horizon_objective_breakdown,
     horizon_objective_settings,
     horizon_bench_weight,
@@ -472,7 +472,8 @@ def plan_horizon_transfers(
             * strategy_hit_coefficient(week_weight, objective_settings, unlimited)
         )
         objective.append(
-            -transfer_counts[week_index] * churn_coefficient(week_weight, objective_settings)
+            -transfer_counts[week_index]
+            * horizon_churn_coefficient(week_weight, objective_settings, unlimited)
         )
         objective.append(
             -bank_shortfalls[week_index]
